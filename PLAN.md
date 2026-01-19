@@ -255,6 +255,26 @@ tend/
 - [ ] Pocket / web archiving integration
 - [ ] Alternative markup languages
 
+### Phase 6: Extensions
+
+#### 6.1 Extension Architecture
+- [ ] Define extension API (hooks, UI slots, data access)
+- [ ] Extension manifest format (permissions, dependencies)
+- [ ] Sandboxed execution environment (iframe or Web Worker)
+- [ ] Extension settings UI
+
+#### 6.2 Core Extension Points
+- [ ] Block decorators (render custom UI for blocks matching patterns)
+- [ ] Slash command providers (extensions can register new commands)
+- [ ] Panel providers (sidebar panels, bottom panels)
+- [ ] Export format providers (PDF, OPML, custom formats)
+- [ ] Theme extensions (beyond CSS variables)
+
+#### 6.3 Extension Distribution
+- [ ] Local extension loading (dev mode)
+- [ ] Extension marketplace/registry (future)
+- [ ] Version management and updates
+
 ---
 
 ## Future Optimization: Sliding Window State Tracking
