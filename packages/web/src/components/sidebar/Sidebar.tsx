@@ -155,10 +155,12 @@ export function Sidebar({ mode, onModeChange, onOpenSettings }: SidebarProps) {
 
   return (
     <aside
-      className="flex flex-col"
+      className="sidebar flex flex-col"
       style={{ width: sidebarWidth, backgroundColor: 'var(--sidebar-bg)' }}
     >
-      {renderContent()}
+      <div className="sidebar-content flex-1 flex flex-col overflow-hidden">
+        {renderContent()}
+      </div>
 
       {/* Bottom toolbar: Graph, History, Settings - always visible */}
       <div className="flex justify-end gap-1 p-[10px] border-t border-base-02">
@@ -197,3 +199,6 @@ export function Sidebar({ mode, onModeChange, onOpenSettings }: SidebarProps) {
     </aside>
   )
 }
+
+// Re-export for use elsewhere if needed
+export type { SidebarProps }
