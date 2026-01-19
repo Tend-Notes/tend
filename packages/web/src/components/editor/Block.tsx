@@ -4,6 +4,7 @@
 import { useRef, useEffect, ReactNode, KeyboardEvent, MouseEvent as ReactMouseEvent, useState, useCallback } from 'react'
 import type { Block } from '../../types'
 import { WikiLinkPopup } from './WikiLinkPopup'
+import { SmoothCaret } from './SmoothCaret'
 import { usePageStore } from '../../stores/pageStore'
 import { useSelectionStore } from '../../stores/selectionStore'
 
@@ -124,6 +125,9 @@ export function BlockComponent({
     x: number
     y: number
   } | null>(null)
+
+  // Track if this block's editor has focus (for smooth caret)
+  const [isEditorFocused, setIsEditorFocused] = useState(false)
 
   // Render content with wiki-link and formatting highlighting
   // cursorOffset indicates cursor position for showing delimiters when inside formatted text
@@ -1123,7 +1127,13 @@ export function BlockComponent({
   // Handle focus on contenteditable - track which block has keyboard focus
   const handleEditorFocus = useCallback(() => {
     setFocusedBlock(block.uuid)
+    setIsEditorFocused(true)
   }, [block.uuid, setFocusedBlock])
+
+  // Handle blur on contenteditable
+  const handleEditorBlur = useCallback(() => {
+    setIsEditorFocused(false)
+  }, [])
 
   return (
     <div
@@ -1143,18 +1153,22 @@ export function BlockComponent({
           title={hasChildren ? (block.collapsed ? 'Expand' : 'Collapse') : undefined}
         />
 
-        {/* Editor */}
-        <div
-          ref={editorRef}
-          contentEditable
-          suppressContentEditableWarning
-          className="block-content flex-1 outline-none min-h-[1.5em] whitespace-pre-wrap"
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          onMouseDown={handleEditorMouseDown}
-          onFocus={handleEditorFocus}
-          data-placeholder="Type something..."
-        />
+        {/* Editor with smooth caret */}
+        <div className="relative flex-1">
+          <div
+            ref={editorRef}
+            contentEditable
+            suppressContentEditableWarning
+            className="block-content outline-none min-h-[1.5em] whitespace-pre-wrap"
+            onInput={handleInput}
+            onKeyDown={handleKeyDown}
+            onMouseDown={handleEditorMouseDown}
+            onFocus={handleEditorFocus}
+            onBlur={handleEditorBlur}
+            data-placeholder="Type something..."
+          />
+          <SmoothCaret containerRef={editorRef} isActive={isEditorFocused} />
+        </div>
       </div>
 
       {/* Children */}
