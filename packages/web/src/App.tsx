@@ -163,8 +163,8 @@ function App() {
       {/* Settings placeholder - TODO: implement settings panel */}
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setSettingsOpen(false)} />
-          <div className="relative z-10 bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-md w-full mx-4">
+          <div className="overlay-backdrop fixed inset-0 bg-black/50 animate-fade-in" onClick={() => setSettingsOpen(false)} />
+          <div className="overlay-content relative z-10 bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-md w-full mx-4">
             <h2 className="text-lg font-medium text-base-06 mb-4">Settings</h2>
             <p className="text-sm text-base-04">Settings panel coming soon...</p>
             <button

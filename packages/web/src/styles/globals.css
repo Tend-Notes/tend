@@ -37,6 +37,17 @@
   --color-todo: var(--base09);
   --color-done: var(--base0B);
 
+  /* Animation timing - subtle and quick */
+  --duration-instant: 50ms;
+  --duration-fast: 100ms;
+  --duration-normal: 150ms;
+  --duration-slow: 200ms;
+
+  /* Easing curves */
+  --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
   color-scheme: dark;
 }
 
@@ -337,7 +348,10 @@ code {
   background-color: var(--base03);
   flex-shrink: 0;
   cursor: pointer;
-  transition: background-color 0.15s ease, transform 0.2s ease, border-color 0.15s ease;
+  transition:
+    background-color var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-spring),
+    border-color var(--duration-normal) var(--ease-out);
 }
 
 .bullet:hover {
@@ -357,7 +371,9 @@ code {
 
 /* Block container - subtle transitions for indent/outdent/reorder */
 .block-container {
-  transition: transform 0.15s ease, opacity 0.15s ease;
+  transition:
+    margin-left var(--duration-normal) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
 }
 
 /* Selected block (multi-block selection) */
@@ -373,7 +389,7 @@ code {
   gap: 8px;
   padding: 2px 0;
   border-radius: 3px;
-  transition: background-color 0.2s cubic-bezier(0, 1, 0, 1);
+  transition: background-color var(--duration-normal) var(--ease-out);
 }
 
 /* Subtle highlight on focused block */
@@ -390,7 +406,10 @@ code {
   margin-left: 24px;
   border-left: 1px solid var(--base02);
   padding-left: 12px;
-  transition: border-color 0.15s ease;
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    max-height var(--duration-slow) var(--ease-out),
+    opacity var(--duration-normal) var(--ease-out);
 }
 
 /* Editor placeholder */
@@ -407,19 +426,91 @@ code {
 
 /* Transitions */
 .transition-colors {
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition:
+    color var(--duration-normal) var(--ease-out),
+    background-color var(--duration-normal) var(--ease-out);
 }
 
 /* Animations */
 @keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes slide-in-right {
   from {
     opacity: 0;
+    transform: translateX(-8px);
   }
   to {
     opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slide-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
   }
 }
 
 .animate-fade-in {
-  animation: fade-in 0.15s ease;
+  animation: fade-in var(--duration-normal) var(--ease-out);
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right var(--duration-normal) var(--ease-out);
+}
+
+.animate-slide-in-up {
+  animation: slide-in-up var(--duration-normal) var(--ease-out);
+}
+
+.animate-scale-in {
+  animation: scale-in var(--duration-normal) var(--ease-out);
+}
+
+/* Overlay/modal backdrop */
+.overlay-backdrop {
+  transition: opacity var(--duration-normal) var(--ease-out);
+}
+
+/* Overlay/modal content */
+.overlay-content {
+  animation: scale-in var(--duration-normal) var(--ease-out);
+}
+
+/* Sidebar transitions */
+.sidebar {
+  transition: width var(--duration-slow) var(--ease-out);
+}
+
+.sidebar-content {
+  animation: slide-in-right var(--duration-normal) var(--ease-out);
+}
+
+/* Smooth caret - uses CSS caret-color transition (limited browser support) */
+[contenteditable] {
+  caret-color: var(--base0D);
 }

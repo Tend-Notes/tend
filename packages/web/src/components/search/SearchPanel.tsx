@@ -77,12 +77,12 @@ export function SearchPanel() {
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50"
+        className="overlay-backdrop fixed inset-0 bg-black/50 animate-fade-in"
         onClick={closeSearch}
       />
 
       {/* Dialog */}
-      <div className="relative w-full max-w-2xl bg-base-01 rounded-lg shadow-2xl border border-base-02 overflow-hidden">
+      <div className="overlay-content relative w-full max-w-2xl bg-base-01 rounded-lg shadow-2xl border border-base-02 overflow-hidden">
         <input
           type="text"
           value={query}

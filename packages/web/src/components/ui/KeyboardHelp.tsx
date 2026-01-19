@@ -40,12 +40,12 @@ export function KeyboardHelp({ open, onClose }: KeyboardHelpProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50"
+        className="overlay-backdrop fixed inset-0 bg-black/50 animate-fade-in"
         onClick={onClose}
       />
 
       {/* Dialog */}
-      <div className="relative bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+      <div className="overlay-content relative bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-medium text-base-06">Keyboard Shortcuts</h2>
           <button
