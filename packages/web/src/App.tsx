@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { useEffect, useState } from 'react'
-import { Sidebar } from './components/sidebar/Sidebar'
+import { Sidebar, type SidebarMode } from './components/sidebar/Sidebar'
 import { MainContent } from './components/layout/MainContent'
 import { CommandPalette } from './components/command-palette/CommandPalette'
 import { SearchPanel } from './components/search/SearchPanel'
@@ -8,11 +8,13 @@ import { KeyboardHelp } from './components/ui/KeyboardHelp'
 import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { usePageStore } from './stores/pageStore'
 import { useUIStore } from './stores/uiStore'
+import { useAutoCommit } from './hooks/useAutoCommit'
 
 function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [keyboardHelpOpen, setKeyboardHelpOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('navigation')
   const loadPages = usePageStore((state) => state.loadPages)
   const loadJournals = usePageStore((state) => state.loadJournals)
   const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
@@ -20,6 +22,9 @@ function App() {
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const openSearch = useUIStore((state) => state.openSearch)
+
+  // Initialize auto-commit system
+  useAutoCommit()
 
   // Load initial data and handle URL
   useEffect(() => {
@@ -55,7 +60,7 @@ function App() {
       const target = e.target as HTMLElement
       const isEditing = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
 
-      // Escape - close any open overlay
+      // Escape - close any open overlay or reset sidebar mode
       if (e.key === 'Escape') {
         if (keyboardHelpOpen) {
           setKeyboardHelpOpen(false)
@@ -64,6 +69,11 @@ function App() {
         }
         if (settingsOpen) {
           setSettingsOpen(false)
+          e.preventDefault()
+          return
+        }
+        if (sidebarMode !== 'navigation') {
+          setSidebarMode('navigation')
           e.preventDefault()
           return
         }
@@ -110,12 +120,16 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keyboardHelpOpen, settingsOpen, toggleSidebar, openSearch])
+  }, [keyboardHelpOpen, settingsOpen, sidebarMode, toggleSidebar, openSearch])
 
   return (
     <div className="flex h-screen bg-base-00 text-base-05">
       {/* Sidebar */}
-      <Sidebar onOpenSettings={() => setSettingsOpen(true)} />
+      <Sidebar
+        mode={sidebarMode}
+        onModeChange={setSidebarMode}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
       {/* Main content area */}
       <MainContent />
@@ -142,7 +156,7 @@ function App() {
       {settingsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="fixed inset-0 bg-black/50" onClick={() => setSettingsOpen(false)} />
-          <div className="relative bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-md w-full mx-4">
+          <div className="relative z-10 bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-md w-full mx-4">
             <h2 className="text-lg font-medium text-base-06 mb-4">Settings</h2>
             <p className="text-sm text-base-04">Settings panel coming soon...</p>
             <button

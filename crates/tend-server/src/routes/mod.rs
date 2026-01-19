@@ -36,6 +36,12 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // Git
         .route("/git/status", get(git::status))
         .route("/git/backup", post(git::backup))
+        .route("/git/commit", post(git::commit))
+        .route("/git/history", get(git::history))
+        .route("/git/diff/{commit}", get(git::diff))
+        .route("/git/restore", post(git::restore))
+        .route("/git/push", post(git::push))
+        .route("/git/pull", post(git::pull))
         // Health check
         .route("/health", get(health))
 }

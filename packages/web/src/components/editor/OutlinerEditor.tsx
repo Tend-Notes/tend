@@ -520,6 +520,18 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
     }
   }, [getAllBlocks, updateCurrentPage, focusBlock])
 
+  // End drag selection on mouseup anywhere
+  const endDrag = useSelectionStore((state) => state.endDrag)
+
+  useEffect(() => {
+    const handleMouseUp = () => {
+      endDrag()
+    }
+
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => window.removeEventListener('mouseup', handleMouseUp)
+  }, [endDrag])
+
   // Handle keyboard shortcuts for selection operations
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -586,84 +598,194 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
     [getFlattenedBlocks, focusBlock]
   )
 
-  // Move block up within its sibling list (swap with previous sibling)
+  // Move block up in document order
+  // Rules:
+  // 1. If block has a previous sibling, swap with it (simple case)
+  // 2. If block is first child, become sibling before parent (outdent + move before)
   const handleMoveBlockUp = useCallback(
     (uuid: string) => {
-      // Deep clone blocks
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
       const block = blocks.find((b) => b.uuid === uuid)
       if (!block) return
 
-      if (block.parentUuid) {
-        // Block has a parent - swap within parent's children
+      // Get siblings list
+      const siblings = block.parentUuid
+        ? blocks.find((b) => b.uuid === block.parentUuid)?.children || []
+        : page.rootBlocks
+
+      const currentIndex = siblings.indexOf(uuid)
+
+      if (currentIndex > 0) {
+        // Has previous sibling - swap with it
+        if (block.parentUuid) {
+          const parent = blocks.find((b) => b.uuid === block.parentUuid)
+          if (!parent) return
+          const newChildren = [...parent.children]
+          ;[newChildren[currentIndex - 1], newChildren[currentIndex]] = [newChildren[currentIndex], newChildren[currentIndex - 1]]
+          parent.children = newChildren
+          updateCurrentPage(blocks)
+        } else {
+          // Root block
+          const newRootBlocks = [...page.rootBlocks]
+          ;[newRootBlocks[currentIndex - 1], newRootBlocks[currentIndex]] = [newRootBlocks[currentIndex], newRootBlocks[currentIndex - 1]]
+          usePageStore.setState((state) => {
+            if (state.currentPage) {
+              state.currentPage.rootBlocks = newRootBlocks
+            }
+          })
+          updateCurrentPage(blocks)
+        }
+      } else if (block.parentUuid) {
+        // First child - move to become sibling before parent
         const parent = blocks.find((b) => b.uuid === block.parentUuid)
         if (!parent) return
 
-        const currentIndex = parent.children.indexOf(uuid)
-        if (currentIndex <= 0) return // Already first child
+        // Remove from parent's children
+        parent.children = parent.children.filter((id) => id !== uuid)
 
-        const newChildren = [...parent.children]
-        ;[newChildren[currentIndex - 1], newChildren[currentIndex]] = [newChildren[currentIndex], newChildren[currentIndex - 1]]
-        parent.children = newChildren
-        updateCurrentPage(blocks)
-      } else {
-        // Block is a root block - swap within rootBlocks
-        const currentIndex = page.rootBlocks.indexOf(uuid)
-        if (currentIndex <= 0) return // Already first root
+        // Get grandparent's children list (or rootBlocks)
+        if (parent.parentUuid) {
+          const grandparent = blocks.find((b) => b.uuid === parent.parentUuid)
+          if (!grandparent) return
+          const parentIndex = grandparent.children.indexOf(parent.uuid)
+          grandparent.children = [
+            ...grandparent.children.slice(0, parentIndex),
+            uuid,
+            ...grandparent.children.slice(parentIndex),
+          ]
+          block.parentUuid = parent.parentUuid
+          block.depth = parent.depth
+        } else {
+          // Parent is root - insert block before parent in rootBlocks
+          const parentIndex = page.rootBlocks.indexOf(parent.uuid)
+          const newRootBlocks = [
+            ...page.rootBlocks.slice(0, parentIndex),
+            uuid,
+            ...page.rootBlocks.slice(parentIndex),
+          ]
+          block.parentUuid = null
+          block.depth = 0
+          usePageStore.setState((state) => {
+            if (state.currentPage) {
+              state.currentPage.rootBlocks = newRootBlocks
+            }
+          })
+        }
 
-        const newRootBlocks = [...page.rootBlocks]
-        ;[newRootBlocks[currentIndex - 1], newRootBlocks[currentIndex]] = [newRootBlocks[currentIndex], newRootBlocks[currentIndex - 1]]
-
-        // Update page state directly with new root order
-        usePageStore.setState((state) => {
-          if (state.currentPage) {
-            state.currentPage.rootBlocks = newRootBlocks
+        // Update depths of moved block's children
+        const updateChildDepths = (parentId: string, parentDepth: number) => {
+          const p = blocks.find((b) => b.uuid === parentId)
+          if (!p) return
+          for (const childUuid of p.children) {
+            const child = blocks.find((b) => b.uuid === childUuid)
+            if (child) {
+              child.depth = parentDepth + 1
+              updateChildDepths(childUuid, child.depth)
+            }
           }
-        })
+        }
+        updateChildDepths(uuid, block.depth)
+
         updateCurrentPage(blocks)
       }
+      // else: first root block, can't move up
 
       focusBlock(uuid, 'start')
     },
     [getAllBlocks, page.rootBlocks, updateCurrentPage, focusBlock]
   )
 
-  // Move block down within its sibling list (swap with next sibling)
+  // Move block down in document order
+  // Rules:
+  // 1. If block has a next sibling, swap with it (simple case)
+  // 2. If block is last child, become sibling after parent (outdent + move after)
   const handleMoveBlockDown = useCallback(
     (uuid: string) => {
-      // Deep clone blocks
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
       const block = blocks.find((b) => b.uuid === uuid)
       if (!block) return
 
-      if (block.parentUuid) {
-        // Block has a parent - swap within parent's children
+      // Get siblings list
+      const siblings = block.parentUuid
+        ? blocks.find((b) => b.uuid === block.parentUuid)?.children || []
+        : page.rootBlocks
+
+      const currentIndex = siblings.indexOf(uuid)
+
+      if (currentIndex < siblings.length - 1) {
+        // Has next sibling - swap with it
+        if (block.parentUuid) {
+          const parent = blocks.find((b) => b.uuid === block.parentUuid)
+          if (!parent) return
+          const newChildren = [...parent.children]
+          ;[newChildren[currentIndex], newChildren[currentIndex + 1]] = [newChildren[currentIndex + 1], newChildren[currentIndex]]
+          parent.children = newChildren
+          updateCurrentPage(blocks)
+        } else {
+          // Root block
+          const newRootBlocks = [...page.rootBlocks]
+          ;[newRootBlocks[currentIndex], newRootBlocks[currentIndex + 1]] = [newRootBlocks[currentIndex + 1], newRootBlocks[currentIndex]]
+          usePageStore.setState((state) => {
+            if (state.currentPage) {
+              state.currentPage.rootBlocks = newRootBlocks
+            }
+          })
+          updateCurrentPage(blocks)
+        }
+      } else if (block.parentUuid) {
+        // Last child - move to become sibling after parent
         const parent = blocks.find((b) => b.uuid === block.parentUuid)
         if (!parent) return
 
-        const currentIndex = parent.children.indexOf(uuid)
-        if (currentIndex === -1 || currentIndex >= parent.children.length - 1) return // Already last child
+        // Remove from parent's children
+        parent.children = parent.children.filter((id) => id !== uuid)
 
-        const newChildren = [...parent.children]
-        ;[newChildren[currentIndex], newChildren[currentIndex + 1]] = [newChildren[currentIndex + 1], newChildren[currentIndex]]
-        parent.children = newChildren
-        updateCurrentPage(blocks)
-      } else {
-        // Block is a root block - swap within rootBlocks
-        const currentIndex = page.rootBlocks.indexOf(uuid)
-        if (currentIndex === -1 || currentIndex >= page.rootBlocks.length - 1) return // Already last root
+        // Get grandparent's children list (or rootBlocks)
+        if (parent.parentUuid) {
+          const grandparent = blocks.find((b) => b.uuid === parent.parentUuid)
+          if (!grandparent) return
+          const parentIndex = grandparent.children.indexOf(parent.uuid)
+          grandparent.children = [
+            ...grandparent.children.slice(0, parentIndex + 1),
+            uuid,
+            ...grandparent.children.slice(parentIndex + 1),
+          ]
+          block.parentUuid = parent.parentUuid
+          block.depth = parent.depth
+        } else {
+          // Parent is root - insert block after parent in rootBlocks
+          const parentIndex = page.rootBlocks.indexOf(parent.uuid)
+          const newRootBlocks = [
+            ...page.rootBlocks.slice(0, parentIndex + 1),
+            uuid,
+            ...page.rootBlocks.slice(parentIndex + 1),
+          ]
+          block.parentUuid = null
+          block.depth = 0
+          usePageStore.setState((state) => {
+            if (state.currentPage) {
+              state.currentPage.rootBlocks = newRootBlocks
+            }
+          })
+        }
 
-        const newRootBlocks = [...page.rootBlocks]
-        ;[newRootBlocks[currentIndex], newRootBlocks[currentIndex + 1]] = [newRootBlocks[currentIndex + 1], newRootBlocks[currentIndex]]
-
-        // Update page state directly with new root order
-        usePageStore.setState((state) => {
-          if (state.currentPage) {
-            state.currentPage.rootBlocks = newRootBlocks
+        // Update depths of moved block's children
+        const updateChildDepths = (parentId: string, parentDepth: number) => {
+          const p = blocks.find((b) => b.uuid === parentId)
+          if (!p) return
+          for (const childUuid of p.children) {
+            const child = blocks.find((b) => b.uuid === childUuid)
+            if (child) {
+              child.depth = parentDepth + 1
+              updateChildDepths(childUuid, child.depth)
+            }
           }
-        })
+        }
+        updateChildDepths(uuid, block.depth)
+
         updateCurrentPage(blocks)
       }
+      // else: last root block, can't move down
 
       focusBlock(uuid, 'start')
     },

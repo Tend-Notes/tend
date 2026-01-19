@@ -33,6 +33,61 @@ pub struct GitStatus {
     pub remote: Option<String>,
     pub ahead: u32,
     pub behind: u32,
+    /// List of changed files (path and status)
+    pub changed_files: Vec<ChangedFile>,
+}
+
+/// A file with pending changes
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedFile {
+    pub path: String,
+    pub status: FileStatus,
+}
+
+/// Status of a changed file
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FileStatus {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Untracked,
+}
+
+/// A commit in the history
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitInfo {
+    pub sha: String,
+    pub short_sha: String,
+    pub message: String,
+    pub author: String,
+    pub timestamp: chrono::DateTime<Utc>,
+    /// Files changed in this commit
+    pub files_changed: u32,
+}
+
+/// Diff information for a commit
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDiff {
+    pub sha: String,
+    pub message: String,
+    pub timestamp: chrono::DateTime<Utc>,
+    /// List of file diffs
+    pub files: Vec<FileDiff>,
+}
+
+/// Diff for a single file
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub path: String,
+    pub status: FileStatus,
+    /// The unified diff content
+    pub diff: String,
 }
 
 /// Manages Git backup operations
@@ -97,17 +152,20 @@ impl BackupManager {
                 remote: None,
                 ahead: 0,
                 behind: 0,
+                changed_files: vec![],
             });
         }
 
-        // Check for changes
+        // Check for changes with porcelain format
         let status_output = Command::new("git")
             .args(["status", "--porcelain"])
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
 
-        let has_changes = !status_output.stdout.is_empty();
+        let status_str = String::from_utf8_lossy(&status_output.stdout);
+        let changed_files = self.parse_porcelain_status(&status_str);
+        let has_changes = !changed_files.is_empty();
 
         // Get current branch
         let branch_output = Command::new("git")
@@ -143,7 +201,206 @@ impl BackupManager {
             remote,
             ahead: 0, // TODO: Calculate ahead/behind
             behind: 0,
+            changed_files,
         })
+    }
+
+    /// Parse git status --porcelain output into ChangedFile list
+    fn parse_porcelain_status(&self, output: &str) -> Vec<ChangedFile> {
+        output
+            .lines()
+            .filter_map(|line| {
+                if line.len() < 4 {
+                    return None;
+                }
+                let status_code = &line[0..2];
+                let path = line[3..].to_string();
+
+                let status = match status_code {
+                    "A " | " A" => FileStatus::Added,
+                    "M " | " M" | "MM" => FileStatus::Modified,
+                    "D " | " D" => FileStatus::Deleted,
+                    "R " => FileStatus::Renamed,
+                    "??" => FileStatus::Untracked,
+                    _ => FileStatus::Modified, // Default for other cases
+                };
+
+                Some(ChangedFile { path, status })
+            })
+            .collect()
+    }
+
+    /// Get commit history, optionally filtered by file path
+    pub fn history(&self, limit: Option<u32>, path_filter: Option<&str>) -> Result<Vec<CommitInfo>, GitError> {
+        if !self.is_git_repo() {
+            return Ok(vec![]);
+        }
+
+        let limit_str = limit.unwrap_or(50).to_string();
+
+        // Build args for git log
+        let mut args = vec![
+            "log".to_string(),
+            format!("-{}", limit_str),
+            "--format=%H|%h|%an|%aI|%s".to_string(),
+        ];
+
+        // Add path filter if provided (git log -- <path>)
+        if let Some(path) = path_filter {
+            args.push("--".to_string());
+            args.push(path.to_string());
+        }
+
+        // Get log with custom format: sha|short_sha|author|timestamp|message
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            // Might be an empty repo with no commits
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("does not have any commits") {
+                return Ok(vec![]);
+            }
+            return Err(GitError::OperationFailed(stderr.to_string()));
+        }
+
+        let log_str = String::from_utf8_lossy(&output.stdout);
+        let mut commits = Vec::new();
+
+        for line in log_str.lines() {
+            let parts: Vec<&str> = line.splitn(5, '|').collect();
+            if parts.len() < 5 {
+                continue;
+            }
+
+            let sha = parts[0].to_string();
+            let short_sha = parts[1].to_string();
+            let author = parts[2].to_string();
+            let timestamp = chrono::DateTime::parse_from_rfc3339(parts[3])
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            let message = parts[4].to_string();
+
+            // Get files changed count for this commit
+            let stat_output = Command::new("git")
+                .args(["diff-tree", "--no-commit-id", "--name-only", "-r", &sha])
+                .current_dir(&self.repo_path)
+                .output();
+
+            let files_changed = stat_output
+                .map(|o| String::from_utf8_lossy(&o.stdout).lines().count() as u32)
+                .unwrap_or(0);
+
+            commits.push(CommitInfo {
+                sha,
+                short_sha,
+                message,
+                author,
+                timestamp,
+                files_changed,
+            });
+        }
+
+        Ok(commits)
+    }
+
+    /// Get diff for a specific commit
+    pub fn diff(&self, commit_sha: &str) -> Result<CommitDiff, GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        // Get commit info
+        let info_output = Command::new("git")
+            .args(["log", "-1", "--format=%s|%aI", commit_sha])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !info_output.status.success() {
+            return Err(GitError::OperationFailed("Commit not found".to_string()));
+        }
+
+        let info_str = String::from_utf8_lossy(&info_output.stdout);
+        let info_parts: Vec<&str> = info_str.trim().splitn(2, '|').collect();
+        let message = info_parts.first().unwrap_or(&"").to_string();
+        let timestamp = info_parts
+            .get(1)
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(Utc::now);
+
+        // Get the diff (compare with parent, or show all for root commit)
+        let diff_output = Command::new("git")
+            .args(["diff-tree", "-p", "--root", commit_sha])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        let diff_str = String::from_utf8_lossy(&diff_output.stdout);
+        let files = self.parse_diff_output(&diff_str);
+
+        Ok(CommitDiff {
+            sha: commit_sha.to_string(),
+            message,
+            timestamp,
+            files,
+        })
+    }
+
+    /// Parse git diff output into FileDiff structs
+    fn parse_diff_output(&self, diff_output: &str) -> Vec<FileDiff> {
+        let mut files = Vec::new();
+        let mut current_file: Option<String> = None;
+        let mut current_diff = String::new();
+        let mut current_status = FileStatus::Modified;
+
+        for line in diff_output.lines() {
+            if line.starts_with("diff --git") {
+                // Save previous file if exists
+                if let Some(path) = current_file.take() {
+                    files.push(FileDiff {
+                        path,
+                        status: current_status.clone(),
+                        diff: current_diff.clone(),
+                    });
+                }
+
+                // Parse new file path
+                // Format: diff --git a/path b/path
+                if let Some(b_path) = line.split(" b/").nth(1) {
+                    current_file = Some(b_path.to_string());
+                }
+                current_diff = String::new();
+                current_status = FileStatus::Modified;
+            } else if line.starts_with("new file") {
+                current_status = FileStatus::Added;
+            } else if line.starts_with("deleted file") {
+                current_status = FileStatus::Deleted;
+            } else if line.starts_with("rename") {
+                current_status = FileStatus::Renamed;
+            } else if current_file.is_some() {
+                // Accumulate diff lines (skip the first commit hash line)
+                if !line.is_empty() && !line.chars().all(|c| c.is_ascii_hexdigit()) {
+                    current_diff.push_str(line);
+                    current_diff.push('\n');
+                }
+            }
+        }
+
+        // Save last file
+        if let Some(path) = current_file {
+            files.push(FileDiff {
+                path,
+                status: current_status,
+                diff: current_diff,
+            });
+        }
+
+        files
     }
 
     /// Run a backup (add all, commit, optionally push)
@@ -245,6 +502,210 @@ impl BackupManager {
             timestamp,
         })
     }
+
+    /// Commit with a custom message (for manual commits via command palette)
+    pub fn commit(&self, message: Option<&str>) -> Result<BackupResult, GitError> {
+        if !self.is_git_repo() {
+            self.init_repo()?;
+        }
+
+        let timestamp = Utc::now();
+
+        // Check for changes first
+        let status = self.status()?;
+        if !status.has_changes {
+            return Ok(BackupResult {
+                success: true,
+                commit_sha: None,
+                message: "No changes to commit".to_string(),
+                timestamp,
+            });
+        }
+
+        info!("Creating commit...");
+
+        // Stage all changes
+        let add_output = Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !add_output.status.success() {
+            let stderr = String::from_utf8_lossy(&add_output.stderr);
+            return Err(GitError::OperationFailed(format!("git add failed: {}", stderr)));
+        }
+
+        // Use custom message or generate one
+        let commit_msg = message
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| format!("Update: {}", timestamp.format("%Y-%m-%d %H:%M:%S UTC")));
+
+        let commit_output = Command::new("git")
+            .args(["commit", "-m", &commit_msg])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !commit_output.status.success() {
+            let stderr = String::from_utf8_lossy(&commit_output.stderr);
+            if stderr.contains("nothing to commit") {
+                return Ok(BackupResult {
+                    success: true,
+                    commit_sha: None,
+                    message: "No changes to commit".to_string(),
+                    timestamp,
+                });
+            }
+            return Err(GitError::OperationFailed(format!("git commit failed: {}", stderr)));
+        }
+
+        // Get the commit SHA
+        let sha_output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        let commit_sha = if sha_output.status.success() {
+            Some(String::from_utf8_lossy(&sha_output.stdout).trim().to_string())
+        } else {
+            None
+        };
+
+        info!("Commit completed: {:?}", commit_sha);
+
+        Ok(BackupResult {
+            success: true,
+            commit_sha,
+            message: commit_msg,
+            timestamp,
+        })
+    }
+
+    /// Restore to a specific commit (checkout the files, don't reset history)
+    pub fn restore(&self, commit_sha: &str) -> Result<(), GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        info!("Restoring to commit: {}", commit_sha);
+
+        // First, commit any current changes so we don't lose them
+        let status = self.status()?;
+        if status.has_changes {
+            self.commit(Some(&format!("Auto-save before restore to {}", &commit_sha[..7])))?;
+        }
+
+        // Checkout the files from that commit (but don't change HEAD)
+        let output = Command::new("git")
+            .args(["checkout", commit_sha, "--", "."])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(GitError::OperationFailed(format!("Restore failed: {}", stderr)));
+        }
+
+        // Auto-commit the restore
+        self.commit(Some(&format!("Restored to {}", &commit_sha[..7])))?;
+
+        info!("Restore completed");
+        Ok(())
+    }
+
+    /// Push to remote repository
+    pub fn push(&self) -> Result<PushResult, GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        let status = self.status()?;
+        if status.remote.is_none() {
+            return Err(GitError::NoRemote);
+        }
+
+        info!("Pushing to remote...");
+
+        let output = Command::new("git")
+            .args(["push"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+
+            // Git push output often goes to stderr even on success
+            let message = if stderr.contains("Everything up-to-date") {
+                "Everything up-to-date".to_string()
+            } else {
+                format!("Pushed to {}", status.remote.unwrap_or_default())
+            };
+
+            info!("Push successful: {}", message);
+            Ok(PushResult {
+                success: true,
+                message,
+                details: if stdout.is_empty() { stderr.to_string() } else { stdout.to_string() },
+            })
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(GitError::OperationFailed(format!("Push failed: {}", stderr)))
+        }
+    }
+
+    /// Pull from remote repository
+    pub fn pull(&self) -> Result<PushResult, GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        let status = self.status()?;
+        if status.remote.is_none() {
+            return Err(GitError::NoRemote);
+        }
+
+        info!("Pulling from remote...");
+
+        let output = Command::new("git")
+            .args(["pull", "--rebase"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+
+            let message = if stdout.contains("Already up to date") {
+                "Already up to date".to_string()
+            } else {
+                "Pulled latest changes".to_string()
+            };
+
+            info!("Pull successful: {}", message);
+            Ok(PushResult {
+                success: true,
+                message,
+                details: stdout.to_string(),
+            })
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(GitError::OperationFailed(format!("Pull failed: {}", stderr)))
+        }
+    }
+}
+
+/// Result of a push/pull operation
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushResult {
+    pub success: bool,
+    pub message: String,
+    pub details: String,
 }
 
 #[cfg(test)]

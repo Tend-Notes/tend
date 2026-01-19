@@ -82,7 +82,17 @@ export interface GitStatus {
   remote: string | null
   ahead: number
   behind: number
+  changedFiles: ChangedFile[]
 }
+
+// Changed file in git status
+export interface ChangedFile {
+  path: string
+  status: FileStatus
+}
+
+// File status enum
+export type FileStatus = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
 
 // Backup result
 export interface BackupResult {
@@ -90,4 +100,36 @@ export interface BackupResult {
   commitSha: string | null
   message: string
   timestamp: string
+}
+
+// Commit info for history
+export interface CommitInfo {
+  sha: string
+  shortSha: string
+  message: string
+  author: string
+  timestamp: string
+  filesChanged: number
+}
+
+// Diff for a commit
+export interface CommitDiff {
+  sha: string
+  message: string
+  timestamp: string
+  files: FileDiff[]
+}
+
+// Diff for a single file
+export interface FileDiff {
+  path: string
+  status: FileStatus
+  diff: string
+}
+
+// Result of push/pull operations
+export interface PushResult {
+  success: boolean
+  message: string
+  details: string
 }

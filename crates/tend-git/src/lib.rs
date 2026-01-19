@@ -2,10 +2,13 @@
 //! Tend Git - Git backup operations
 //!
 //! This crate handles scheduled Git backups with garden locking.
-//! Uses gitoxide (gix) for pure-Rust Git operations.
+//! Provides commit history browsing and diff viewing.
 
-pub mod error;
 pub mod backup;
+pub mod error;
 
+pub use backup::{
+    BackupManager, BackupResult, ChangedFile, CommitDiff, CommitInfo, FileDiff, FileStatus,
+    GitStatus, PushResult,
+};
 pub use error::GitError;
-pub use backup::{BackupManager, BackupResult, GitStatus};

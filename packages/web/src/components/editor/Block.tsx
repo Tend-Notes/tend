@@ -101,7 +101,8 @@ export function BlockComponent({
   const navigateToPage = usePageStore((state) => state.navigateToPage)
 
   // Selection state
-  const { startSelection, extendSelection, isInSelection } = useSelectionStore()
+  const { setFocusedBlock, startSelection, extendSelection, extendSelectionInDirection, clearSelection, isInSelection, startDrag } = useSelectionStore()
+  const isDragging = useSelectionStore((state) => state.isDragging)
   const isSelected = isInSelection(block.uuid, flatBlockOrder)
 
   // Wiki-link autocomplete state
@@ -943,39 +944,42 @@ export function BlockComponent({
       return
     }
 
-    // Shift+Arrow Up - extend selection to previous block
-    if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    // Alt+Arrow Left - outdent (same as Shift+Tab)
+    if (e.key === 'ArrowLeft' && e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault()
-      const currentIndex = flatBlockOrder.indexOf(block.uuid)
-      if (currentIndex > 0) {
-        // If no anchor yet, set current block as anchor first
-        const { anchorUuid } = useSelectionStore.getState()
-        if (!anchorUuid) {
-          startSelection(block.uuid)
-        }
-        extendSelection(flatBlockOrder[currentIndex - 1])
-      }
+      onOutdent(block.uuid)
       return
     }
 
-    // Shift+Arrow Down - extend selection to next block
+    // Alt+Arrow Right - indent (same as Tab)
+    if (e.key === 'ArrowRight' && e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      onIndent(block.uuid)
+      return
+    }
+
+    // Shift+Arrow Up - extend selection upward
+    if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      // Use the new method that extends from selection focus, not keyboard focus
+      extendSelectionInDirection('up', flatBlockOrder)
+      return
+    }
+
+    // Shift+Arrow Down - extend selection downward
     if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault()
-      const currentIndex = flatBlockOrder.indexOf(block.uuid)
-      if (currentIndex < flatBlockOrder.length - 1) {
-        // If no anchor yet, set current block as anchor first
-        const { anchorUuid } = useSelectionStore.getState()
-        if (!anchorUuid) {
-          startSelection(block.uuid)
-        }
-        extendSelection(flatBlockOrder[currentIndex + 1])
-      }
+      // Use the new method that extends from selection focus, not keyboard focus
+      extendSelectionInDirection('down', flatBlockOrder)
       return
     }
 
     // Arrow Up - navigate to previous block
     // For single-line content, always navigate; for multi-line, only when at start
     if (e.key === 'ArrowUp') {
+      // Clear multi-block selection when moving cursor without Shift
+      clearSelection()
+
       const selection = window.getSelection()
       if (selection && selection.isCollapsed) {
         // Check if content is single-line or cursor is at start
@@ -992,6 +996,9 @@ export function BlockComponent({
     // Arrow Down - navigate to next block
     // For single-line content, always navigate; for multi-line, only when at end
     if (e.key === 'ArrowDown') {
+      // Clear multi-block selection when moving cursor without Shift
+      clearSelection()
+
       const selection = window.getSelection()
       if (selection && selection.isCollapsed) {
         const hasLineBreaks = el.textContent?.includes('\n')
@@ -1006,6 +1013,9 @@ export function BlockComponent({
 
     // Arrow Left at start - navigate to previous block
     if (e.key === 'ArrowLeft') {
+      // Clear multi-block selection when moving cursor without Shift
+      clearSelection()
+
       const selection = window.getSelection()
       if (selection && selection.isCollapsed && isAtStart(el, selection)) {
         e.preventDefault()
@@ -1016,6 +1026,9 @@ export function BlockComponent({
 
     // Arrow Right at end - navigate to next block
     if (e.key === 'ArrowRight') {
+      // Clear multi-block selection when moving cursor without Shift
+      clearSelection()
+
       const selection = window.getSelection()
       if (selection && selection.isCollapsed && isAtEnd(el, selection)) {
         e.preventDefault()
@@ -1056,38 +1069,68 @@ export function BlockComponent({
     }
   }, [contextMenu])
 
-  // Get clearSelection from store
-  const clearSelection = useSelectionStore((state) => state.clearSelection)
+  // Handle mousedown on block container - start drag selection
+  const handleBlockMouseDown = useCallback((e: ReactMouseEvent) => {
+    // Only start drag on left click, not on the contenteditable itself
+    if (e.button !== 0) return
+    if ((e.target as HTMLElement).closest('[contenteditable]')) return
 
-  // Handle click on block container (for selection)
-  const handleBlockClick = useCallback((e: ReactMouseEvent) => {
-    if (e.shiftKey) {
-      // Shift+Click extends selection from anchor to this block
-      e.preventDefault()
-      e.stopPropagation()
+    // Start drag selection from this block
+    e.preventDefault()
+    startDrag(block.uuid)
+    setFocusedBlock(block.uuid)
+  }, [block.uuid, startDrag, setFocusedBlock])
+
+  // Handle mouseenter during drag - extend selection
+  const handleBlockMouseEnter = useCallback(() => {
+    if (isDragging) {
       extendSelection(block.uuid)
     }
-    // Regular clicks are handled by handleEditorMouseDown
-  }, [block.uuid, extendSelection])
+  }, [isDragging, block.uuid, extendSelection])
 
-  // Handle mousedown on contenteditable - this is where we set the anchor
+  // Handle mousedown on contenteditable
   const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {
     if (e.shiftKey) {
       // Shift+Click extends selection - don't reset anchor
       e.preventDefault()
-      extendSelection(block.uuid)
+      e.stopPropagation()
+
+      // Get current state
+      const { anchorUuid, focusedBlockUuid } = useSelectionStore.getState()
+
+      if (!anchorUuid && !focusedBlockUuid) {
+        // No anchor and no focus - can't extend, just select this block
+        startSelection(block.uuid)
+      } else if (!anchorUuid) {
+        // No anchor but have focus - start from focused block, extend to this
+        startSelection(focusedBlockUuid!)
+        if (focusedBlockUuid !== block.uuid) {
+          extendSelection(block.uuid)
+        }
+      } else {
+        // Have anchor - extend to this block
+        extendSelection(block.uuid)
+      }
     } else {
-      // Regular click clears multi-block selection and sets this as anchor
+      // Regular click - clear multi-block selection, set this as focused block
       clearSelection()
-      startSelection(block.uuid)
+      setFocusedBlock(block.uuid)
+      // Start drag in case user drags
+      startDrag(block.uuid)
     }
-  }, [block.uuid, startSelection, extendSelection, clearSelection])
+  }, [block.uuid, setFocusedBlock, startSelection, extendSelection, clearSelection, startDrag])
+
+  // Handle focus on contenteditable - track which block has keyboard focus
+  const handleEditorFocus = useCallback(() => {
+    setFocusedBlock(block.uuid)
+  }, [block.uuid, setFocusedBlock])
 
   return (
     <div
       className={`block-container ${isSelected ? 'block-container--selected' : ''}`}
       data-block-id={block.uuid}
-      onClick={handleBlockClick}
+      onMouseDown={handleBlockMouseDown}
+      onMouseEnter={handleBlockMouseEnter}
     >
       <div className="block flex items-start gap-2 py-0.5">
         {/* Bullet point */}
@@ -1109,6 +1152,7 @@ export function BlockComponent({
           onInput={handleInput}
           onKeyDown={handleKeyDown}
           onMouseDown={handleEditorMouseDown}
+          onFocus={handleEditorFocus}
           data-placeholder="Type something..."
         />
       </div>

@@ -1,12 +1,17 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
+import { SidebarHistory } from './SidebarHistory'
+
+export type SidebarMode = 'navigation' | 'history' | 'graph'
 
 interface SidebarProps {
+  mode: SidebarMode
+  onModeChange: (mode: SidebarMode) => void
   onOpenSettings: () => void
 }
 
-export function Sidebar({ onOpenSettings }: SidebarProps) {
+export function Sidebar({ mode, onModeChange, onOpenSettings }: SidebarProps) {
   const { pages, journals, currentPageName, navigateToPage, navigateToJournal, loadTodaysJournal } =
     usePageStore()
   const { sidebarOpen, sidebarWidth, toggleSidebar } = useUIStore()
@@ -28,89 +33,159 @@ export function Sidebar({ onOpenSettings }: SidebarProps) {
     )
   }
 
+  // Get current page info for history
+  const currentPage = pages.find(p => p.name === currentPageName)
+    || journals.find(j => j.name === currentPageName)
+  const isCurrentJournal = currentPage?.isJournal ?? false
+
+  // Render content based on mode
+  const renderContent = () => {
+    switch (mode) {
+      case 'history':
+        return (
+          <SidebarHistory
+            onBack={() => onModeChange('navigation')}
+            pageName={currentPageName}
+            isJournal={isCurrentJournal}
+          />
+        )
+
+      case 'graph':
+        return (
+          <div className="flex-1 flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between p-3 border-b border-base-02">
+              <button
+                onClick={() => onModeChange('navigation')}
+                className="p-1 text-base-04 hover:text-base-05 transition-colors"
+                title="Back to navigation"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <span className="text-sm font-medium text-base-05">Graph</span>
+              <div className="w-4" /> {/* Spacer for alignment */}
+            </div>
+            {/* Graph placeholder */}
+            <div className="flex-1 flex items-center justify-center p-4 text-base-04 text-sm">
+              Graph visualization coming soon...
+            </div>
+          </div>
+        )
+
+      default:
+        return (
+          <>
+            {/* Header with collapse button */}
+            <div className="flex items-center justify-between p-3">
+              <button
+                onClick={() => loadTodaysJournal()}
+                className="px-2 py-1 text-sm text-base-04 hover:text-base-05 transition-colors"
+              >
+                Today
+              </button>
+              <button
+                onClick={toggleSidebar}
+                className="p-1 text-base-03 hover:text-base-05 transition-colors"
+                title="Close sidebar (Alt+Shift+S)"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7M19 19l-7-7 7-7" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Navigation */}
+            <div className="flex-1 overflow-y-auto px-3">
+              {/* Recent journals */}
+              {journals.length > 0 && (
+                <div className="mb-4">
+                  <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
+                    Journals
+                  </h2>
+                  <ul>
+                    {journals.slice(0, 7).map((journal) => (
+                      <li key={journal.name}>
+                        <button
+                          onClick={() => navigateToJournal(journal.journalDate!)}
+                          className={`w-full px-2 py-1 text-left text-sm transition-colors ${
+                            currentPageName === journal.name
+                              ? 'text-base-06'
+                              : 'text-base-04 hover:text-base-05'
+                          }`}
+                        >
+                          {journal.title}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Pages */}
+              {pages.length > 0 && (
+                <div>
+                  <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
+                    Pages
+                  </h2>
+                  <ul>
+                    {pages.map((page) => (
+                      <li key={page.name}>
+                        <button
+                          onClick={() => navigateToPage(page.name)}
+                          className={`w-full px-2 py-1 text-left text-sm transition-colors ${
+                            currentPageName === page.name
+                              ? 'text-base-06'
+                              : 'text-base-04 hover:text-base-05'
+                          }`}
+                        >
+                          {page.title}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </>
+        )
+    }
+  }
+
   return (
     <aside
       className="flex flex-col"
       style={{ width: sidebarWidth, backgroundColor: 'var(--sidebar-bg)' }}
     >
-      {/* Header with collapse button */}
-      <div className="flex items-center justify-between p-3">
+      {renderContent()}
+
+      {/* Bottom toolbar: Graph, History, Settings - always visible */}
+      <div className="flex justify-end gap-1 p-[10px] border-t border-base-02">
         <button
-          onClick={() => loadTodaysJournal()}
-          className="px-2 py-1 text-sm text-base-04 hover:text-base-05 transition-colors"
+          onClick={() => onModeChange(mode === 'graph' ? 'navigation' : 'graph')}
+          className={`p-2 rounded-lg transition-colors font-mono text-sm font-bold ${
+            mode === 'graph' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+          }`}
+          style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+          title="Graph view"
         >
-          Today
+          G
         </button>
         <button
-          onClick={toggleSidebar}
-          className="p-1 text-base-03 hover:text-base-05 transition-colors"
-          title="Close sidebar (Alt+Shift+S)"
+          onClick={() => onModeChange(mode === 'history' ? 'navigation' : 'history')}
+          className={`p-2 rounded-lg transition-colors font-mono text-sm font-bold ${
+            mode === 'history' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+          }`}
+          style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+          title="History"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7M19 19l-7-7 7-7" />
-          </svg>
+          H
         </button>
-      </div>
-
-      {/* Navigation */}
-      <div className="flex-1 overflow-y-auto px-3">
-        {/* Recent journals */}
-        {journals.length > 0 && (
-          <div className="mb-4">
-            <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
-              Journals
-            </h2>
-            <ul>
-              {journals.slice(0, 7).map((journal) => (
-                <li key={journal.name}>
-                  <button
-                    onClick={() => navigateToJournal(journal.journalDate!)}
-                    className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                      currentPageName === journal.name
-                        ? 'text-base-06'
-                        : 'text-base-04 hover:text-base-05'
-                    }`}
-                  >
-                    {journal.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Pages */}
-        {pages.length > 0 && (
-          <div>
-            <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
-              Pages
-            </h2>
-            <ul>
-              {pages.map((page) => (
-                <li key={page.name}>
-                  <button
-                    onClick={() => navigateToPage(page.name)}
-                    className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                      currentPageName === page.name
-                        ? 'text-base-06'
-                        : 'text-base-04 hover:text-base-05'
-                    }`}
-                  >
-                    {page.title}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
-
-      {/* Settings gear icon */}
-      <div className="flex justify-end p-[10px]">
         <button
           onClick={onOpenSettings}
           className="p-2 rounded-lg text-base-04 hover:text-base-05 transition-colors"
-          style={{ backgroundColor: 'var(--sidebar-bg)', boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+          style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
           title="Settings (Alt+Shift+O)"
         >
           <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

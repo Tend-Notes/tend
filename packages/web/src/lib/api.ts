@@ -9,7 +9,10 @@ import type {
   Graph,
   GitStatus,
   BackupResult,
+  CommitInfo,
+  CommitDiff,
   Block,
+  PushResult,
 } from '../types'
 
 const API_BASE = '/api/v1'
@@ -91,6 +94,37 @@ export const git = {
 
   backup: () =>
     fetchJson<BackupResult>(`${API_BASE}/git/backup`, {
+      method: 'POST',
+    }),
+
+  commit: (message?: string) =>
+    fetchJson<BackupResult>(`${API_BASE}/git/commit`, {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+
+  history: (limit = 50, path?: string) => {
+    const params = new URLSearchParams({ limit: limit.toString() })
+    if (path) params.append('path', path)
+    return fetchJson<CommitInfo[]>(`${API_BASE}/git/history?${params}`)
+  },
+
+  diff: (commitSha: string) =>
+    fetchJson<CommitDiff>(`${API_BASE}/git/diff/${encodeURIComponent(commitSha)}`),
+
+  restore: (commitSha: string) =>
+    fetchJson<BackupResult>(`${API_BASE}/git/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ commit: commitSha }),
+    }),
+
+  push: () =>
+    fetchJson<PushResult>(`${API_BASE}/git/push`, {
+      method: 'POST',
+    }),
+
+  pull: () =>
+    fetchJson<PushResult>(`${API_BASE}/git/pull`, {
       method: 'POST',
     }),
 }
