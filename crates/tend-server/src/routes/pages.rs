@@ -1,0 +1,234 @@
+// SPDX-License-Identifier: MIT WITH Commons-Clause
+//! Page API routes
+
+use std::sync::Arc;
+
+use axum::extract::{Path, State};
+use axum::Json;
+use serde::{Deserialize, Serialize};
+use tend_core::{Block, Page, PageMeta};
+use tracing::debug;
+
+use crate::error::AppError;
+use crate::state::AppState;
+
+/// List all pages
+pub async fn list_pages(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<PageMeta>>, AppError> {
+    let pages = state.file_manager.list_pages().await?;
+    Ok(Json(pages))
+}
+
+/// Request body for creating a page
+#[derive(Debug, Deserialize)]
+pub struct CreatePageRequest {
+    pub name: String,
+    pub content: Option<String>,
+}
+
+/// Create a new page
+pub async fn create_page(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreatePageRequest>,
+) -> Result<Json<Page>, AppError> {
+    // Check if page already exists
+    if state.file_manager.page_exists(&req.name).await {
+        return Err(AppError::BadRequest(format!(
+            "Page '{}' already exists",
+            req.name
+        )));
+    }
+
+    let mut page = Page::new(&req.name);
+
+    // Add initial content if provided
+    if let Some(content) = req.content {
+        let block = Block::new(content);
+        page.add_block(block);
+    }
+
+    state.file_manager.write_page(&page).await?;
+
+    // Index the new page
+    {
+        let mut index = state.search_index.write().await;
+        index.index_page(&page)?;
+        index.commit()?;
+    }
+
+    debug!("Created page: {}", req.name);
+    Ok(Json(page))
+}
+
+/// Get a page by name
+pub async fn get_page(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<Page>, AppError> {
+    let page = state.file_manager.read_page(&name).await?;
+    Ok(Json(page))
+}
+
+/// Request body for updating a page
+#[derive(Debug, Deserialize)]
+pub struct UpdatePageRequest {
+    pub blocks: Vec<BlockData>,
+}
+
+/// Block data in API requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockData {
+    pub uuid: String,
+    pub content: String,
+    pub parent_uuid: Option<String>,
+    pub children: Vec<String>,
+    pub collapsed: bool,
+    #[serde(default)]
+    pub properties: std::collections::HashMap<String, String>,
+}
+
+/// Update a page
+pub async fn update_page(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Json(req): Json<UpdatePageRequest>,
+) -> Result<Json<Page>, AppError> {
+    // Read existing page or create new
+    let mut page = state
+        .file_manager
+        .read_page(&name)
+        .await
+        .unwrap_or_else(|_| Page::new(&name));
+
+    // Clear existing blocks
+    page.blocks.clear();
+    page.root_blocks.clear();
+
+    // Add blocks from request
+    for block_data in req.blocks {
+        let uuid = block_data
+            .uuid
+            .parse()
+            .map_err(|_| AppError::BadRequest("Invalid UUID".to_string()))?;
+
+        let mut block = Block::with_uuid(uuid, &block_data.content);
+
+        block.parent_uuid = block_data
+            .parent_uuid
+            .as_ref()
+            .and_then(|s| s.parse().ok());
+
+        block.children = block_data
+            .children
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        block.collapsed = block_data.collapsed;
+        block.properties = block_data.properties;
+
+        page.add_block(block);
+    }
+
+    page.touch();
+    state.file_manager.write_page(&page).await?;
+
+    // Update search index
+    {
+        let mut index = state.search_index.write().await;
+        index.index_page(&page)?;
+        index.commit()?;
+    }
+
+    debug!("Updated page: {}", name);
+    Ok(Json(page))
+}
+
+/// Delete a page
+pub async fn delete_page(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    state.file_manager.delete_page(&name).await?;
+
+    // Remove from search index
+    {
+        let mut index = state.search_index.write().await;
+        index.remove_page(&name)?;
+        index.commit()?;
+    }
+
+    debug!("Deleted page: {}", name);
+    Ok(Json(serde_json::json!({ "deleted": name })))
+}
+
+/// Backlink reference
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BacklinkRef {
+    pub page_name: String,
+    pub page_title: String,
+    pub block_uuid: String,
+    pub block_content: String,
+    pub is_journal: bool,
+    pub journal_date: Option<String>,
+}
+
+/// Get backlinks to a page
+pub async fn get_backlinks(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> Result<Json<Vec<BacklinkRef>>, AppError> {
+    let mut backlinks = Vec::new();
+
+    // Search for pages that link to this page
+    let search_term = format!("[[{}]]", name);
+
+    // Scan all pages for links
+    // TODO: This is inefficient - we should maintain a link index
+    let pages = state.file_manager.list_pages().await?;
+    for page_meta in pages {
+        if page_meta.name == name {
+            continue;
+        }
+
+        if let Ok(page) = state.file_manager.read_page(&page_meta.name).await {
+            for block in page.blocks.values() {
+                if block.content.contains(&search_term) {
+                    backlinks.push(BacklinkRef {
+                        page_name: page.name.clone(),
+                        page_title: page.title.clone(),
+                        block_uuid: block.uuid.to_string(),
+                        block_content: block.content.clone(),
+                        is_journal: false,
+                        journal_date: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Also check journals
+    let journals = state.file_manager.list_journals().await?;
+    for journal_meta in journals {
+        if let Some(date) = journal_meta.journal_date {
+            if let Ok(page) = state.file_manager.read_journal(date).await {
+                for block in page.blocks.values() {
+                    if block.content.contains(&search_term) {
+                        backlinks.push(BacklinkRef {
+                            page_name: page.name.clone(),
+                            page_title: page.title.clone(),
+                            block_uuid: block.uuid.to_string(),
+                            block_content: block.content.clone(),
+                            is_journal: true,
+                            journal_date: Some(date.format("%Y-%m-%d").to_string()),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Json(backlinks))
+}

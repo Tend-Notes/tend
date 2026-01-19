@@ -1,0 +1,123 @@
+// SPDX-License-Identifier: MIT WITH Commons-Clause
+//! Journal API routes
+
+use std::sync::Arc;
+
+use axum::extract::{Path, State};
+use axum::Json;
+use chrono::{Local, NaiveDate};
+use tend_core::{Block, Page, PageMeta};
+use tracing::debug;
+
+use crate::error::AppError;
+use crate::routes::pages::UpdatePageRequest;
+use crate::state::AppState;
+
+/// List all journals
+pub async fn list_journals(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<PageMeta>>, AppError> {
+    let journals = state.file_manager.list_journals().await?;
+    Ok(Json(journals))
+}
+
+/// Get today's journal (creates if doesn't exist)
+pub async fn get_today(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Page>, AppError> {
+    let today = Local::now().date_naive();
+    let page = state.file_manager.read_journal(today).await?;
+
+    // If the page is empty (new journal), create it with an empty block
+    if page.blocks.is_empty() {
+        let mut new_page = Page::new_journal(today);
+        let block = Block::new("");
+        new_page.add_block(block);
+
+        state.file_manager.write_page(&new_page).await?;
+
+        // Index the new journal
+        {
+            let mut index = state.search_index.write().await;
+            index.index_page(&new_page)?;
+            index.commit()?;
+        }
+
+        debug!("Created today's journal: {}", today);
+        return Ok(Json(new_page));
+    }
+
+    Ok(Json(page))
+}
+
+/// Get a journal by date
+pub async fn get_journal(
+    State(state): State<Arc<AppState>>,
+    Path(date_str): Path<String>,
+) -> Result<Json<Page>, AppError> {
+    let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}", date_str)))?;
+
+    let page = state.file_manager.read_journal(date).await?;
+    Ok(Json(page))
+}
+
+/// Update a journal
+pub async fn update_journal(
+    State(state): State<Arc<AppState>>,
+    Path(date_str): Path<String>,
+    Json(req): Json<UpdatePageRequest>,
+) -> Result<Json<Page>, AppError> {
+    let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+        .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}", date_str)))?;
+
+    // Read existing journal or create new
+    let mut page = state
+        .file_manager
+        .read_journal(date)
+        .await
+        .unwrap_or_else(|_| Page::new_journal(date));
+
+    // Clear existing blocks
+    page.blocks.clear();
+    page.root_blocks.clear();
+
+    // Add blocks from request
+    for block_data in req.blocks {
+        let uuid = block_data
+            .uuid
+            .parse()
+            .map_err(|_| AppError::BadRequest("Invalid UUID".to_string()))?;
+
+        let mut block = Block::with_uuid(uuid, &block_data.content);
+
+        block.parent_uuid = block_data
+            .parent_uuid
+            .as_ref()
+            .and_then(|s| s.parse().ok());
+
+        block.children = block_data
+            .children
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        block.collapsed = block_data.collapsed;
+        block.properties = block_data.properties;
+
+        page.add_block(block);
+    }
+
+    page.touch();
+    state.file_manager.write_page(&page).await?;
+
+    // Update search index
+    {
+        let mut index = state.search_index.write().await;
+        index.index_page(&page)?;
+        index.commit()?;
+    }
+
+    debug!("Updated journal: {}", date_str);
+    Ok(Json(page))
+}

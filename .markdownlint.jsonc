@@ -1,0 +1,8 @@
+{
+  // Suppress warnings for Logseq-style markdown in data directories
+  // These files use non-standard markdown (id:: properties, no heading spaces)
+  "globs": [
+    "data/**/*.md"
+  ],
+  "default": false
+}

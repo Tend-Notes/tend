@@ -1,0 +1,3 @@
+# Ignore Logseq-style markdown files (non-standard format with id:: properties)
+data/
+**/data/

@@ -1,0 +1,419 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base16 One Dark Theme (default) */
+:root {
+  --base00: #282c34;
+  --base01: #353b45;
+  --base02: #3e4451;
+  --base03: #545862;
+  --base04: #565c64;
+  --base05: #abb2bf;
+  --base06: #b6bdca;
+  --base07: #c8ccd4;
+  --base08: #e06c75;
+  --base09: #d19a66;
+  --base0A: #e5c07b;
+  --base0B: #98c379;
+  --base0C: #56b6c2;
+  --base0D: #61afef;
+  --base0E: #c678dd;
+  --base0F: #be5046;
+
+  /* Derived colors */
+  --sidebar-bg: color-mix(in srgb, var(--base00) 90%, black);
+
+  /* Semantic colors */
+  --color-bg: var(--base00);
+  --color-bg-secondary: var(--base01);
+  --color-bg-selection: var(--base02);
+  --color-text-muted: var(--base03);
+  --color-text: var(--base05);
+  --color-text-emphasis: var(--base06);
+  --color-link: var(--base0D);
+  --color-link-missing: var(--base08);
+  --color-tag: var(--base0E);
+  --color-todo: var(--base09);
+  --color-done: var(--base0B);
+
+  color-scheme: dark;
+}
+
+/* Base styles */
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus styles */
+:focus-visible {
+  outline: 2px solid var(--base0D);
+  outline-offset: 2px;
+}
+
+/* Selection */
+::selection {
+  background-color: var(--color-bg-selection);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--base02);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--base03);
+}
+
+/* Links */
+a {
+  color: var(--color-link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Headings in editor */
+.ProseMirror h1 {
+  font-size: 1.75em;
+  font-weight: 600;
+  color: var(--base06);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.ProseMirror h2 {
+  font-size: 1.4em;
+  font-weight: 600;
+  color: var(--base06);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.ProseMirror h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--base06);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.ProseMirror h4 {
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--base06);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Inline code */
+code {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  background-color: var(--color-bg-secondary);
+  padding: 0.125em 0.25em;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+
+/* Code blocks */
+.ProseMirror pre {
+  background-color: var(--base00);
+  border: 1px solid var(--base02);
+  border-radius: 6px;
+  padding: 0.75em 1em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+
+.ProseMirror pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.875em;
+  line-height: 1.5;
+  color: var(--base05);
+}
+
+/* Syntax highlighting - One Dark theme colors */
+.hljs-comment,
+.hljs-quote {
+  color: var(--base03);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-addition {
+  color: var(--base0E);
+}
+
+.hljs-number,
+.hljs-string,
+.hljs-meta .hljs-meta-string,
+.hljs-literal,
+.hljs-doctag,
+.hljs-regexp {
+  color: var(--base0B);
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--base0D);
+}
+
+.hljs-attribute,
+.hljs-attr,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-class .hljs-title,
+.hljs-type {
+  color: var(--base09);
+}
+
+.hljs-symbol,
+.hljs-bullet,
+.hljs-subst,
+.hljs-meta,
+.hljs-meta .hljs-keyword,
+.hljs-selector-attr,
+.hljs-selector-pseudo,
+.hljs-link {
+  color: var(--base08);
+}
+
+.hljs-built_in,
+.hljs-deletion {
+  color: var(--base08);
+}
+
+.hljs-formula {
+  background: var(--base01);
+}
+
+.hljs-emphasis {
+  font-style: italic;
+}
+
+.hljs-strong {
+  font-weight: bold;
+}
+
+/* Wiki-link styles */
+.wiki-link {
+  color: var(--color-link);
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.wiki-link:hover {
+  background-color: var(--color-bg-selection);
+}
+
+.wiki-link--missing {
+  color: var(--color-link-missing);
+}
+
+.wiki-link--focused {
+  /* When cursor is inside, show differently */
+  background-color: var(--color-bg-secondary);
+}
+
+/* Text formatting styles */
+.fmt-bold {
+  font-weight: 700;
+}
+
+.fmt-italic {
+  font-style: italic;
+}
+
+.fmt-underline {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.fmt-strikethrough {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.fmt-highlight {
+  background-color: color-mix(in srgb, var(--base0A) 35%, transparent);
+  border-radius: 2px;
+  padding: 0 2px;
+  margin: 0 -2px;
+}
+
+/* Focused formatting (when cursor is inside) - show delimiters */
+.fmt--focused {
+  background-color: var(--color-bg-secondary);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Block reference styles */
+.block-ref {
+  color: var(--color-link);
+  background-color: var(--color-bg-secondary);
+  padding: 0 4px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.block-ref:hover {
+  background-color: var(--color-bg-selection);
+}
+
+/* Tag styles */
+.tag {
+  color: var(--color-tag);
+  cursor: pointer;
+}
+
+.tag:hover {
+  text-decoration: underline;
+}
+
+/* Task markers */
+.task-marker {
+  font-weight: 600;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+
+.task-marker--todo {
+  color: var(--color-todo);
+  background-color: color-mix(in srgb, var(--color-todo) 15%, transparent);
+}
+
+.task-marker--doing {
+  color: var(--base0D);
+  background-color: color-mix(in srgb, var(--base0D) 15%, transparent);
+}
+
+.task-marker--done {
+  color: var(--color-done);
+  background-color: color-mix(in srgb, var(--color-done) 15%, transparent);
+  text-decoration: line-through;
+}
+
+/* Bullet point */
+.bullet {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--base03);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.2s ease, border-color 0.15s ease;
+}
+
+.bullet:hover {
+  background-color: var(--base0D);
+  transform: scale(1.2);
+}
+
+.bullet--collapsed {
+  background-color: transparent;
+  border: 2px solid var(--base03);
+}
+
+.bullet--collapsed:hover {
+  border-color: var(--base0D);
+  transform: scale(1.2);
+}
+
+/* Block container - subtle transitions for indent/outdent/reorder */
+.block-container {
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+/* Block */
+.block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 2px 0;
+  border-radius: 3px;
+  transition: background-color 0.2s cubic-bezier(0, 1, 0, 1);
+}
+
+/* Subtle highlight on focused block */
+.block:has(.ProseMirror-focused) {
+  background-color: color-mix(in srgb, var(--base02) 30%, transparent);
+}
+
+.block-content {
+  flex: 1;
+  min-height: 1.5em;
+}
+
+.block-children {
+  margin-left: 24px;
+  border-left: 1px solid var(--base02);
+  padding-left: 12px;
+  transition: border-color 0.15s ease;
+}
+
+/* Editor placeholder */
+.block-content:empty::before {
+  content: attr(data-placeholder);
+  color: var(--base04);
+  pointer-events: none;
+}
+
+/* Editor focus */
+.block-content:focus {
+  outline: none;
+}
+
+/* Transitions */
+.transition-colors {
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+/* Animations */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.15s ease;
+}

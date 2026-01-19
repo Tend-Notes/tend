@@ -1,0 +1,16 @@
+[package]
+name = "tend-git"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Git backup operations for Tend"
+
+[dependencies]
+tend-core = { workspace = true }
+gix = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }

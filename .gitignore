@@ -1,0 +1,29 @@
+# Rust
+/target/
+Cargo.lock
+
+# Node
+node_modules/
+packages/web/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tend data (local development)
+/data/
+*.tmp
+
+# Nix
+result
+.direnv/
+
+# Environment
+.env
+.env.local

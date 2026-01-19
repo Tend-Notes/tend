@@ -1,0 +1,42 @@
+[package]
+name = "tend-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Web server for Tend"
+
+[[bin]]
+name = "tend"
+path = "src/main.rs"
+
+[dependencies]
+tend-core = { workspace = true }
+tend-storage = { workspace = true }
+tend-search = { workspace = true }
+tend-git = { workspace = true }
+
+# Web framework
+axum = { workspace = true }
+tokio = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Configuration
+toml = { workspace = true }
+directories = { workspace = true }
+
+# Date/time
+chrono = { workspace = true }
