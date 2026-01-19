@@ -510,7 +510,36 @@ code {
   animation: slide-in-right var(--duration-normal) var(--ease-out);
 }
 
-/* Smooth caret - uses CSS caret-color transition (limited browser support) */
+/* Smooth caret - custom overlay that animates position */
 [contenteditable] {
-  caret-color: var(--base0D);
+  caret-color: transparent; /* Hide native caret */
+}
+
+/* Custom animated caret */
+.smooth-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  background-color: var(--base0D);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 10;
+  /* Smooth position transitions - subtle, not squishy */
+  transition:
+    transform var(--duration-fast) var(--ease-out),
+    height var(--duration-fast) var(--ease-out);
+  /* Blink animation */
+  animation: caret-blink 1s step-end infinite;
+  animation-delay: 0.5s;
+}
+
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* When caret moves, temporarily disable blink for visibility */
+.smooth-caret:not([style*="animation: none"]) {
+  /* Animation resets are handled in JS */
 }
