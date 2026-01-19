@@ -5,6 +5,7 @@ import { useRef, useEffect, ReactNode, KeyboardEvent, MouseEvent as ReactMouseEv
 import type { Block } from '../../types'
 import { WikiLinkPopup } from './WikiLinkPopup'
 import { usePageStore } from '../../stores/pageStore'
+import { useSelectionStore } from '../../stores/selectionStore'
 
 interface BlockProps {
   block: Block
@@ -18,6 +19,7 @@ interface BlockProps {
   onMergeWithPrevious: (uuid: string) => void
   onNavigateUp: (uuid: string, cursorOffset?: number) => void
   onNavigateDown: (uuid: string, cursorOffset?: number) => void
+  flatBlockOrder: string[]
 }
 
 // Wiki-link state for autocomplete popup
@@ -86,10 +88,15 @@ export function BlockComponent({
   onMergeWithPrevious,
   onNavigateUp,
   onNavigateDown,
+  flatBlockOrder,
 }: BlockProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const lastContentRef = useRef(block.content)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
+
+  // Selection state
+  const { startSelection, extendSelection, isInSelection } = useSelectionStore()
+  const isSelected = isInSelection(block.uuid, flatBlockOrder)
 
   // Wiki-link autocomplete state
   const [wikiLink, setWikiLink] = useState<WikiLinkState>({
@@ -988,8 +995,31 @@ export function BlockComponent({
     }
   }, [contextMenu])
 
+  // Handle click on block container (for selection)
+  const handleBlockClick = useCallback((e: ReactMouseEvent) => {
+    if (e.shiftKey) {
+      // Shift+Click extends selection from anchor to this block
+      e.preventDefault()
+      extendSelection(block.uuid)
+    } else if (!e.target || !(e.target as HTMLElement).closest('[contenteditable]')) {
+      // Click outside contenteditable starts new selection (but don't interfere with text editing)
+      startSelection(block.uuid)
+    }
+  }, [block.uuid, startSelection, extendSelection])
+
+  // Clear selection when focusing contenteditable (unless Shift is held)
+  const handleEditorFocus = useCallback(() => {
+    // When user focuses the editor for text editing, set this as selection anchor
+    // This enables Shift+Click to work from the current cursor position
+    startSelection(block.uuid)
+  }, [block.uuid, startSelection])
+
   return (
-    <div className="block-container" data-block-id={block.uuid}>
+    <div
+      className={`block-container ${isSelected ? 'block-container--selected' : ''}`}
+      data-block-id={block.uuid}
+      onClick={handleBlockClick}
+    >
       <div className="block flex items-start gap-2 py-0.5">
         {/* Bullet point */}
         <button
@@ -1009,6 +1039,7 @@ export function BlockComponent({
           className="block-content flex-1 outline-none min-h-[1.5em] whitespace-pre-wrap"
           onInput={handleInput}
           onKeyDown={handleKeyDown}
+          onFocus={handleEditorFocus}
           data-placeholder="Type something..."
         />
       </div>
