@@ -357,17 +357,195 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
     }
   }, [getSelectedUuids, flatBlockOrder, getAllBlocks, updateCurrentPage, clearSelection, focusBlock])
 
-  // Handle Delete/Backspace key for multi-block deletion
+  // Serialize blocks to markdown format
+  const blocksToMarkdown = useCallback((blockUuids: string[]): string => {
+    const lines: string[] = []
+
+    const serializeBlock = (uuid: string, indent: number) => {
+      const block = page.blocks[uuid]
+      if (!block) return
+
+      const prefix = '  '.repeat(indent) + '- '
+      lines.push(prefix + block.content)
+
+      // Serialize children
+      for (const childUuid of block.children) {
+        serializeBlock(childUuid, indent + 1)
+      }
+    }
+
+    // Find root-level blocks among the selection (blocks whose parent isn't in selection)
+    const selectedSet = new Set(blockUuids)
+    const rootUuids = blockUuids.filter((uuid) => {
+      const block = page.blocks[uuid]
+      return !block?.parentUuid || !selectedSet.has(block.parentUuid)
+    })
+
+    for (const uuid of rootUuids) {
+      serializeBlock(uuid, 0)
+    }
+
+    return lines.join('\n')
+  }, [page.blocks])
+
+  // Copy selected blocks to clipboard
+  const copySelectedBlocks = useCallback(async () => {
+    const selectedUuids = getSelectedUuids(flatBlockOrder)
+    if (selectedUuids.length === 0) return
+
+    const markdown = blocksToMarkdown(selectedUuids)
+    await navigator.clipboard.writeText(markdown)
+  }, [getSelectedUuids, flatBlockOrder, blocksToMarkdown])
+
+  // Cut selected blocks (copy + delete)
+  const cutSelectedBlocks = useCallback(async () => {
+    await copySelectedBlocks()
+    deleteSelectedBlocks()
+  }, [copySelectedBlocks, deleteSelectedBlocks])
+
+  // Paste blocks from clipboard after the focused block
+  const pasteBlocks = useCallback(async (afterUuid: string) => {
+    const text = await navigator.clipboard.readText()
+    if (!text) return
+
+    // Parse markdown into blocks
+    const lines = text.split('\n').filter((line) => line.trim())
+    if (lines.length === 0) return
+
+    // Deep clone blocks
+    const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+    const afterBlock = blocks.find((b) => b.uuid === afterUuid)
+    if (!afterBlock) return
+
+    // Parse indentation and create block hierarchy
+    interface ParsedLine {
+      content: string
+      indent: number
+    }
+
+    const parsedLines: ParsedLine[] = lines.map((line) => {
+      // Count leading spaces/tabs before the bullet
+      const match = line.match(/^(\s*)(?:-\s*)?(.*)$/)
+      if (match) {
+        const spaces = match[1]
+        const content = match[2]
+        // Each 2 spaces = 1 indent level
+        const indent = Math.floor(spaces.length / 2)
+        return { content, indent }
+      }
+      return { content: line.trim(), indent: 0 }
+    })
+
+    // Create new blocks
+    const newBlocks: Block[] = []
+    const uuidStack: { uuid: string; indent: number }[] = []
+
+    // Determine base indent (minimum indent in parsed lines)
+    const baseIndent = Math.min(...parsedLines.map((l) => l.indent))
+
+    for (const { content, indent } of parsedLines) {
+      const relativeIndent = indent - baseIndent
+
+      // Find parent from stack
+      while (uuidStack.length > 0 && uuidStack[uuidStack.length - 1].indent >= relativeIndent) {
+        uuidStack.pop()
+      }
+
+      const parentUuid = uuidStack.length > 0 ? uuidStack[uuidStack.length - 1].uuid : null
+      const parentBlock = parentUuid ? blocks.find((b) => b.uuid === parentUuid) || newBlocks.find((b) => b.uuid === parentUuid) : null
+
+      const newBlock: Block = {
+        uuid: uuidv4(),
+        content,
+        parentUuid,
+        children: [],
+        collapsed: false,
+        properties: {},
+        depth: parentBlock ? parentBlock.depth + 1 : afterBlock.depth,
+      }
+
+      // Add to parent's children
+      if (parentBlock) {
+        parentBlock.children.push(newBlock.uuid)
+      }
+
+      newBlocks.push(newBlock)
+      uuidStack.push({ uuid: newBlock.uuid, indent: relativeIndent })
+    }
+
+    // Find root-level pasted blocks (those without a parent in newBlocks)
+    const pastedRootUuids = newBlocks
+      .filter((b) => !b.parentUuid)
+      .map((b) => b.uuid)
+
+    // Insert pasted root blocks after afterBlock
+    if (afterBlock.parentUuid) {
+      const parent = blocks.find((b) => b.uuid === afterBlock.parentUuid)
+      if (parent) {
+        const afterIndex = parent.children.indexOf(afterUuid)
+        parent.children = [
+          ...parent.children.slice(0, afterIndex + 1),
+          ...pastedRootUuids,
+          ...parent.children.slice(afterIndex + 1),
+        ]
+        // Update parent UUID for pasted root blocks
+        for (const uuid of pastedRootUuids) {
+          const pastedBlock = newBlocks.find((b) => b.uuid === uuid)
+          if (pastedBlock) {
+            pastedBlock.parentUuid = afterBlock.parentUuid
+            pastedBlock.depth = afterBlock.depth
+          }
+        }
+      }
+    }
+
+    // Update depths for all pasted blocks
+    const updateDepths = (blockList: Block[]) => {
+      for (const block of blockList) {
+        if (block.parentUuid) {
+          const parent = blocks.find((b) => b.uuid === block.parentUuid) || newBlocks.find((b) => b.uuid === block.parentUuid)
+          if (parent) {
+            block.depth = parent.depth + 1
+          }
+        }
+      }
+    }
+    updateDepths(newBlocks)
+
+    updateCurrentPage([...blocks, ...newBlocks])
+
+    // Focus the last pasted block
+    if (newBlocks.length > 0) {
+      focusBlock(newBlocks[newBlocks.length - 1].uuid, 'end')
+    }
+  }, [getAllBlocks, updateCurrentPage, focusBlock])
+
+  // Handle keyboard shortcuts for selection operations
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't interfere if user is typing in an input/textarea
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
       // Only handle Delete/Backspace when we have multi-block selection
       if ((e.key === 'Delete' || e.key === 'Backspace') && hasMultiBlockSelection(flatBlockOrder)) {
-        // Don't interfere if user is typing in an input/textarea
-        const target = e.target as HTMLElement
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
-
         e.preventDefault()
         deleteSelectedBlocks()
+        return
+      }
+
+      // Copy (Ctrl+C / Cmd+C) when we have multi-block selection
+      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && hasMultiBlockSelection(flatBlockOrder)) {
+        e.preventDefault()
+        copySelectedBlocks()
+        return
+      }
+
+      // Cut (Ctrl+X / Cmd+X) when we have multi-block selection
+      if ((e.ctrlKey || e.metaKey) && e.key === 'x' && hasMultiBlockSelection(flatBlockOrder)) {
+        e.preventDefault()
+        cutSelectedBlocks()
+        return
       }
 
       // Escape clears selection
@@ -378,7 +556,7 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [hasMultiBlockSelection, flatBlockOrder, deleteSelectedBlocks, clearSelection])
+  }, [hasMultiBlockSelection, flatBlockOrder, deleteSelectedBlocks, copySelectedBlocks, cutSelectedBlocks, clearSelection])
 
   // Navigate to previous block (arrow up at start)
   const handleNavigateUp = useCallback(
@@ -643,6 +821,7 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
         onNavigateDown={handleNavigateDown}
         onMoveBlockUp={handleMoveBlockUp}
         onMoveBlockDown={handleMoveBlockDown}
+        onPasteBlocks={pasteBlocks}
         flatBlockOrder={flatBlockOrder}
       >
         {!block.collapsed &&
@@ -678,6 +857,7 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
           onNavigateDown={handleNavigateDown}
           onMoveBlockUp={handleMoveBlockUp}
           onMoveBlockDown={handleMoveBlockDown}
+          onPasteBlocks={pasteBlocks}
           flatBlockOrder={[emptyBlock.uuid]}
         />
       </div>

@@ -147,8 +147,8 @@ tend/
 - [x] Shift+Arrow to extend selection across blocks
 - [x] Visual indication of selected blocks (background highlight)
 - [x] Delete key removes all selected blocks
-- [ ] Copy/Cut selected blocks to clipboard (as markdown)
-- [ ] Paste blocks from clipboard
+- [x] Copy/Cut selected blocks to clipboard (as markdown)
+- [x] Paste blocks from clipboard
 
 #### 2.3 Block Movement (Alt+Arrow)
 - [x] Alt+Up: Move block to become last child of the immediately preceding visible block

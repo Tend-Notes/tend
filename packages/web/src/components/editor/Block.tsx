@@ -21,6 +21,7 @@ interface BlockProps {
   onNavigateDown: (uuid: string, cursorOffset?: number) => void
   onMoveBlockUp: (uuid: string) => void
   onMoveBlockDown: (uuid: string) => void
+  onPasteBlocks: (afterUuid: string) => void
   flatBlockOrder: string[]
 }
 
@@ -92,6 +93,7 @@ export function BlockComponent({
   onNavigateDown,
   onMoveBlockUp,
   onMoveBlockDown,
+  onPasteBlocks,
   flatBlockOrder,
 }: BlockProps) {
   const editorRef = useRef<HTMLDivElement>(null)
@@ -914,6 +916,17 @@ export function BlockComponent({
         onIndent(block.uuid)
       }
       return
+    }
+
+    // Ctrl+V / Cmd+V - paste blocks (when no text selection, let it parse markdown)
+    if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      const selection = window.getSelection()
+      // Only intercept paste if there's no text selection (otherwise let browser handle inline paste)
+      if (selection && selection.isCollapsed) {
+        e.preventDefault()
+        onPasteBlocks(block.uuid)
+        return
+      }
     }
 
     // Alt+Arrow Up - move block up (become child of previous block)
