@@ -19,6 +19,8 @@ interface BlockProps {
   onMergeWithPrevious: (uuid: string) => void
   onNavigateUp: (uuid: string, cursorOffset?: number) => void
   onNavigateDown: (uuid: string, cursorOffset?: number) => void
+  onMoveBlockUp: (uuid: string) => void
+  onMoveBlockDown: (uuid: string) => void
   flatBlockOrder: string[]
 }
 
@@ -88,6 +90,8 @@ export function BlockComponent({
   onMergeWithPrevious,
   onNavigateUp,
   onNavigateDown,
+  onMoveBlockUp,
+  onMoveBlockDown,
   flatBlockOrder,
 }: BlockProps) {
   const editorRef = useRef<HTMLDivElement>(null)
@@ -909,6 +913,20 @@ export function BlockComponent({
       } else {
         onIndent(block.uuid)
       }
+      return
+    }
+
+    // Shift+Arrow Up - move block up (become child of previous block)
+    if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      onMoveBlockUp(block.uuid)
+      return
+    }
+
+    // Shift+Arrow Down - move block down (become sibling after next block's subtree)
+    if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      onMoveBlockDown(block.uuid)
       return
     }
 

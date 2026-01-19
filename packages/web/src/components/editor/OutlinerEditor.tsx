@@ -408,6 +408,137 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
     [getFlattenedBlocks, focusBlock]
   )
 
+  // Move block up: make it the last child of the previous visible block
+  // (This is different from outdent - it moves the block in document order)
+  const handleMoveBlockUp = useCallback(
+    (uuid: string) => {
+      const flatBlocks = getFlattenedBlocks()
+      const currentIndex = flatBlocks.findIndex((b) => b.uuid === uuid)
+      if (currentIndex <= 0) return // Can't move first block up
+
+      // Deep clone blocks
+      const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+      const block = blocks.find((b) => b.uuid === uuid)
+      if (!block) return
+
+      const previousBlock = flatBlocks[currentIndex - 1]
+      const prevBlockInArray = blocks.find((b) => b.uuid === previousBlock.uuid)
+      if (!prevBlockInArray) return
+
+      // Remove block from current parent
+      if (block.parentUuid) {
+        const oldParent = blocks.find((b) => b.uuid === block.parentUuid)
+        if (oldParent) {
+          oldParent.children = oldParent.children.filter((id) => id !== uuid)
+        }
+      }
+
+      // Add as last child of previous block
+      prevBlockInArray.children = [...prevBlockInArray.children, uuid]
+      block.parentUuid = previousBlock.uuid
+      block.depth = prevBlockInArray.depth + 1
+
+      // Update children depths recursively
+      const updateChildDepths = (parentId: string, parentDepth: number) => {
+        const p = blocks.find((b) => b.uuid === parentId)
+        if (!p) return
+        for (const childUuid of p.children) {
+          const child = blocks.find((b) => b.uuid === childUuid)
+          if (child) {
+            child.depth = parentDepth + 1
+            updateChildDepths(childUuid, child.depth)
+          }
+        }
+      }
+      updateChildDepths(uuid, block.depth)
+
+      updateCurrentPage(blocks)
+      focusBlock(uuid, 'start')
+    },
+    [getFlattenedBlocks, getAllBlocks, updateCurrentPage, focusBlock]
+  )
+
+  // Move block down: move after the next visible block (or after its last descendant)
+  const handleMoveBlockDown = useCallback(
+    (uuid: string) => {
+      const flatBlocks = getFlattenedBlocks()
+      const currentIndex = flatBlocks.findIndex((b) => b.uuid === uuid)
+      if (currentIndex === -1 || currentIndex >= flatBlocks.length - 1) return // Can't move last block down
+
+      // Deep clone blocks
+      const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+      const block = blocks.find((b) => b.uuid === uuid)
+      if (!block) return
+
+      const nextBlock = flatBlocks[currentIndex + 1]
+      const nextBlockInArray = blocks.find((b) => b.uuid === nextBlock.uuid)
+      if (!nextBlockInArray) return
+
+      // Remove block from current parent
+      if (block.parentUuid) {
+        const oldParent = blocks.find((b) => b.uuid === block.parentUuid)
+        if (oldParent) {
+          oldParent.children = oldParent.children.filter((id) => id !== uuid)
+        }
+      }
+
+      // Find where to insert: after the next block's subtree
+      // If next block has visible children, we go after its last visible descendant
+      // This means we become a sibling of next block (inserted after it in parent's children)
+
+      // Find the last visible descendant of nextBlock
+      let targetBlock = nextBlockInArray
+
+      // Walk through flatBlocks to find the last descendant of nextBlock
+      // A block is a descendant if it has greater depth and comes before a block at same/lower depth
+      for (let i = currentIndex + 2; i < flatBlocks.length; i++) {
+        const candidate = flatBlocks[i]
+        if (candidate.depth <= nextBlockInArray.depth) {
+          break // Found a block at same or lower level, stop
+        }
+        targetBlock = blocks.find((b) => b.uuid === candidate.uuid) || targetBlock
+      }
+
+      // Now insert block as sibling right after targetBlock
+      // The new parent is targetBlock's parent (same level)
+      const newParentUuid = targetBlock.parentUuid
+      block.parentUuid = newParentUuid
+
+      if (newParentUuid) {
+        const newParent = blocks.find((b) => b.uuid === newParentUuid)
+        if (newParent) {
+          const targetSiblingIndex = newParent.children.indexOf(targetBlock.uuid)
+          newParent.children = [
+            ...newParent.children.slice(0, targetSiblingIndex + 1),
+            uuid,
+            ...newParent.children.slice(targetSiblingIndex + 1),
+          ]
+        }
+      }
+
+      // Update depth (same level as target block)
+      block.depth = targetBlock.depth
+
+      // Update children depths recursively
+      const updateChildDepths = (parentId: string, parentDepth: number) => {
+        const p = blocks.find((b) => b.uuid === parentId)
+        if (!p) return
+        for (const childUuid of p.children) {
+          const child = blocks.find((b) => b.uuid === childUuid)
+          if (child) {
+            child.depth = parentDepth + 1
+            updateChildDepths(childUuid, child.depth)
+          }
+        }
+      }
+      updateChildDepths(uuid, block.depth)
+
+      updateCurrentPage(blocks)
+      focusBlock(uuid, 'start')
+    },
+    [getFlattenedBlocks, getAllBlocks, updateCurrentPage, focusBlock]
+  )
+
   // Merge with previous block (backspace at start)
   const handleMergeWithPrevious = useCallback(
     (uuid: string) => {
@@ -510,6 +641,8 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
         onMergeWithPrevious={handleMergeWithPrevious}
         onNavigateUp={handleNavigateUp}
         onNavigateDown={handleNavigateDown}
+        onMoveBlockUp={handleMoveBlockUp}
+        onMoveBlockDown={handleMoveBlockDown}
         flatBlockOrder={flatBlockOrder}
       >
         {!block.collapsed &&
@@ -543,6 +676,8 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
           onMergeWithPrevious={handleMergeWithPrevious}
           onNavigateUp={handleNavigateUp}
           onNavigateDown={handleNavigateDown}
+          onMoveBlockUp={handleMoveBlockUp}
+          onMoveBlockDown={handleMoveBlockDown}
           flatBlockOrder={[emptyBlock.uuid]}
         />
       </div>
