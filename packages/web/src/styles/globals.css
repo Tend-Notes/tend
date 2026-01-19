@@ -360,6 +360,12 @@ code {
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
+/* Selected block (multi-block selection) */
+.block-container--selected > .block {
+  background-color: color-mix(in srgb, var(--base0D) 20%, transparent);
+  border-radius: 3px;
+}
+
 /* Block */
 .block {
   display: flex;

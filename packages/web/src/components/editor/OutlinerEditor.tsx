@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Main outliner editor component
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useEffect } from 'react'
 import type { Page, Block } from '../../types'
 import { usePageStore } from '../../stores/pageStore'
+import { useSelectionStore } from '../../stores/selectionStore'
 import { BlockComponent } from './Block'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -13,6 +14,7 @@ interface OutlinerEditorProps {
 
 export function OutlinerEditor({ page }: OutlinerEditorProps) {
   const updateCurrentPage = usePageStore((state) => state.updateCurrentPage)
+  const { getSelectedUuids, hasMultiBlockSelection, clearSelection } = useSelectionStore()
 
   // Get blocks in tree order for rendering
   const rootBlocks = useMemo(() => {
@@ -303,6 +305,81 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
     return result
   }, [page.blocks, page.rootBlocks])
 
+  // Memoized flat block order for selection (just UUIDs)
+  const flatBlockOrder = useMemo(() => {
+    return getFlattenedBlocks().map((b) => b.uuid)
+  }, [getFlattenedBlocks])
+
+  // Delete multiple selected blocks
+  const deleteSelectedBlocks = useCallback(() => {
+    const selectedUuids = getSelectedUuids(flatBlockOrder)
+    if (selectedUuids.length === 0) return
+
+    // Deep clone blocks
+    let blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+
+    // Don't delete if it would remove all blocks
+    if (selectedUuids.length >= blocks.length) {
+      // Keep one empty block
+      const firstUuid = selectedUuids[0]
+      blocks = blocks.map((b) =>
+        b.uuid === firstUuid ? { ...b, content: '', children: [] } : b
+      )
+      blocks = blocks.filter((b) => b.uuid === firstUuid)
+      updateCurrentPage(blocks)
+      clearSelection()
+      return
+    }
+
+    // Remove selected blocks from their parents' children arrays
+    for (const uuid of selectedUuids) {
+      const block = blocks.find((b) => b.uuid === uuid)
+      if (block?.parentUuid) {
+        const parent = blocks.find((b) => b.uuid === block.parentUuid)
+        if (parent) {
+          parent.children = parent.children.filter((id) => id !== uuid)
+        }
+      }
+    }
+
+    // Filter out selected blocks
+    const selectedSet = new Set(selectedUuids)
+    blocks = blocks.filter((b) => !selectedSet.has(b.uuid))
+
+    updateCurrentPage(blocks)
+    clearSelection()
+
+    // Focus the block after the selection (or before if at end)
+    const lastSelectedIndex = flatBlockOrder.indexOf(selectedUuids[selectedUuids.length - 1])
+    const nextBlockUuid = flatBlockOrder[lastSelectedIndex + 1] || flatBlockOrder[lastSelectedIndex - selectedUuids.length]
+    if (nextBlockUuid && !selectedSet.has(nextBlockUuid)) {
+      focusBlock(nextBlockUuid, 'start')
+    }
+  }, [getSelectedUuids, flatBlockOrder, getAllBlocks, updateCurrentPage, clearSelection, focusBlock])
+
+  // Handle Delete/Backspace key for multi-block deletion
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle Delete/Backspace when we have multi-block selection
+      if ((e.key === 'Delete' || e.key === 'Backspace') && hasMultiBlockSelection(flatBlockOrder)) {
+        // Don't interfere if user is typing in an input/textarea
+        const target = e.target as HTMLElement
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+
+        e.preventDefault()
+        deleteSelectedBlocks()
+      }
+
+      // Escape clears selection
+      if (e.key === 'Escape' && hasMultiBlockSelection(flatBlockOrder)) {
+        clearSelection()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [hasMultiBlockSelection, flatBlockOrder, deleteSelectedBlocks, clearSelection])
+
   // Navigate to previous block (arrow up at start)
   const handleNavigateUp = useCallback(
     (uuid: string, cursorOffset?: number) => {
@@ -433,6 +510,7 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
         onMergeWithPrevious={handleMergeWithPrevious}
         onNavigateUp={handleNavigateUp}
         onNavigateDown={handleNavigateDown}
+        flatBlockOrder={flatBlockOrder}
       >
         {!block.collapsed &&
           children.map((child) => renderBlock(child))}
@@ -465,6 +543,7 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
           onMergeWithPrevious={handleMergeWithPrevious}
           onNavigateUp={handleNavigateUp}
           onNavigateDown={handleNavigateDown}
+          flatBlockOrder={[emptyBlock.uuid]}
         />
       </div>
     )
