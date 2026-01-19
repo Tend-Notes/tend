@@ -11,7 +11,7 @@ const shortcuts = [
     { keys: ['Alt', 'Shift', 'P'], description: 'Open command palette' },
     { keys: ['Alt', 'Shift', 'S'], description: 'Toggle sidebar' },
     { keys: ['Alt', 'Shift', 'F'], description: 'Search' },
-    { keys: ['Alt', 'Shift', 'O'], description: 'Open settings' },
+    { keys: ['Alt', 'Shift', 'O'], description: 'Open options' },
     { keys: ['?'], description: 'Show keyboard shortcuts' },
   ]},
   { category: 'Editor', items: [

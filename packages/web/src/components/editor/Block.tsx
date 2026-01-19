@@ -70,6 +70,13 @@ const FORMAT_PATTERNS: FormatPattern[] = [
   { key: '=', delimiter: '==', className: 'fmt-highlight', regex: /==([^=]+)==/g, hideDelimiters: true },
 ]
 
+// Detect heading level from content (1-4, or 0 if not a heading)
+// Matches: "# Heading", "## Heading", etc.
+function getHeadingLevel(content: string): number {
+  const match = content.match(/^(#{1,4})\s/)
+  return match ? match[1].length : 0
+}
+
 // Track pending format wraps (for selection + delimiter typing)
 interface PendingFormatWrap {
   text: string
@@ -136,7 +143,7 @@ export function BlockComponent({
     interface Span {
       start: number
       end: number
-      type: 'wiki-link' | 'format'
+      type: 'wiki-link' | 'format' | 'heading-marker'
       className: string
       innerText: string
       delimiter?: string
@@ -144,6 +151,18 @@ export function BlockComponent({
     }
 
     const spans: Span[] = []
+
+    // Check for heading marker at start (# , ## , etc.)
+    const headingMatch = content.match(/^(#{1,4})\s/)
+    if (headingMatch) {
+      spans.push({
+        start: 0,
+        end: headingMatch[0].length,
+        type: 'heading-marker',
+        className: 'heading-marker',
+        innerText: headingMatch[0],
+      })
+    }
 
     // Find wiki-links
     const wikiRegex = /\[\[([^\]]+)\]\]/g
@@ -208,6 +227,9 @@ export function BlockComponent({
           const focusClass = cursorInside ? ' wiki-link--focused' : ''
           result += `<span class="${span.className}${focusClass}" data-page-name="${escapeHtml(span.pageName!)}" data-start="${span.start}" data-end="${span.end}">[[${escapeHtml(span.innerText)}]]</span>`
         }
+      } else if (span.type === 'heading-marker') {
+        // Heading marker - always shown with subtle styling
+        result += `<span class="${span.className}">${escapeHtml(span.innerText)}</span>`
       } else {
         // Format span
         const delim = span.delimiter!
@@ -284,6 +306,12 @@ export function BlockComponent({
     if (!el) return
 
     const handleSelectionChange = () => {
+      // Skip this event if we're explicitly jumping out of a span
+      if (skipNextSelectionChangeRef.current) {
+        skipNextSelectionChangeRef.current = false
+        return
+      }
+
       const selection = window.getSelection()
       if (!selection || !el.contains(selection.anchorNode)) {
         // Cursor not in this block
@@ -352,7 +380,10 @@ export function BlockComponent({
         const newHtml = renderContent(content, foundSpan ? { start: contentCursorOffset, end: contentCursorOffset } : null)
         if (el.innerHTML !== newHtml) {
           el.innerHTML = newHtml
-          restoreCursor(el, domCursorOffset)
+          // Convert content offset to new DOM offset after re-render
+          // The DOM structure changed (delimiters shown/hidden), so we need to recalculate
+          const newDomOffset = contentOffsetToDomOffset(content, contentCursorOffset, foundSpan)
+          restoreCursor(el, newDomOffset)
         }
       }
     }
@@ -512,6 +543,9 @@ export function BlockComponent({
   // Track selected text when '[' is typed, to wrap with [[]] on second '['
   const pendingWikiWrapRef = useRef<{ text: string; insertPos: number; time: number } | null>(null)
 
+  // Flag to skip next selectionchange event (used when explicitly jumping out of a span)
+  const skipNextSelectionChangeRef = useRef(false)
+
   // Track selected text for format wrapping (e.g., * for italic, ** for bold)
   const pendingFormatWrapRef = useRef<PendingFormatWrap | null>(null)
 
@@ -629,25 +663,26 @@ export function BlockComponent({
     if (!el) return
 
     // Keyboard shortcuts for formatting (Alt+Shift + key)
+    // Use e.code for physical key (macOS Alt produces special characters with e.key)
     if (e.altKey && e.shiftKey) {
-      switch (e.key.toLowerCase()) {
-        case 'b': // Bold
+      switch (e.code) {
+        case 'KeyB': // Bold
           e.preventDefault()
           applyFormatting('**')
           return
-        case 'i': // Italic
+        case 'KeyI': // Italic
           e.preventDefault()
           applyFormatting('*')
           return
-        case 'u': // Underline
+        case 'KeyU': // Underline
           e.preventDefault()
           applyFormatting('__')
           return
-        case 's': // Strikethrough
+        case 'KeyS': // Strikethrough
           e.preventDefault()
           applyFormatting('~~')
           return
-        case 'h': // Highlight
+        case 'KeyH': // Highlight
           e.preventDefault()
           applyFormatting('==')
           return
@@ -696,6 +731,8 @@ export function BlockComponent({
           requestAnimationFrame(() => {
             if (editorRef.current) {
               editorRef.current.innerHTML = renderContent(newContent, null)
+              // Skip next selectionchange to prevent re-decoration pulling cursor back into span
+              skipNextSelectionChangeRef.current = true
               restoreCursor(editorRef.current, domCursorPos)
               editorRef.current.focus()
             }
@@ -825,17 +862,23 @@ export function BlockComponent({
         const before = content.substring(0, insertPos)
         const after = content.substring(insertPos + 1) // +1 to skip the '[' we already typed
 
-        const newContent = `${before}[[${selectedText}]]${after}`
+        const wikiLink = `[[${selectedText}]]`
+        const newContent = `${before}${wikiLink}${after}`
         lastContentRef.current = newContent
         onChange(block.uuid, newContent)
 
         // Update display and position cursor after the wiki-link
         requestAnimationFrame(() => {
           if (editorRef.current) {
-            const newCursorPos = before.length + selectedText.length + 4 // [[ + text + ]]
+            // Content offset is after the full [[text]] - i.e., before.length + wikiLink.length
+            const contentCursorPos = before.length + wikiLink.length
+            // Convert to DOM offset (brackets are hidden)
+            const domCursorPos = contentOffsetToDomOffset(newContent, contentCursorPos, null)
             // Cursor is after the wiki-link, so no brackets to show
             editorRef.current.innerHTML = renderContent(newContent, null)
-            restoreCursor(editorRef.current, newCursorPos)
+            // Skip next selectionchange to prevent re-decoration pulling cursor back into span
+            skipNextSelectionChangeRef.current = true
+            restoreCursor(editorRef.current, domCursorPos)
             editorRef.current.focus()
           }
         })
@@ -873,13 +916,19 @@ export function BlockComponent({
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
 
-      // Get cursor position and split content
+      // Get cursor position in DOM, then convert to raw content position
+      // This is critical because the DOM may have hidden delimiters (e.g., [[ ]] for wiki-links)
       const selection = window.getSelection()
-      const cursorOffset = selection ? getCursorOffset(el, selection) : 0
-      const content = el.textContent || ''
+      const domCursorOffset = selection ? getCursorOffset(el, selection) : 0
 
-      const contentBefore = content.substring(0, cursorOffset)
-      const contentAfter = content.substring(cursorOffset)
+      // Use raw content from block.content, not el.textContent (which has hidden delimiters)
+      const rawContent = block.content
+
+      // Convert DOM offset to content offset, accounting for hidden delimiters
+      const contentCursorOffset = domOffsetToContentOffset(rawContent, domCursorOffset, cursorInWikiLink)
+
+      const contentBefore = rawContent.substring(0, contentCursorOffset)
+      const contentAfter = rawContent.substring(contentCursorOffset)
 
       // Update current block with content before cursor
       if (contentBefore !== block.content) {
@@ -1016,30 +1065,139 @@ export function BlockComponent({
     }
 
     // Arrow Left at start - navigate to previous block
+    // Also handle jumping over hidden delimiters at span boundaries
     if (e.key === 'ArrowLeft') {
       // Clear multi-block selection when moving cursor without Shift
       clearSelection()
 
       const selection = window.getSelection()
-      if (selection && selection.isCollapsed && isAtStart(el, selection)) {
-        e.preventDefault()
-        onNavigateUp(block.uuid)
-        return
+      if (selection && selection.isCollapsed) {
+        // Check if at start of document
+        if (isAtStart(el, selection)) {
+          e.preventDefault()
+          onNavigateUp(block.uuid)
+          return
+        }
+
+        // Check if we need to jump over hidden delimiters (entering a span from the right)
+        const domOffset = getCursorOffset(el, selection)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+
+        // If we're at the end of a formatted span, jump to inside it (before closing delimiter)
+        const spanInfo = getSpanAtContentOffset(block.content, contentOffset)
+        if (spanInfo && contentOffset === spanInfo.end) {
+          // At the end of a span - jump inside before the closing delimiter
+          e.preventDefault()
+          const newContentOffset = spanInfo.end - spanInfo.delimiterLength
+          const newDomOffset = contentOffsetToDomOffset(block.content, newContentOffset, { start: spanInfo.start, end: spanInfo.end })
+          el.innerHTML = renderContent(block.content, { start: newContentOffset, end: newContentOffset })
+          restoreCursor(el, newDomOffset)
+          setCursorInWikiLink({ start: spanInfo.start, end: spanInfo.end })
+          return
+        }
       }
     }
 
     // Arrow Right at end - navigate to next block
+    // Also handle jumping over hidden delimiters at span boundaries
     if (e.key === 'ArrowRight') {
       // Clear multi-block selection when moving cursor without Shift
       clearSelection()
 
       const selection = window.getSelection()
-      if (selection && selection.isCollapsed && isAtEnd(el, selection)) {
-        e.preventDefault()
-        onNavigateDown(block.uuid)
-        return
+      if (selection && selection.isCollapsed) {
+        // Check if we need to jump over hidden delimiters (exiting a span)
+        // This must be checked BEFORE isAtEnd, because isAtEnd uses DOM length
+        // which doesn't account for hidden closing delimiters
+        const domOffset = getCursorOffset(el, selection)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+
+        // If we're inside a formatted span (delimiters visible), check if we're at the true end
+        if (cursorInWikiLink) {
+          if (contentOffset >= cursorInWikiLink.end - 1) {
+            // At or past the last character of the span - exit and strip delimiters
+            // Move one past the span end for visual continuity
+            e.preventDefault()
+            const newContentOffset = Math.min(cursorInWikiLink.end + 1, block.content.length)
+            const newDomOffset = contentOffsetToDomOffset(block.content, newContentOffset, null)
+            el.innerHTML = renderContent(block.content, null)
+            // Skip the next selectionchange to prevent re-decoration
+            skipNextSelectionChangeRef.current = true
+            restoreCursor(el, newDomOffset)
+            setCursorInWikiLink(null)
+            return
+          }
+          // Otherwise, let browser handle normal navigation through the visible delimiters
+        } else {
+          // Not tracking a focused span, but we might be at the end of one's visible text
+          // (e.g., cursor placed there after wiki-link wrap without entering the span)
+          // In this case, show the delimiters first (like ArrowLeft does when entering)
+          const spanInfo = getSpanAtContentOffset(block.content, contentOffset)
+          if (spanInfo) {
+            const innerEnd = spanInfo.end - spanInfo.delimiterLength
+            if (contentOffset >= innerEnd) {
+              // At the inner end - show delimiters and position cursor before closing delimiter
+              // This mirrors ArrowLeft behavior: show delimiters, let user navigate through
+              e.preventDefault()
+              const newContentOffset = innerEnd
+              const newDomOffset = contentOffsetToDomOffset(block.content, newContentOffset, { start: spanInfo.start, end: spanInfo.end })
+              el.innerHTML = renderContent(block.content, { start: newContentOffset, end: newContentOffset })
+              restoreCursor(el, newDomOffset)
+              setCursorInWikiLink({ start: spanInfo.start, end: spanInfo.end })
+              return
+            }
+          }
+        }
+
+        // Check if at end of content (after handling any span boundaries)
+        // Use content offset comparison since DOM length doesn't include hidden delimiters
+        if (contentOffset >= block.content.length) {
+          e.preventDefault()
+          onNavigateDown(block.uuid)
+          return
+        }
       }
     }
+  }
+
+  // Helper: get span info at a content offset
+  // Returns span info if offset is AT or INSIDE the span (not after it)
+  function getSpanAtContentOffset(content: string, offset: number): { start: number; end: number; delimiterLength: number } | null {
+    // Check wiki-links
+    const wikiRegex = /\[\[([^\]]+)\]\]/g
+    let match
+    while ((match = wikiRegex.exec(content)) !== null) {
+      // offset < end (not <=) because position == end means AFTER the span
+      if (offset >= match.index && offset < match.index + match[0].length) {
+        return { start: match.index, end: match.index + match[0].length, delimiterLength: 2 }
+      }
+    }
+
+    // Check format patterns
+    for (const pattern of FORMAT_PATTERNS) {
+      const regex = new RegExp(pattern.regex.source, 'g')
+      while ((match = regex.exec(content)) !== null) {
+        // offset < end (not <=) because position == end means AFTER the span
+        if (offset >= match.index && offset < match.index + match[0].length) {
+          return { start: match.index, end: match.index + match[0].length, delimiterLength: pattern.delimiter.length }
+        }
+      }
+    }
+
+    return null
+  }
+
+  // Helper: get delimiter length for a span
+  function getSpanDelimiterLength(content: string, span: { start: number; end: number }): number {
+    const spanText = content.substring(span.start, span.end)
+    if (spanText.startsWith('[[') && spanText.endsWith(']]')) return 2
+    if (spanText.startsWith('***') && spanText.endsWith('***')) return 3
+    if (spanText.startsWith('**') && spanText.endsWith('**')) return 2
+    if (spanText.startsWith('*') && spanText.endsWith('*')) return 1
+    if (spanText.startsWith('~~') && spanText.endsWith('~~')) return 2
+    if (spanText.startsWith('__') && spanText.endsWith('__')) return 2
+    if (spanText.startsWith('==') && spanText.endsWith('==')) return 2
+    return 0
   }
 
   const hasChildren = block.children.length > 0
@@ -1135,9 +1293,13 @@ export function BlockComponent({
     setIsEditorFocused(false)
   }, [])
 
+  // Get heading level for this block
+  const headingLevel = getHeadingLevel(block.content)
+  const headingClass = headingLevel > 0 ? `block-heading-${headingLevel}` : ''
+
   return (
     <div
-      className={`block-container ${isSelected ? 'block-container--selected' : ''}`}
+      className={`block-container ${isSelected ? 'block-container--selected' : ''} ${headingClass}`}
       data-block-id={block.uuid}
       onMouseDown={handleBlockMouseDown}
       onMouseEnter={handleBlockMouseEnter}
@@ -1147,7 +1309,7 @@ export function BlockComponent({
         <button
           onClick={() => hasChildren && onToggleCollapse(block.uuid)}
           onContextMenu={handleBulletContextMenu}
-          className={`bullet mt-1.5 ${
+          className={`bullet mt-[0.55rem] ${
             hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
           }`}
           title={hasChildren ? (block.collapsed ? 'Expand' : 'Collapse') : undefined}
@@ -1359,10 +1521,17 @@ function domOffsetToContentOffset(
 
     // The span itself (delimiters hidden, so DOM shows only inner text)
     const innerTextLength = span.contentEnd - span.contentStart - (span.delimiterLength * 2)
-    if (domPos + innerTextLength >= domOffset) {
-      // Cursor is inside this span's visible text
+    if (domPos + innerTextLength > domOffset) {
+      // Cursor is strictly inside this span's visible text (not at the end)
       // Map to content position (after opening delimiter)
       return span.contentStart + span.delimiterLength + (domOffset - domPos)
+    }
+    if (domPos + innerTextLength === domOffset) {
+      // Cursor is exactly at the end of the span's visible text
+      // This is ambiguous: could be "end of inner text" or "after the span"
+      // We treat it as AFTER the span (content position = span.contentEnd)
+      // This allows cursor to escape rightward without getting trapped
+      return span.contentEnd
     }
     domPos += innerTextLength
     contentPos = span.contentEnd
@@ -1435,8 +1604,9 @@ function contentOffsetToDomOffset(
     domPos += textBeforeSpan
     contentPos = span.contentStart
 
-    // Check if cursor is within the span (including delimiters)
-    if (contentOffset <= span.contentEnd) {
+    // Check if cursor is within the span (including delimiters, but NOT at the end)
+    // Position == contentEnd means cursor is AFTER the span, not in it
+    if (contentOffset < span.contentEnd) {
       // Cursor is somewhere in this span
       if (contentOffset <= span.contentStart + span.delimiterLength) {
         // Cursor is in opening delimiter - map to start of visible text

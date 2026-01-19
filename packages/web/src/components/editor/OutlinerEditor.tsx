@@ -65,8 +65,9 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
       if (hasChildren) {
         // Insert as first child of current block
         afterBlock.children = [newBlock.uuid, ...afterBlock.children]
+        updateCurrentPage([...blocks, newBlock])
       } else if (afterBlock.parentUuid) {
-        // Insert as sibling after current block
+        // Insert as sibling after current block (non-root)
         const parent = blocks.find((b) => b.uuid === afterBlock.parentUuid)
         if (parent) {
           const afterIndex = parent.children.indexOf(afterUuid)
@@ -76,12 +77,26 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
             ...parent.children.slice(afterIndex + 1),
           ]
         }
+        updateCurrentPage([...blocks, newBlock])
+      } else {
+        // Root-level block: need to insert in rootBlocks after this block
+        // We handle this by directly updating rootBlocks via setState
+        const afterIndex = page.rootBlocks.indexOf(afterUuid)
+        const newRootBlocks = [
+          ...page.rootBlocks.slice(0, afterIndex + 1),
+          newBlock.uuid,
+          ...page.rootBlocks.slice(afterIndex + 1),
+        ]
+        usePageStore.setState((state) => {
+          if (state.currentPage) {
+            state.currentPage.rootBlocks = newRootBlocks
+          }
+        })
+        updateCurrentPage([...blocks, newBlock])
       }
-
-      updateCurrentPage([...blocks, newBlock])
       return newBlock.uuid
     },
-    [getAllBlocks, updateCurrentPage]
+    [getAllBlocks, updateCurrentPage, page.rootBlocks]
   )
 
   // Delete a block (merge with previous if at start)
@@ -905,36 +920,28 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
     )
   }
 
-  // If page is empty, show a single empty block
-  if (rootBlocks.length === 0) {
-    const emptyBlock: Block = {
-      uuid: uuidv4(),
-      content: '',
-      parentUuid: null,
-      children: [],
-      collapsed: false,
-      properties: {},
-      depth: 0,
+  // If page is empty, create and persist an initial empty block
+  useEffect(() => {
+    if (rootBlocks.length === 0) {
+      const initialBlock: Block = {
+        uuid: uuidv4(),
+        content: '',
+        parentUuid: null,
+        children: [],
+        collapsed: false,
+        properties: {},
+        depth: 0,
+      }
+      // Persist the initial block so Enter/other operations work
+      updateCurrentPage([initialBlock])
     }
+  }, [rootBlocks.length, updateCurrentPage])
 
+  // While waiting for the initial block to be created, show a loading state
+  if (rootBlocks.length === 0) {
     return (
       <div className="outliner-editor max-w-3xl">
-        <BlockComponent
-          block={emptyBlock}
-          onChange={handleBlockChange}
-          onCreateBlock={handleCreateBlock}
-          onDeleteBlock={handleDeleteBlock}
-          onIndent={handleIndent}
-          onOutdent={handleOutdent}
-          onToggleCollapse={handleToggleCollapse}
-          onMergeWithPrevious={handleMergeWithPrevious}
-          onNavigateUp={handleNavigateUp}
-          onNavigateDown={handleNavigateDown}
-          onMoveBlockUp={handleMoveBlockUp}
-          onMoveBlockDown={handleMoveBlockDown}
-          onPasteBlocks={pasteBlocks}
-          flatBlockOrder={[emptyBlock.uuid]}
-        />
+        <div className="text-base-03 text-sm">Loading...</div>
       </div>
     )
   }

@@ -42,11 +42,10 @@ pub async fn create_page(
 
     let mut page = Page::new(&req.name);
 
-    // Add initial content if provided
-    if let Some(content) = req.content {
-        let block = Block::new(content);
-        page.add_block(block);
-    }
+    // Add initial content if provided, otherwise create an empty block
+    // (matching journal behavior for consistency)
+    let block = Block::new(req.content.unwrap_or_default());
+    page.add_block(block);
 
     state.file_manager.write_page(&page).await?;
 

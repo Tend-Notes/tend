@@ -352,7 +352,7 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               onSelect={() => onOpenChange(false)}
               shortcut="Alt+Shift+O"
             >
-              Settings
+              Options
             </CommandItem>
           </Command.Group>
         </Command.List>

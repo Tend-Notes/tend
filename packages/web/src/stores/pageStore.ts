@@ -54,6 +54,8 @@ interface PageState {
   resolveConflictKeepMine: () => Promise<void>
   resolveConflictKeepServer: () => Promise<void>
   dismissConflict: () => void
+  // Flush any pending saves immediately (called before navigation)
+  flushPendingSave: () => Promise<void>
 }
 
 // Helper to build URL path for content
@@ -77,6 +79,14 @@ const SAVE_DEBOUNCE_MS = 500
 // Debounce helper for draft saves (faster than server saves)
 let draftTimeout: ReturnType<typeof setTimeout> | null = null
 const DRAFT_DEBOUNCE_MS = 300
+
+// Store pending save data so we can flush it immediately on navigation
+let pendingSaveData: {
+  pageName: string
+  blocks: Block[]
+  isJournal: boolean
+  journalDate: string | null
+} | null = null
 
 export const usePageStore = create<PageState>()(
   immer((set, get) => ({
@@ -168,6 +178,9 @@ export const usePageStore = create<PageState>()(
     },
 
     navigateToPage: async (name: string, pushHistory = true) => {
+      // Flush any pending saves before navigating away
+      await get().flushPendingSave()
+
       set((state) => {
         state.isLoading = true
         state.error = null
@@ -244,6 +257,9 @@ export const usePageStore = create<PageState>()(
     },
 
     navigateToJournal: async (date: string, pushHistory = true) => {
+      // Flush any pending saves before navigating away
+      await get().flushPendingSave()
+
       set((state) => {
         state.isLoading = true
         state.error = null
@@ -411,10 +427,21 @@ export const usePageStore = create<PageState>()(
 
       const isJournal = currentPage.isJournal
       const journalDate = currentPage.journalDate
-      const version = currentPage.version
+
+      // Store pending save data for flush on navigation
+      pendingSaveData = {
+        pageName,
+        blocks,
+        isJournal,
+        journalDate,
+      }
 
       saveTimeout = setTimeout(async () => {
         try {
+          // Read version at save time, not call time, to avoid stale version after rapid edits
+          const currentState = get()
+          const version = currentState.currentPage?.version
+
           const apiBlocks = blocks.map(api.blockToApiFormat)
           let updatedPage: Page
           if (isJournal && journalDate) {
@@ -422,7 +449,8 @@ export const usePageStore = create<PageState>()(
           } else {
             updatedPage = await api.pages.update(pageName, apiBlocks, version)
           }
-          // Server save succeeded - clear the draft and update state with new version
+          // Server save succeeded - clear the draft and pending save data
+          pendingSaveData = null
           await draftStore.deleteDraft(pageName)
           set((state) => {
             state.hasUnsavedChanges = false
@@ -545,6 +573,46 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.pendingConflict = null
       })
+    },
+
+    flushPendingSave: async () => {
+      // Cancel the pending debounced save
+      if (saveTimeout) {
+        clearTimeout(saveTimeout)
+        saveTimeout = null
+      }
+
+      // If there's pending save data, save it immediately
+      if (pendingSaveData) {
+        const { pageName, blocks, isJournal, journalDate } = pendingSaveData
+        pendingSaveData = null
+
+        try {
+          const currentState = get()
+          const version = currentState.currentPage?.version
+
+          const apiBlocks = blocks.map(api.blockToApiFormat)
+          let updatedPage: Page
+          if (isJournal && journalDate) {
+            updatedPage = await api.journals.update(journalDate, apiBlocks, version)
+          } else {
+            updatedPage = await api.pages.update(pageName, apiBlocks, version)
+          }
+
+          await draftStore.deleteDraft(pageName)
+          set((state) => {
+            state.hasUnsavedChanges = false
+            if (state.currentPage && state.currentPage.name === pageName) {
+              state.currentPage.version = updatedPage.version
+              state.currentPage.modifiedAt = updatedPage.modifiedAt
+            }
+          })
+        } catch (e) {
+          // On navigation, we don't want to block with conflict dialogs
+          // Just log the error - the draft is still saved locally
+          console.warn('Failed to flush pending save:', e)
+        }
+      }
     },
   }))
 )

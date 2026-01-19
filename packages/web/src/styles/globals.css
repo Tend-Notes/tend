@@ -369,6 +369,42 @@ code {
   transform: scale(1.2);
 }
 
+/* Heading styles for blocks */
+.block-heading-1 .block-content {
+  font-size: 1.75em;
+  font-weight: 600;
+  color: var(--base06);
+  line-height: 1.3;
+}
+
+.block-heading-2 .block-content {
+  font-size: 1.4em;
+  font-weight: 600;
+  color: var(--base06);
+  line-height: 1.3;
+}
+
+.block-heading-3 .block-content {
+  font-size: 1.15em;
+  font-weight: 600;
+  color: var(--base06);
+  line-height: 1.4;
+}
+
+.block-heading-4 .block-content {
+  font-size: 1em;
+  font-weight: 600;
+  color: var(--base06);
+  line-height: 1.4;
+}
+
+/* Heading hash markers - subtle appearance */
+.heading-marker {
+  color: var(--base03);
+  font-weight: 400;
+  margin-right: 0.25em;
+}
+
 /* Block container - subtle transitions for indent/outdent/reorder */
 .block-container {
   transition:
@@ -508,6 +544,42 @@ code {
 
 .sidebar-content {
   animation: slide-in-right var(--duration-normal) var(--ease-out);
+}
+
+/* Sidebar mode content - animated transitions between navigation/history/graph */
+.sidebar-mode-content {
+  animation: sidebar-mode-enter var(--duration-normal) var(--ease-out);
+}
+
+@keyframes sidebar-mode-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Page content - crossfade animation on page navigation */
+.page-content {
+  animation: page-enter var(--duration-normal) var(--ease-out);
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Block children container - smooth indentation transitions */
+.block-children {
+  transition: margin-left var(--duration-fast) var(--ease-out),
+              padding-left var(--duration-fast) var(--ease-out);
 }
 
 /* Smooth caret - custom overlay that animates position */

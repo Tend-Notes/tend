@@ -32,7 +32,7 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       sidebarOpen: false,
-      sidebarWidth: 220,
+      sidebarWidth: 285,
       backlinksOpen: false,
       graphOpen: false,
       searchOpen: false,

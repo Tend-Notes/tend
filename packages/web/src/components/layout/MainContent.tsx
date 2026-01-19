@@ -34,7 +34,8 @@ export function MainContent() {
     <main className="flex-1 flex flex-col overflow-hidden">
       {/* Editor area with backlinks */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-6 py-12">
+        {/* Key changes with page name to trigger crossfade animation */}
+        <div key={currentPage.name} className="page-content max-w-2xl mx-auto px-6 py-12">
           {/* Page title with unsaved indicator */}
           <div className="flex items-center gap-3 mb-8">
             <h1 className="text-xl font-semibold text-base-06">{currentPage.title}</h1>

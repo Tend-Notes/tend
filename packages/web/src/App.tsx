@@ -15,7 +15,6 @@ import { useWebSocket } from './hooks/useWebSocket'
 function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [keyboardHelpOpen, setKeyboardHelpOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('navigation')
   const loadPages = usePageStore((state) => state.loadPages)
   const loadJournals = usePageStore((state) => state.loadJournals)
@@ -72,11 +71,6 @@ function App() {
           e.preventDefault()
           return
         }
-        if (settingsOpen) {
-          setSettingsOpen(false)
-          e.preventDefault()
-          return
-        }
         if (sidebarMode !== 'navigation') {
           setSidebarMode('navigation')
           e.preventDefault()
@@ -95,37 +89,38 @@ function App() {
       if (isEditing) return
 
       // Alt + Shift + P - Command palette
-      if (e.altKey && e.shiftKey && e.key === 'P') {
+      // Use e.code for physical key (macOS Alt produces special characters with e.key)
+      if (e.altKey && e.shiftKey && e.code === 'KeyP') {
         e.preventDefault()
         setCommandPaletteOpen(true)
         return
       }
 
       // Alt + Shift + S - Toggle sidebar
-      if (e.altKey && e.shiftKey && e.key === 'S') {
+      if (e.altKey && e.shiftKey && e.code === 'KeyS') {
         e.preventDefault()
         toggleSidebar()
         return
       }
 
       // Alt + Shift + F - Search
-      if (e.altKey && e.shiftKey && e.key === 'F') {
+      if (e.altKey && e.shiftKey && e.code === 'KeyF') {
         e.preventDefault()
         openSearch()
         return
       }
 
-      // Alt + Shift + O - Settings
-      if (e.altKey && e.shiftKey && e.key === 'O') {
+      // Alt + Shift + O - Options (toggle sidebar options mode)
+      if (e.altKey && e.shiftKey && e.code === 'KeyO') {
         e.preventDefault()
-        setSettingsOpen(true)
+        setSidebarMode(sidebarMode === 'options' ? 'navigation' : 'options')
         return
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keyboardHelpOpen, settingsOpen, sidebarMode, toggleSidebar, openSearch])
+  }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch])
 
   return (
     <div className="flex h-screen bg-base-00 text-base-05">
@@ -133,7 +128,6 @@ function App() {
       <Sidebar
         mode={sidebarMode}
         onModeChange={setSidebarMode}
-        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       {/* Main content area */}
@@ -159,23 +153,6 @@ function App() {
 
       {/* Conflict resolution dialog */}
       <ConflictResolutionDialog />
-
-      {/* Settings placeholder - TODO: implement settings panel */}
-      {settingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="overlay-backdrop fixed inset-0 bg-black/50 animate-fade-in" onClick={() => setSettingsOpen(false)} />
-          <div className="overlay-content relative z-10 bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-medium text-base-06 mb-4">Settings</h2>
-            <p className="text-sm text-base-04">Settings panel coming soon...</p>
-            <button
-              onClick={() => setSettingsOpen(false)}
-              className="mt-4 px-3 py-1.5 text-sm bg-base-02 hover:bg-base-03 rounded transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
