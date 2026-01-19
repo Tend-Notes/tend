@@ -74,6 +74,9 @@ pub async fn get_page(
 #[derive(Debug, Deserialize)]
 pub struct UpdatePageRequest {
     pub blocks: Vec<BlockData>,
+    /// Expected version for conflict detection. If provided and doesn't match
+    /// the current version, returns 409 Conflict.
+    pub version: Option<u64>,
 }
 
 /// Block data in API requests
@@ -100,6 +103,19 @@ pub async fn update_page(
         .read_page(&name)
         .await
         .unwrap_or_else(|_| Page::new(&name));
+
+    // Version conflict check
+    if let Some(expected_version) = req.version {
+        if page.version != expected_version {
+            return Err(AppError::Conflict {
+                current_version: page.version,
+                message: format!(
+                    "Version mismatch: expected {}, current {}",
+                    expected_version, page.version
+                ),
+            });
+        }
+    }
 
     // Clear existing blocks
     page.blocks.clear();
@@ -131,6 +147,8 @@ pub async fn update_page(
         page.add_block(block);
     }
 
+    // Increment version and update timestamp
+    page.version += 1;
     page.touch();
     state.file_manager.write_page(&page).await?;
 
@@ -141,7 +159,7 @@ pub async fn update_page(
         index.commit()?;
     }
 
-    debug!("Updated page: {}", name);
+    debug!("Updated page: {} (version {})", name, page.version);
     Ok(Json(page))
 }
 

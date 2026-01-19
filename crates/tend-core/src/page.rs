@@ -41,6 +41,14 @@ pub struct Page {
 
     /// File modification timestamp
     pub modified_at: DateTime<Utc>,
+
+    /// Version number for conflict detection (increments on each save)
+    #[serde(default = "default_version")]
+    pub version: u64,
+}
+
+fn default_version() -> u64 {
+    1
 }
 
 impl Page {
@@ -58,6 +66,7 @@ impl Page {
             journal_date: None,
             created_at: now,
             modified_at: now,
+            version: 1,
         }
     }
 
@@ -78,6 +87,7 @@ impl Page {
             journal_date: Some(date),
             created_at: now,
             modified_at: now,
+            version: 1,
         }
     }
 

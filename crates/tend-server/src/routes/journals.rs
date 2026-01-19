@@ -78,6 +78,19 @@ pub async fn update_journal(
         .await
         .unwrap_or_else(|_| Page::new_journal(date));
 
+    // Version conflict check
+    if let Some(expected_version) = req.version {
+        if page.version != expected_version {
+            return Err(AppError::Conflict {
+                current_version: page.version,
+                message: format!(
+                    "Version mismatch: expected {}, current {}",
+                    expected_version, page.version
+                ),
+            });
+        }
+    }
+
     // Clear existing blocks
     page.blocks.clear();
     page.root_blocks.clear();
@@ -108,6 +121,8 @@ pub async fn update_journal(
         page.add_block(block);
     }
 
+    // Increment version and update timestamp
+    page.version += 1;
     page.touch();
     state.file_manager.write_page(&page).await?;
 
@@ -118,6 +133,6 @@ pub async fn update_journal(
         index.commit()?;
     }
 
-    debug!("Updated journal: {}", date_str);
+    debug!("Updated journal: {} (version {})", date_str, page.version);
     Ok(Json(page))
 }

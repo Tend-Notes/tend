@@ -6,6 +6,7 @@ import { CommandPalette } from './components/command-palette/CommandPalette'
 import { SearchPanel } from './components/search/SearchPanel'
 import { KeyboardHelp } from './components/ui/KeyboardHelp'
 import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
+import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
 import { usePageStore } from './stores/pageStore'
 import { useUIStore } from './stores/uiStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
@@ -155,6 +156,9 @@ function App() {
 
       {/* Draft recovery dialog */}
       <DraftRecoveryDialog />
+
+      {/* Conflict resolution dialog */}
+      <ConflictResolutionDialog />
 
       {/* Settings placeholder - TODO: implement settings panel */}
       {settingsOpen && (

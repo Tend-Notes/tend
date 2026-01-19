@@ -17,6 +17,20 @@ import type {
 
 const API_BASE = '/api/v1'
 
+/**
+ * Error thrown when a version conflict occurs (409 Conflict).
+ * This happens when another client has modified the resource since we last loaded it.
+ */
+export class VersionConflictError extends Error {
+  readonly currentVersion: number
+
+  constructor(message: string, currentVersion: number) {
+    super(message)
+    this.name = 'VersionConflictError'
+    this.currentVersion = currentVersion
+  }
+}
+
 // Helper for JSON requests
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -29,6 +43,12 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }))
+
+    // Handle 409 Conflict specially
+    if (res.status === 409 && error.code === 'VERSION_CONFLICT') {
+      throw new VersionConflictError(error.error, error.currentVersion)
+    }
+
     throw new Error(`${res.status}: ${error.error || 'Request failed'}`)
   }
 
@@ -47,10 +67,10 @@ export const pages = {
       body: JSON.stringify({ name, content }),
     }),
 
-  update: (name: string, blocks: BlockData[]) =>
+  update: (name: string, blocks: BlockData[], version?: number) =>
     fetchJson<Page>(`${API_BASE}/pages/${encodeURIComponent(name)}`, {
       method: 'PUT',
-      body: JSON.stringify({ blocks }),
+      body: JSON.stringify({ blocks, version }),
     }),
 
   delete: (name: string) =>
@@ -70,10 +90,10 @@ export const journals = {
 
   get: (date: string) => fetchJson<Page>(`${API_BASE}/journals/${date}`),
 
-  update: (date: string, blocks: BlockData[]) =>
+  update: (date: string, blocks: BlockData[], version?: number) =>
     fetchJson<Page>(`${API_BASE}/journals/${date}`, {
       method: 'PUT',
-      body: JSON.stringify({ blocks }),
+      body: JSON.stringify({ blocks, version }),
     }),
 }
 
