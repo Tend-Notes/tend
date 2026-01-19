@@ -946,7 +946,15 @@ export function BlockComponent({
     // Shift+Arrow Up - extend selection to previous block
     if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault()
-      extendSelection(flatBlockOrder[Math.max(0, flatBlockOrder.indexOf(block.uuid) - 1)])
+      const currentIndex = flatBlockOrder.indexOf(block.uuid)
+      if (currentIndex > 0) {
+        // If no anchor yet, set current block as anchor first
+        const { anchorUuid } = useSelectionStore.getState()
+        if (!anchorUuid) {
+          startSelection(block.uuid)
+        }
+        extendSelection(flatBlockOrder[currentIndex - 1])
+      }
       return
     }
 
@@ -955,6 +963,11 @@ export function BlockComponent({
       e.preventDefault()
       const currentIndex = flatBlockOrder.indexOf(block.uuid)
       if (currentIndex < flatBlockOrder.length - 1) {
+        // If no anchor yet, set current block as anchor first
+        const { anchorUuid } = useSelectionStore.getState()
+        if (!anchorUuid) {
+          startSelection(block.uuid)
+        }
         extendSelection(flatBlockOrder[currentIndex + 1])
       }
       return
@@ -1043,24 +1056,32 @@ export function BlockComponent({
     }
   }, [contextMenu])
 
+  // Get clearSelection from store
+  const clearSelection = useSelectionStore((state) => state.clearSelection)
+
   // Handle click on block container (for selection)
   const handleBlockClick = useCallback((e: ReactMouseEvent) => {
     if (e.shiftKey) {
       // Shift+Click extends selection from anchor to this block
       e.preventDefault()
+      e.stopPropagation()
       extendSelection(block.uuid)
-    } else if (!e.target || !(e.target as HTMLElement).closest('[contenteditable]')) {
-      // Click outside contenteditable starts new selection (but don't interfere with text editing)
+    }
+    // Regular clicks are handled by handleEditorMouseDown
+  }, [block.uuid, extendSelection])
+
+  // Handle mousedown on contenteditable - this is where we set the anchor
+  const handleEditorMouseDown = useCallback((e: ReactMouseEvent) => {
+    if (e.shiftKey) {
+      // Shift+Click extends selection - don't reset anchor
+      e.preventDefault()
+      extendSelection(block.uuid)
+    } else {
+      // Regular click clears multi-block selection and sets this as anchor
+      clearSelection()
       startSelection(block.uuid)
     }
-  }, [block.uuid, startSelection, extendSelection])
-
-  // Clear selection when focusing contenteditable (unless Shift is held)
-  const handleEditorFocus = useCallback(() => {
-    // When user focuses the editor for text editing, set this as selection anchor
-    // This enables Shift+Click to work from the current cursor position
-    startSelection(block.uuid)
-  }, [block.uuid, startSelection])
+  }, [block.uuid, startSelection, extendSelection, clearSelection])
 
   return (
     <div
@@ -1087,7 +1108,7 @@ export function BlockComponent({
           className="block-content flex-1 outline-none min-h-[1.5em] whitespace-pre-wrap"
           onInput={handleInput}
           onKeyDown={handleKeyDown}
-          onFocus={handleEditorFocus}
+          onMouseDown={handleEditorMouseDown}
           data-placeholder="Type something..."
         />
       </div>

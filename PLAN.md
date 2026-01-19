@@ -151,13 +151,8 @@ tend/
 - [x] Paste blocks from clipboard
 
 #### 2.3 Block Movement (Alt+Arrow)
-- [x] Alt+Up: Move block to become last child of the immediately preceding visible block
-  - Find the previous block in flattened document order (respecting collapsed state)
-  - Reparent current block as child of that block
-  - This is different from indent (Tab) which only looks at siblings
-- [x] Alt+Down: Move block to become sibling after the next visible block
-  - If next block has children (and is expanded), become sibling after last descendant
-  - If next block has no children, swap positions
+- [x] Alt+Up: Swap block with previous sibling (stays at same indent level)
+- [x] Alt+Down: Swap block with next sibling (stays at same indent level)
 - [ ] Visual feedback during move (subtle animation)
 - [x] Preserve children when moving parent block
 
