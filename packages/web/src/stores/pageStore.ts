@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import type { Page, PageMeta, Block } from '../types'
 import * as api from '../lib/api'
+import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 
 interface PageState {
@@ -29,6 +30,13 @@ interface PageState {
     savedAt: number
   } | null
 
+  // Conflict state
+  pendingConflict: {
+    currentVersion: number
+    localBlocks: Block[]
+    localRootBlocks: string[]
+  } | null
+
   // Actions
   loadPages: () => Promise<void>
   loadJournals: () => Promise<void>
@@ -42,6 +50,10 @@ interface PageState {
   initializeFromUrl: () => Promise<void>
   restoreDraft: () => void
   discardDraft: () => Promise<void>
+  // Conflict resolution
+  resolveConflictKeepMine: () => Promise<void>
+  resolveConflictKeepServer: () => Promise<void>
+  dismissConflict: () => void
 }
 
 // Helper to build URL path for content
@@ -76,6 +88,7 @@ export const usePageStore = create<PageState>()(
     error: null,
     hasUnsavedChanges: false,
     pendingDraftRecovery: null,
+    pendingConflict: null,
 
     loadPages: async () => {
       try {
@@ -398,24 +411,41 @@ export const usePageStore = create<PageState>()(
 
       const isJournal = currentPage.isJournal
       const journalDate = currentPage.journalDate
+      const version = currentPage.version
 
       saveTimeout = setTimeout(async () => {
         try {
           const apiBlocks = blocks.map(api.blockToApiFormat)
+          let updatedPage: Page
           if (isJournal && journalDate) {
-            await api.journals.update(journalDate, apiBlocks)
+            updatedPage = await api.journals.update(journalDate, apiBlocks, version)
           } else {
-            await api.pages.update(pageName, apiBlocks)
+            updatedPage = await api.pages.update(pageName, apiBlocks, version)
           }
-          // Server save succeeded - clear the draft and update state
+          // Server save succeeded - clear the draft and update state with new version
           await draftStore.deleteDraft(pageName)
           set((state) => {
             state.hasUnsavedChanges = false
+            if (state.currentPage && state.currentPage.name === pageName) {
+              state.currentPage.version = updatedPage.version
+              state.currentPage.modifiedAt = updatedPage.modifiedAt
+            }
           })
         } catch (e) {
-          set((state) => {
-            state.error = e instanceof Error ? e.message : 'Failed to save changes'
-          })
+          if (e instanceof VersionConflictError) {
+            // Version conflict - store local changes and prompt user
+            set((state) => {
+              state.pendingConflict = {
+                currentVersion: e.currentVersion,
+                localBlocks: blocks,
+                localRootBlocks: finalRoots,
+              }
+            })
+          } else {
+            set((state) => {
+              state.error = e instanceof Error ? e.message : 'Failed to save changes'
+            })
+          }
         }
       }, SAVE_DEBOUNCE_MS)
     },
@@ -458,6 +488,62 @@ export const usePageStore = create<PageState>()(
 
       set((state) => {
         state.pendingDraftRecovery = null
+      })
+    },
+
+    resolveConflictKeepMine: async () => {
+      const { pendingConflict, currentPage } = get()
+      if (!pendingConflict || !currentPage) return
+
+      // Force save our local changes (without version check)
+      set((state) => {
+        state.pendingConflict = null
+      })
+
+      try {
+        const apiBlocks = pendingConflict.localBlocks.map(api.blockToApiFormat)
+        let updatedPage: Page
+        if (currentPage.isJournal && currentPage.journalDate) {
+          // Don't send version - force overwrite
+          updatedPage = await api.journals.update(currentPage.journalDate, apiBlocks)
+        } else {
+          updatedPage = await api.pages.update(currentPage.name, apiBlocks)
+        }
+        // Update local state with new version
+        await draftStore.deleteDraft(currentPage.name)
+        set((state) => {
+          state.hasUnsavedChanges = false
+          if (state.currentPage) {
+            state.currentPage.version = updatedPage.version
+            state.currentPage.modifiedAt = updatedPage.modifiedAt
+          }
+        })
+      } catch (e) {
+        set((state) => {
+          state.error = e instanceof Error ? e.message : 'Failed to save changes'
+        })
+      }
+    },
+
+    resolveConflictKeepServer: async () => {
+      const { pendingConflict, currentPage } = get()
+      if (!pendingConflict || !currentPage) return
+
+      set((state) => {
+        state.pendingConflict = null
+      })
+
+      // Reload the page from server
+      if (currentPage.isJournal && currentPage.journalDate) {
+        await get().navigateToJournal(currentPage.journalDate, false)
+      } else {
+        await get().navigateToPage(currentPage.name, false)
+      }
+    },
+
+    dismissConflict: () => {
+      set((state) => {
+        state.pendingConflict = null
       })
     },
   }))

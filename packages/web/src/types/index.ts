@@ -22,6 +22,8 @@ export interface Page {
   journalDate: string | null
   createdAt: string
   modifiedAt: string
+  /** Version number for conflict detection (increments on each save) */
+  version: number
 }
 
 // Page metadata (for lists)

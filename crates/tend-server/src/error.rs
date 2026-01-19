@@ -15,24 +15,52 @@ pub enum AppError {
     Storage(tend_storage::StorageError),
     Search(tend_search::SearchError),
     Git(tend_git::GitError),
+    /// Version conflict - another client modified the resource
+    Conflict {
+        current_version: u64,
+        message: String,
+    },
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, message) = match self {
-            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, msg),
-            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
-            AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-            AppError::Storage(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            AppError::Search(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-            AppError::Git(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
-        };
-
-        let body = Json(json!({
-            "error": message,
-        }));
-
-        (status, body).into_response()
+        match self {
+            AppError::NotFound(msg) => {
+                let body = Json(json!({ "error": msg }));
+                (StatusCode::NOT_FOUND, body).into_response()
+            }
+            AppError::BadRequest(msg) => {
+                let body = Json(json!({ "error": msg }));
+                (StatusCode::BAD_REQUEST, body).into_response()
+            }
+            AppError::Internal(msg) => {
+                let body = Json(json!({ "error": msg }));
+                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+            }
+            AppError::Storage(e) => {
+                let body = Json(json!({ "error": e.to_string() }));
+                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+            }
+            AppError::Search(e) => {
+                let body = Json(json!({ "error": e.to_string() }));
+                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+            }
+            AppError::Git(e) => {
+                let body = Json(json!({ "error": e.to_string() }));
+                (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
+            }
+            AppError::Conflict {
+                current_version,
+                message,
+            } => {
+                let body = Json(json!({
+                    "error": message,
+                    "code": "VERSION_CONFLICT",
+                    "currentVersion": current_version,
+                }));
+                (StatusCode::CONFLICT, body).into_response()
+            }
+        }
     }
 }
 
