@@ -4,7 +4,7 @@ import { OutlinerEditor } from '../editor/OutlinerEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 
 export function MainContent() {
-  const { currentPage, isLoading, error } = usePageStore()
+  const { currentPage, isLoading, error, hasUnsavedChanges } = usePageStore()
 
   if (isLoading) {
     return (
@@ -35,8 +35,15 @@ export function MainContent() {
       {/* Editor area with backlinks */}
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-6 py-12">
-          {/* Page title */}
-          <h1 className="text-xl font-semibold text-base-06 mb-8">{currentPage.title}</h1>
+          {/* Page title with unsaved indicator */}
+          <div className="flex items-center gap-3 mb-8">
+            <h1 className="text-xl font-semibold text-base-06">{currentPage.title}</h1>
+            {hasUnsavedChanges && (
+              <span className="text-xs text-base-03" title="Changes not yet saved to server">
+                (unsaved)
+              </span>
+            )}
+          </div>
 
           {/* Editor */}
           <OutlinerEditor page={currentPage} />
