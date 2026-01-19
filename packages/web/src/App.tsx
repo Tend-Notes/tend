@@ -9,6 +9,7 @@ import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { usePageStore } from './stores/pageStore'
 import { useUIStore } from './stores/uiStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
+import { useWebSocket } from './hooks/useWebSocket'
 
 function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
@@ -25,6 +26,9 @@ function App() {
 
   // Initialize auto-commit system
   useAutoCommit()
+
+  // Initialize WebSocket connection for real-time updates
+  useWebSocket()
 
   // Load initial data and handle URL
   useEffect(() => {

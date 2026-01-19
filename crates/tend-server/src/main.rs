@@ -6,10 +6,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{routing::get, Router};
+use tend_storage::{FileEvent, SimpleFileWatcher};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
-use tracing::{info, warn, Level};
+use tracing::{error, info, warn, Level};
 
 mod config;
 mod error;
@@ -80,6 +81,54 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+    }
+
+    // Start file watcher for real-time updates
+    {
+        let watcher_state = Arc::clone(&state);
+        let pending_writes = state.file_manager.pending_writes();
+        let root = config.data_dir.clone();
+
+        match SimpleFileWatcher::new(&root, pending_writes) {
+            Ok(watcher) => {
+                let mut rx = watcher.subscribe();
+
+                tokio::spawn(async move {
+                    // Keep watcher alive
+                    let _watcher = watcher;
+
+                    info!("File watcher started");
+
+                    while let Ok(event) = rx.recv().await {
+                        // Convert file path to page name
+                        let (path, event_type) = match &event {
+                            FileEvent::Created(p) | FileEvent::Modified(p) => {
+                                (p.clone(), "modified")
+                            }
+                            FileEvent::Deleted(p) => (p.clone(), "deleted"),
+                            FileEvent::Renamed { to, .. } => (to.clone(), "renamed"),
+                        };
+
+                        // Extract relative path from root
+                        let relative = path
+                            .strip_prefix(&root)
+                            .unwrap_or(&path)
+                            .to_string_lossy()
+                            .to_string();
+
+                        info!("File {} externally: {}", event_type, relative);
+
+                        // Broadcast the event
+                        watcher_state.broadcast(WsEvent::FileChanged {
+                            path: relative,
+                        });
+                    }
+                });
+            }
+            Err(e) => {
+                error!("Failed to start file watcher: {}", e);
+            }
+        }
     }
 
     // Build router

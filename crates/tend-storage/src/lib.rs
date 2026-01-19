@@ -12,4 +12,4 @@ pub mod watcher;
 
 pub use error::StorageError;
 pub use fs::FileManager;
-pub use watcher::FileWatcher;
+pub use watcher::{FileEvent, FileWatcher, SimpleFileWatcher};
