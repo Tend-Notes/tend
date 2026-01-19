@@ -916,17 +916,34 @@ export function BlockComponent({
       return
     }
 
-    // Shift+Arrow Up - move block up (become child of previous block)
-    if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    // Alt+Arrow Up - move block up (become child of previous block)
+    if (e.key === 'ArrowUp' && e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault()
       onMoveBlockUp(block.uuid)
       return
     }
 
-    // Shift+Arrow Down - move block down (become sibling after next block's subtree)
-    if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+    // Alt+Arrow Down - move block down (become sibling after next block's subtree)
+    if (e.key === 'ArrowDown' && e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault()
       onMoveBlockDown(block.uuid)
+      return
+    }
+
+    // Shift+Arrow Up - extend selection to previous block
+    if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      extendSelection(flatBlockOrder[Math.max(0, flatBlockOrder.indexOf(block.uuid) - 1)])
+      return
+    }
+
+    // Shift+Arrow Down - extend selection to next block
+    if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      const currentIndex = flatBlockOrder.indexOf(block.uuid)
+      if (currentIndex < flatBlockOrder.length - 1) {
+        extendSelection(flatBlockOrder[currentIndex + 1])
+      }
       return
     }
 

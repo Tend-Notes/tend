@@ -144,18 +144,18 @@ tend/
 #### 2.2 Multi-Block Selection
 - [x] Track selection state in outliner (start block, end block)
 - [x] Shift+Click to select range of blocks
-- [ ] Shift+Arrow to extend selection across blocks
+- [x] Shift+Arrow to extend selection across blocks
 - [x] Visual indication of selected blocks (background highlight)
 - [x] Delete key removes all selected blocks
 - [ ] Copy/Cut selected blocks to clipboard (as markdown)
 - [ ] Paste blocks from clipboard
 
-#### 2.3 Block Movement (Shift+Arrow)
-- [x] Shift+Up: Move block to become last child of the immediately preceding visible block
+#### 2.3 Block Movement (Alt+Arrow)
+- [x] Alt+Up: Move block to become last child of the immediately preceding visible block
   - Find the previous block in flattened document order (respecting collapsed state)
   - Reparent current block as child of that block
   - This is different from indent (Tab) which only looks at siblings
-- [x] Shift+Down: Move block to become sibling after the next visible block
+- [x] Alt+Down: Move block to become sibling after the next visible block
   - If next block has children (and is expanded), become sibling after last descendant
   - If next block has no children, swap positions
 - [ ] Visual feedback during move (subtle animation)
