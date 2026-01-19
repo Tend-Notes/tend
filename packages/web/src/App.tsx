@@ -5,6 +5,7 @@ import { MainContent } from './components/layout/MainContent'
 import { CommandPalette } from './components/command-palette/CommandPalette'
 import { SearchPanel } from './components/search/SearchPanel'
 import { KeyboardHelp } from './components/ui/KeyboardHelp'
+import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { usePageStore } from './stores/pageStore'
 import { useUIStore } from './stores/uiStore'
 
@@ -133,6 +134,9 @@ function App() {
         open={keyboardHelpOpen}
         onClose={() => setKeyboardHelpOpen(false)}
       />
+
+      {/* Draft recovery dialog */}
+      <DraftRecoveryDialog />
 
       {/* Settings placeholder - TODO: implement settings panel */}
       {settingsOpen && (

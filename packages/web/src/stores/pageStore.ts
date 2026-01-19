@@ -5,6 +5,7 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import type { Page, PageMeta, Block } from '../types'
 import * as api from '../lib/api'
+import * as draftStore from '../lib/draftStore'
 
 interface PageState {
   // Current page/journal being viewed
@@ -19,6 +20,15 @@ interface PageState {
   isLoading: boolean
   error: string | null
 
+  // Draft state
+  hasUnsavedChanges: boolean
+  pendingDraftRecovery: {
+    pageName: string
+    blocks: Block[]
+    rootBlocks: string[]
+    savedAt: number
+  } | null
+
   // Actions
   loadPages: () => Promise<void>
   loadJournals: () => Promise<void>
@@ -30,6 +40,8 @@ interface PageState {
   updateCurrentPage: (blocks: Block[]) => Promise<void>
   setError: (error: string | null) => void
   initializeFromUrl: () => Promise<void>
+  restoreDraft: () => void
+  discardDraft: () => Promise<void>
 }
 
 // Helper to build URL path for content
@@ -50,6 +62,10 @@ function parseUrlPath(path: string): { type: 'page' | 'journal' | null; name: st
 let saveTimeout: ReturnType<typeof setTimeout> | null = null
 const SAVE_DEBOUNCE_MS = 500
 
+// Debounce helper for draft saves (faster than server saves)
+let draftTimeout: ReturnType<typeof setTimeout> | null = null
+const DRAFT_DEBOUNCE_MS = 300
+
 export const usePageStore = create<PageState>()(
   immer((set, get) => ({
     currentPage: null,
@@ -58,6 +74,8 @@ export const usePageStore = create<PageState>()(
     journals: [],
     isLoading: false,
     error: null,
+    hasUnsavedChanges: false,
+    pendingDraftRecovery: null,
 
     loadPages: async () => {
       try {
@@ -89,15 +107,40 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.isLoading = true
         state.error = null
+        state.hasUnsavedChanges = false
+        state.pendingDraftRecovery = null
       })
 
       try {
         const page = await api.journals.getToday()
-        set((state) => {
-          state.currentPage = page
-          state.currentPageName = page.name
-          state.isLoading = false
-        })
+
+        // Check for stale draft
+        const draft = await draftStore.getDraft(page.name)
+        if (draft && draft.serverVersion !== page.modifiedAt) {
+          // Found a draft that differs from server - offer recovery
+          set((state) => {
+            state.currentPage = page
+            state.currentPageName = page.name
+            state.isLoading = false
+            state.pendingDraftRecovery = {
+              pageName: draft.pageName,
+              blocks: draft.blocks,
+              rootBlocks: draft.rootBlocks,
+              savedAt: draft.savedAt,
+            }
+          })
+        } else {
+          // No stale draft - clear any existing draft for this page
+          if (draft) {
+            await draftStore.deleteDraft(page.name)
+          }
+          set((state) => {
+            state.currentPage = page
+            state.currentPageName = page.name
+            state.isLoading = false
+          })
+        }
+
         // Update URL without adding to history (initial load)
         const url = buildUrlPath('journal', page.journalDate || page.name)
         window.history.replaceState({ type: 'journal', name: page.journalDate || page.name }, '', url)
@@ -115,15 +158,40 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.isLoading = true
         state.error = null
+        state.hasUnsavedChanges = false
+        state.pendingDraftRecovery = null
       })
 
       try {
         const page = await api.pages.get(name)
-        set((state) => {
-          state.currentPage = page
-          state.currentPageName = name
-          state.isLoading = false
-        })
+
+        // Check for stale draft
+        const draft = await draftStore.getDraft(page.name)
+        if (draft && draft.serverVersion !== page.modifiedAt) {
+          // Found a draft that differs from server - offer recovery
+          set((state) => {
+            state.currentPage = page
+            state.currentPageName = name
+            state.isLoading = false
+            state.pendingDraftRecovery = {
+              pageName: draft.pageName,
+              blocks: draft.blocks,
+              rootBlocks: draft.rootBlocks,
+              savedAt: draft.savedAt,
+            }
+          })
+        } else {
+          // No stale draft - clear any existing draft for this page
+          if (draft) {
+            await draftStore.deleteDraft(page.name)
+          }
+          set((state) => {
+            state.currentPage = page
+            state.currentPageName = name
+            state.isLoading = false
+          })
+        }
+
         // Update browser history
         if (pushHistory) {
           const url = buildUrlPath('page', name)
@@ -166,15 +234,40 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.isLoading = true
         state.error = null
+        state.hasUnsavedChanges = false
+        state.pendingDraftRecovery = null
       })
 
       try {
         const page = await api.journals.get(date)
-        set((state) => {
-          state.currentPage = page
-          state.currentPageName = date
-          state.isLoading = false
-        })
+
+        // Check for stale draft
+        const draft = await draftStore.getDraft(page.name)
+        if (draft && draft.serverVersion !== page.modifiedAt) {
+          // Found a draft that differs from server - offer recovery
+          set((state) => {
+            state.currentPage = page
+            state.currentPageName = date
+            state.isLoading = false
+            state.pendingDraftRecovery = {
+              pageName: draft.pageName,
+              blocks: draft.blocks,
+              rootBlocks: draft.rootBlocks,
+              savedAt: draft.savedAt,
+            }
+          })
+        } else {
+          // No stale draft - clear any existing draft for this page
+          if (draft) {
+            await draftStore.deleteDraft(page.name)
+          }
+          set((state) => {
+            state.currentPage = page
+            state.currentPageName = date
+            state.isLoading = false
+          })
+        }
+
         // Update browser history
         if (pushHistory) {
           const url = buildUrlPath('journal', date)
@@ -240,52 +333,69 @@ export const usePageStore = create<PageState>()(
       const { currentPage } = get()
       if (!currentPage) return
 
+      // Compute new root blocks
+      const blockMap: Record<string, Block> = {}
+      const newRootUuids = new Set<string>()
+
+      for (const block of blocks) {
+        blockMap[block.uuid] = block
+        if (!block.parentUuid) {
+          newRootUuids.add(block.uuid)
+        }
+      }
+
+      // Build new rootBlocks list preserving order and inserting new roots smartly
+      const existingRoots = currentPage.rootBlocks.filter(uuid => newRootUuids.has(uuid))
+      const addedRoots = [...newRootUuids].filter(uuid => !currentPage.rootBlocks.includes(uuid))
+
+      // For each new root, try to insert it after its former parent (if parent is a root)
+      let finalRoots = [...existingRoots]
+      for (const newRootUuid of addedRoots) {
+        // Check the old state to find the former parent
+        const oldBlock = currentPage.blocks[newRootUuid]
+        const formerParentUuid = oldBlock?.parentUuid
+
+        if (formerParentUuid && finalRoots.includes(formerParentUuid)) {
+          // Insert after the former parent
+          const parentIndex = finalRoots.indexOf(formerParentUuid)
+          finalRoots.splice(parentIndex + 1, 0, newRootUuid)
+        } else {
+          // Append at the end
+          finalRoots.push(newRootUuid)
+        }
+      }
+
       // Optimistic update (instant, no debounce)
       set((state) => {
         if (state.currentPage) {
-          const blockMap: Record<string, Block> = {}
-          const newRootUuids = new Set<string>()
-
-          for (const block of blocks) {
-            blockMap[block.uuid] = block
-            if (!block.parentUuid) {
-              newRootUuids.add(block.uuid)
-            }
-          }
-
-          // Build new rootBlocks list preserving order and inserting new roots smartly
-          const existingRoots = state.currentPage.rootBlocks.filter(uuid => newRootUuids.has(uuid))
-          const addedRoots = [...newRootUuids].filter(uuid => !state.currentPage!.rootBlocks.includes(uuid))
-
-          // For each new root, try to insert it after its former parent (if parent is a root)
-          let finalRoots = [...existingRoots]
-          for (const newRootUuid of addedRoots) {
-            // Check the old state to find the former parent
-            const oldBlock = state.currentPage.blocks[newRootUuid]
-            const formerParentUuid = oldBlock?.parentUuid
-
-            if (formerParentUuid && finalRoots.includes(formerParentUuid)) {
-              // Insert after the former parent
-              const parentIndex = finalRoots.indexOf(formerParentUuid)
-              finalRoots.splice(parentIndex + 1, 0, newRootUuid)
-            } else {
-              // Append at the end
-              finalRoots.push(newRootUuid)
-            }
-          }
-
           state.currentPage.blocks = blockMap
           state.currentPage.rootBlocks = finalRoots
+          state.hasUnsavedChanges = true
         }
       })
+
+      // Debounced draft save (faster than server save for data loss prevention)
+      if (draftTimeout) {
+        clearTimeout(draftTimeout)
+      }
+
+      const pageName = currentPage.name
+      const serverVersion = currentPage.modifiedAt
+
+      draftTimeout = setTimeout(async () => {
+        try {
+          await draftStore.saveDraft(pageName, blocks, finalRoots, serverVersion)
+        } catch (e) {
+          // Draft save failure is not critical - log but don't show error
+          console.warn('Failed to save draft to IndexedDB:', e)
+        }
+      }, DRAFT_DEBOUNCE_MS)
 
       // Debounced save to server - cancel previous pending save
       if (saveTimeout) {
         clearTimeout(saveTimeout)
       }
 
-      // Capture current page info for the closure
-      const pageName = currentPage.name
       const isJournal = currentPage.isJournal
       const journalDate = currentPage.journalDate
 
@@ -297,6 +407,11 @@ export const usePageStore = create<PageState>()(
           } else {
             await api.pages.update(pageName, apiBlocks)
           }
+          // Server save succeeded - clear the draft and update state
+          await draftStore.deleteDraft(pageName)
+          set((state) => {
+            state.hasUnsavedChanges = false
+          })
         } catch (e) {
           set((state) => {
             state.error = e instanceof Error ? e.message : 'Failed to save changes'
@@ -308,6 +423,41 @@ export const usePageStore = create<PageState>()(
     setError: (error) => {
       set((state) => {
         state.error = error
+      })
+    },
+
+    restoreDraft: () => {
+      const { pendingDraftRecovery, currentPage } = get()
+      if (!pendingDraftRecovery || !currentPage) return
+
+      // Apply the draft to current page
+      const blockMap: Record<string, Block> = {}
+      for (const block of pendingDraftRecovery.blocks) {
+        blockMap[block.uuid] = block
+      }
+
+      set((state) => {
+        if (state.currentPage) {
+          state.currentPage.blocks = blockMap
+          state.currentPage.rootBlocks = pendingDraftRecovery.rootBlocks
+          state.pendingDraftRecovery = null
+          state.hasUnsavedChanges = true
+        }
+      })
+
+      // Trigger a save to server
+      get().updateCurrentPage(pendingDraftRecovery.blocks)
+    },
+
+    discardDraft: async () => {
+      const { pendingDraftRecovery } = get()
+      if (!pendingDraftRecovery) return
+
+      // Delete the draft from IndexedDB
+      await draftStore.deleteDraft(pendingDraftRecovery.pageName)
+
+      set((state) => {
+        state.pendingDraftRecovery = null
       })
     },
   }))
