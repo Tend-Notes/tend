@@ -42,9 +42,14 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
     let mut block_stack: Vec<(usize, Uuid)> = Vec::new();
     let mut current_block: Option<Block> = None;
 
+    // Track if we've seen a block yet (page properties come before blocks)
+    let mut seen_first_block = false;
+
     for line in lines {
         // Try to match a bullet line
         if let Some(caps) = BULLET_RE.captures(line) {
+            seen_first_block = true;
+
             // Save the previous block if any
             if let Some(block) = current_block.take() {
                 save_block(&mut page, &mut block_stack, block);
@@ -67,6 +72,7 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
             let value = caps.get(3).map_or("", |m| m.as_str());
 
             if let Some(ref mut block) = current_block {
+                // Property belongs to the current block
                 if key == "id" {
                     // Parse UUID and set it on the block
                     if let Ok(uuid) = Uuid::parse_str(value) {
@@ -76,6 +82,15 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
                     block.collapsed = value == "true";
                 } else {
                     block.set_property(key, value);
+                }
+            } else if !seen_first_block {
+                // Property before any block - this is a page-level property
+                if key == "version" {
+                    if let Ok(v) = value.parse::<u64>() {
+                        page.version = v;
+                    }
+                } else {
+                    page.properties.insert(key.to_string(), value.to_string());
                 }
             }
         }
@@ -238,5 +253,26 @@ mod tests {
         assert!(is_journal_filename("2025-01-18.md"));
         assert!(is_journal_filename("2025_01_18.md"));
         assert!(!is_journal_filename("My Page.md"));
+    }
+
+    #[test]
+    fn test_parse_page_properties() {
+        let content = r#"version:: 5
+custom:: value
+
+- First block
+  id:: 12345678-1234-1234-1234-123456789abc"#;
+
+        let page = parse_markdown(content, "Test").unwrap();
+
+        // Check page-level properties
+        assert_eq!(page.version, 5);
+        assert_eq!(
+            page.properties.get("custom"),
+            Some(&"value".to_string())
+        );
+
+        // Check that block was parsed correctly
+        assert_eq!(page.blocks.len(), 1);
     }
 }
