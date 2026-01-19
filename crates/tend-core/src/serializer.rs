@@ -11,6 +11,20 @@ use uuid::Uuid;
 pub fn serialize_page(page: &Page) -> String {
     let mut output = String::new();
 
+    // Write page-level properties first (before any blocks)
+    // Version is stored as a page property for conflict detection
+    output.push_str(&format!("version:: {}\n", page.version));
+
+    // Write other page properties
+    for (key, value) in &page.properties {
+        output.push_str(&format!("{}:: {}\n", key, value));
+    }
+
+    // Add a blank line between page properties and blocks (if there are properties and blocks)
+    if !page.root_blocks.is_empty() {
+        output.push('\n');
+    }
+
     for root_uuid in &page.root_blocks {
         serialize_block_recursive(&mut output, page, root_uuid, 0);
     }
@@ -175,7 +189,9 @@ mod tests {
     fn test_roundtrip() {
         use crate::parser::parse_markdown;
 
-        let original = r#"- Parent block
+        let original = r#"version:: 42
+
+- Parent block
   id:: 12345678-1234-1234-1234-123456789abc
   status:: active
   - Child block
@@ -183,10 +199,15 @@ mod tests {
 "#;
 
         let page = parse_markdown(original, "Test").unwrap();
+        assert_eq!(page.version, 42);
+
         let serialized = serialize_page(&page);
 
         // Parse again
         let page2 = parse_markdown(&serialized, "Test").unwrap();
+
+        // Check that version is preserved
+        assert_eq!(page2.version, 42);
 
         // Check that structure is preserved
         assert_eq!(page.root_blocks.len(), page2.root_blocks.len());
