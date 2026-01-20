@@ -876,15 +876,34 @@ export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) 
         const selection = window.getSelection()
         if (!selection) return
 
+        // Use TreeWalker to properly position cursor at the merge point,
+        // accounting for formatted content (spans) that may wrap text nodes
         const range = document.createRange()
-        if (editorEl.firstChild && editorEl.firstChild.nodeType === Node.TEXT_NODE) {
-          const pos = Math.max(0, Math.min(cursorPos, editorEl.firstChild.textContent?.length || 0))
-          range.setStart(editorEl.firstChild, pos)
-          range.setEnd(editorEl.firstChild, pos)
-        } else {
+        let currentOffset = 0
+        let found = false
+
+        const walker = document.createTreeWalker(editorEl, NodeFilter.SHOW_TEXT)
+        let node: Text | null
+
+        while ((node = walker.nextNode() as Text | null)) {
+          const nodeLength = node.textContent?.length || 0
+          if (currentOffset + nodeLength >= cursorPos) {
+            // Found the right node - position cursor at the merge point
+            const pos = cursorPos - currentOffset
+            range.setStart(node, pos)
+            range.setEnd(node, pos)
+            found = true
+            break
+          }
+          currentOffset += nodeLength
+        }
+
+        if (!found) {
+          // Cursor position beyond content, put at end
           range.selectNodeContents(editorEl)
           range.collapse(false)
         }
+
         selection.removeAllRanges()
         selection.addRange(range)
       })
