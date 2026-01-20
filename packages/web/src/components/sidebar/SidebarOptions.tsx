@@ -661,63 +661,167 @@ function BackupSection() {
   const {
     backupEnabled,
     setBackupEnabled,
-    backupRemoteUrl,
-    setBackupRemoteUrl,
     backupIntervalMinutes,
     setBackupIntervalMinutes,
-    backupAuthMethod,
-    setBackupAuthMethod,
   } = useSettingsStore()
+
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
+  const [editingRemote, setEditingRemote] = useState(false)
+  const [remoteInput, setRemoteInput] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [isGitRepo, setIsGitRepo] = useState(false)
+  const [initializingGit, setInitializingGit] = useState(false)
+
+  // Fetch git status to get remote URL and repo status
+  useEffect(() => {
+    const fetchGitStatus = async () => {
+      try {
+        const { git } = await import('../../lib/api')
+        const status = await git.status()
+        setIsGitRepo(status.isRepo)
+        setRemoteUrl(status.remote)
+        setRemoteInput(status.remote || '')
+        setError(null)
+      } catch (err) {
+        setError('Failed to fetch git status')
+        console.error('Failed to fetch git status:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchGitStatus()
+  }, [])
+
+  const handleSaveRemote = async () => {
+    // TODO: Implement API to set remote
+    // For now, just close the editor
+    setEditingRemote(false)
+    setRemoteUrl(remoteInput || null)
+  }
+
+  const handleEnableVersions = async () => {
+    setInitializingGit(true)
+    try {
+      // TODO: Implement API to initialize git repo
+      // For now, we'll call backup which will init if needed
+      const { git } = await import('../../lib/api')
+      await git.backup()
+      setIsGitRepo(true)
+      setError(null)
+    } catch (err) {
+      setError('Failed to initialize version control')
+      console.error('Failed to initialize git:', err)
+    } finally {
+      setInitializingGit(false)
+    }
+  }
 
   return (
     <div className="space-y-3">
-      <SettingsRow label="Enable backup">
-        <Toggle checked={backupEnabled} onChange={setBackupEnabled} />
+      {/* Enable versions - initializes local git repo */}
+      <SettingsRow label="Enable versions">
+        <Toggle
+          checked={isGitRepo}
+          onChange={(checked) => {
+            if (checked && !isGitRepo) {
+              handleEnableVersions()
+            }
+          }}
+        />
       </SettingsRow>
+      <p className="text-xs text-base-03">
+        {initializingGit ? 'Initializing...' : isGitRepo
+          ? 'Version history is enabled. Your notes are stored locally on your server.'
+          : 'Enable to track changes and restore previous versions. Notes are stored on your server.'}
+      </p>
 
+      {/* Show backup options only when versions are enabled */}
       <AnimatePresence>
-        {backupEnabled && (
+        {isGitRepo && (
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden space-y-3"
           >
-            <SettingsRow label="Remote URL">
-              <input
-                type="text"
-                value={backupRemoteUrl}
-                onChange={(e) => setBackupRemoteUrl(e.target.value)}
-                placeholder="git@github.com:..."
-                className="w-32 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
-              />
+            {/* Enable/disable remote backup - controls push/pull operations */}
+            <SettingsRow label="Enable remote backup">
+              <Toggle checked={backupEnabled} onChange={setBackupEnabled} />
             </SettingsRow>
+            <p className="text-xs text-base-03">
+              Push changes to a remote git repository for off-site backup.
+            </p>
 
-            <SettingsRow label="Auth method">
-              <select
-                value={backupAuthMethod}
-                onChange={(e) => setBackupAuthMethod(e.target.value as 'ssh' | 'https' | 'none')}
-                className="bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
-              >
-                <option value="ssh">SSH</option>
-                <option value="https">HTTPS</option>
-                <option value="none">None</option>
-              </select>
-            </SettingsRow>
+            {/* Remote URL - read from git repo */}
+            <div className="space-y-1">
+              <SettingsRow label="Remote">
+                {loading ? (
+                  <span className="text-xs text-base-03">Loading...</span>
+                ) : editingRemote ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={remoteInput}
+                      onChange={(e) => setRemoteInput(e.target.value)}
+                      placeholder="git@github.com:..."
+                      className="w-28 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSaveRemote}
+                      className="px-1.5 py-0.5 text-xs text-base-06 bg-base-02 rounded hover:bg-base-03 transition-colors"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={() => {
+                        setEditingRemote(false)
+                        setRemoteInput(remoteUrl || '')
+                      }}
+                      className="px-1.5 py-0.5 text-xs text-base-04 hover:text-base-05 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setEditingRemote(true)}
+                    className="text-xs text-base-05 hover:text-base-06 transition-colors text-right max-w-[140px] truncate"
+                    title={remoteUrl || 'Not configured'}
+                  >
+                    {remoteUrl ? remoteUrl.replace(/^(git@|https:\/\/)/, '').replace(/\.git$/, '') : 'Not configured'}
+                  </button>
+                )}
+              </SettingsRow>
+              {error && <p className="text-xs text-base-08">{error}</p>}
+            </div>
 
-            <SettingsRow label="Interval">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min={5}
-                  max={1440}
-                  value={backupIntervalMinutes}
-                  onChange={(e) => setBackupIntervalMinutes(Number(e.target.value))}
-                  className="w-14 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
-                />
-                <span className="text-xs text-base-03">min</span>
-              </div>
-            </SettingsRow>
+            {/* Backup interval - shown when remote backup is enabled */}
+            <AnimatePresence>
+              {backupEnabled && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden space-y-3"
+                >
+                  <SettingsRow label="Interval">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={5}
+                        max={1440}
+                        value={backupIntervalMinutes}
+                        onChange={(e) => setBackupIntervalMinutes(Number(e.target.value))}
+                        className="w-14 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                      />
+                      <span className="text-xs text-base-03">min</span>
+                    </div>
+                  </SettingsRow>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
