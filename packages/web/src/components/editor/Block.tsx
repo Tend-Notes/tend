@@ -8,6 +8,7 @@ import { WikiLinkPopup } from './WikiLinkPopup'
 import { SmoothCaret } from './SmoothCaret'
 import { usePageStore } from '../../stores/pageStore'
 import { useSelectionStore } from '../../stores/selectionStore'
+import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
 
 interface BlockProps {
   block: Block
@@ -38,6 +39,19 @@ interface WikiLinkState {
 
 // Configuration for bracket hiding (will be moved to a settings store later)
 const HIDE_WIKI_LINK_BRACKETS = true
+
+// Build regex to match task status keywords at start of block
+function buildTaskStatusRegex(): RegExp {
+  // Collect all keywords from all status sets
+  const allKeywords = Object.values(TASK_STATUS_SETS).flatMap(statuses =>
+    statuses.map(s => s.keyword)
+  )
+  // Deduplicate
+  const uniqueKeywords = [...new Set(allKeywords)]
+  // Match at start of content, followed by whitespace or end
+  return new RegExp(`^(${uniqueKeywords.join('|')})(?:\\s|$)`)
+}
+
 
 // Helper to escape HTML special characters
 function escapeHtml(text: string): string {
@@ -110,6 +124,7 @@ export function BlockComponent({
   const editorRef = useRef<HTMLDivElement>(null)
   const lastContentRef = useRef(block.content)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
+  const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
 
   // Selection state
   const { setFocusedBlock, startSelection, extendSelection, extendSelectionInDirection, clearSelection, isInSelection, startDrag } = useSelectionStore()
@@ -146,18 +161,45 @@ export function BlockComponent({
     interface Span {
       start: number
       end: number
-      type: 'wiki-link' | 'format' | 'heading-marker'
+      type: 'wiki-link' | 'format' | 'heading-marker' | 'task-status'
       className: string
       innerText: string
       delimiter?: string
       pageName?: string
+      taskKeyword?: string
+      taskColor?: string
     }
 
     const spans: Span[] = []
 
-    // Check for heading marker at start (# , ## , etc.)
+    // Check for task status at start (TODO, DOING, DONE, etc.)
+    const taskStatusRegex = buildTaskStatusRegex()
+    const taskMatch = content.match(taskStatusRegex)
+    if (taskMatch) {
+      const keyword = taskMatch[1]
+      // Find the color for this keyword from any status set
+      let color = 'base-05' // default
+      for (const statuses of Object.values(TASK_STATUS_SETS)) {
+        const status = statuses.find(s => s.keyword === keyword)
+        if (status) {
+          color = status.color
+          break
+        }
+      }
+      spans.push({
+        start: 0,
+        end: keyword.length,
+        type: 'task-status',
+        className: `task-status task-status--${keyword.toLowerCase()}`,
+        innerText: keyword,
+        taskKeyword: keyword,
+        taskColor: color,
+      })
+    }
+
+    // Check for heading marker at start (# , ## , etc.) - but not if there's a task status
     const headingMatch = content.match(/^(#{1,4})\s/)
-    if (headingMatch) {
+    if (headingMatch && !taskMatch) {
       spans.push({
         start: 0,
         end: headingMatch[0].length,
@@ -223,7 +265,10 @@ export function BlockComponent({
         cursorRange.start >= span.start &&
         cursorRange.start <= span.end
 
-      if (span.type === 'wiki-link') {
+      if (span.type === 'task-status') {
+        // Task status marker - styled badge that's clickable to cycle
+        result += `<span class="${span.className}" data-task-keyword="${escapeHtml(span.taskKeyword!)}" style="color: var(--${span.taskColor}); cursor: pointer;">${escapeHtml(span.innerText)}</span>`
+      } else if (span.type === 'wiki-link') {
         if (HIDE_WIKI_LINK_BRACKETS && !cursorInside) {
           result += `<span class="${span.className}" data-page-name="${escapeHtml(span.pageName!)}" data-start="${span.start}" data-end="${span.end}">${escapeHtml(span.innerText)}</span>`
         } else {
@@ -302,6 +347,44 @@ export function BlockComponent({
     el.addEventListener('mousedown', handleMouseDown)
     return () => el.removeEventListener('mousedown', handleMouseDown)
   }, [navigateToPage])
+
+  // Handle task status clicks - cycle through statuses
+  useEffect(() => {
+    const el = editorRef.current
+    if (!el || readonly) return
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (target.dataset.taskKeyword) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        const currentKeyword = target.dataset.taskKeyword
+        // Find current position in task statuses array
+        const currentIndex = taskStatuses.findIndex(s => s.keyword === currentKeyword)
+
+        if (currentIndex !== -1) {
+          // Cycle to next status (wrap around)
+          const nextIndex = (currentIndex + 1) % taskStatuses.length
+          const nextKeyword = taskStatuses[nextIndex].keyword
+
+          // Replace the keyword in content
+          const newContent = block.content.replace(
+            new RegExp(`^${currentKeyword}(?=\\s|$)`),
+            nextKeyword
+          )
+
+          if (newContent !== block.content) {
+            lastContentRef.current = newContent
+            onChange(block.uuid, newContent)
+          }
+        }
+      }
+    }
+
+    el.addEventListener('click', handleClick)
+    return () => el.removeEventListener('click', handleClick)
+  }, [block.uuid, block.content, taskStatuses, onChange, readonly])
 
   // Track cursor position to show/hide delimiters (wiki-links and formatting)
   useEffect(() => {
@@ -1287,6 +1370,12 @@ export function BlockComponent({
   const headingLevel = getHeadingLevel(block.content)
   const headingClass = headingLevel > 0 ? `block-heading-${headingLevel}` : ''
 
+  // Check if block has a "completed" task status (DONE or NEVER)
+  const completedKeywords = ['DONE', 'NEVER']
+  const taskStatusRegex = buildTaskStatusRegex()
+  const taskMatch = block.content.match(taskStatusRegex)
+  const isTaskCompleted = taskMatch && completedKeywords.includes(taskMatch[1])
+
   return (
     <motion.div
       layout
@@ -1320,7 +1409,7 @@ export function BlockComponent({
             ref={editorRef}
             contentEditable={!readonly}
             suppressContentEditableWarning
-            className={`block-content outline-none min-h-[1.5em] whitespace-pre-wrap ${readonly ? 'cursor-default' : ''}`}
+            className={`block-content outline-none min-h-[1.5em] whitespace-pre-wrap ${readonly ? 'cursor-default' : ''} ${isTaskCompleted ? 'block-content--completed' : ''}`}
             onInput={readonly ? undefined : handleInput}
             onKeyDown={readonly ? undefined : handleKeyDown}
             onMouseDown={readonly ? undefined : handleEditorMouseDown}

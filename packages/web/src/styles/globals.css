@@ -316,7 +316,7 @@ code {
   text-decoration: underline;
 }
 
-/* Task markers */
+/* Task markers (legacy) */
 .task-marker {
   font-weight: 600;
   padding: 0 4px;
@@ -338,6 +338,33 @@ code {
   color: var(--color-done);
   background-color: color-mix(in srgb, var(--color-done) 15%, transparent);
   text-decoration: line-through;
+}
+
+/* Task status - inline status badges (TODO, DOING, DONE, NOW, LATER, NEVER) */
+.task-status {
+  font-weight: 600;
+  font-size: 0.85em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.task-status:hover {
+  opacity: 0.8;
+}
+
+/* Completed task block - strikethrough the whole content */
+.block-content--completed {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+/* Don't strikethrough the status badge itself */
+.block-content--completed .task-status {
+  text-decoration: none;
+  opacity: 1;
 }
 
 /* Bullet point */
