@@ -2,6 +2,7 @@
 // Main outliner editor component
 
 import { useCallback, useMemo, useEffect } from 'react'
+import { LayoutGroup } from 'framer-motion'
 import type { Page, Block } from '../../types'
 import { usePageStore } from '../../stores/pageStore'
 import { useSelectionStore } from '../../stores/selectionStore'
@@ -947,8 +948,10 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
   }
 
   return (
-    <div className="outliner-editor max-w-3xl">
-      {rootBlocks.map((block) => renderBlock(block))}
-    </div>
+    <LayoutGroup>
+      <div className="outliner-editor max-w-3xl">
+        {rootBlocks.map((block) => renderBlock(block))}
+      </div>
+    </LayoutGroup>
   )
 }

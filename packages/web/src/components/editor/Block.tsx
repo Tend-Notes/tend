@@ -2,6 +2,7 @@
 // Simple block component with plain contenteditable
 
 import { useRef, useEffect, ReactNode, KeyboardEvent, MouseEvent as ReactMouseEvent, useState, useCallback } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import type { Block } from '../../types'
 import { WikiLinkPopup } from './WikiLinkPopup'
 import { SmoothCaret } from './SmoothCaret'
@@ -1187,19 +1188,6 @@ export function BlockComponent({
     return null
   }
 
-  // Helper: get delimiter length for a span
-  function getSpanDelimiterLength(content: string, span: { start: number; end: number }): number {
-    const spanText = content.substring(span.start, span.end)
-    if (spanText.startsWith('[[') && spanText.endsWith(']]')) return 2
-    if (spanText.startsWith('***') && spanText.endsWith('***')) return 3
-    if (spanText.startsWith('**') && spanText.endsWith('**')) return 2
-    if (spanText.startsWith('*') && spanText.endsWith('*')) return 1
-    if (spanText.startsWith('~~') && spanText.endsWith('~~')) return 2
-    if (spanText.startsWith('__') && spanText.endsWith('__')) return 2
-    if (spanText.startsWith('==') && spanText.endsWith('==')) return 2
-    return 0
-  }
-
   const hasChildren = block.children.length > 0
 
   // Handle bullet right-click context menu
@@ -1298,7 +1286,16 @@ export function BlockComponent({
   const headingClass = headingLevel > 0 ? `block-heading-${headingLevel}` : ''
 
   return (
-    <div
+    <motion.div
+      layout
+      layoutId={block.uuid}
+      transition={{
+        layout: {
+          type: 'spring',
+          stiffness: 500,
+          damping: 40,
+        },
+      }}
       className={`block-container ${isSelected ? 'block-container--selected' : ''} ${headingClass}`}
       data-block-id={block.uuid}
       onMouseDown={handleBlockMouseDown}
@@ -1334,11 +1331,29 @@ export function BlockComponent({
       </div>
 
       {/* Children */}
-      {children && !block.collapsed && (
-        <div className="block-children ml-6 pl-3 border-l border-base-02">
-          {children}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {children && !block.collapsed && (
+          <motion.div
+            key="children"
+            layout
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="block-children ml-6 pl-3 border-l border-base-02 overflow-hidden"
+            transition={{
+              layout: {
+                type: 'spring',
+                stiffness: 500,
+                damping: 40,
+              },
+              opacity: { duration: 0.15 },
+              height: { duration: 0.2 },
+            }}
+          >
+            {children}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Wiki-link autocomplete popup */}
       {wikiLink.active && (
@@ -1364,7 +1379,7 @@ export function BlockComponent({
           </button>
         </div>
       )}
-    </div>
+    </motion.div>
   )
 }
 
