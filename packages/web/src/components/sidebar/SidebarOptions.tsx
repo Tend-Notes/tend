@@ -210,7 +210,6 @@ function AppearanceSection() {
             <ThemePicker
               variant="light"
               currentThemeName={lightThemeName}
-              activeVariant={effectiveVariant}
               activeTheme={activeTheme}
               onSelect={(name) => {
                 setLightThemeName(name)
@@ -255,7 +254,6 @@ function AppearanceSection() {
             <ThemePicker
               variant="dark"
               currentThemeName={darkThemeName}
-              activeVariant={effectiveVariant}
               activeTheme={activeTheme}
               onSelect={(name) => {
                 setDarkThemeName(name)
@@ -376,15 +374,13 @@ function ThemeSwatch({ theme, size = 'md' }: { theme: Base16Theme | undefined; s
 function ThemePicker({
   variant,
   currentThemeName,
-  activeVariant,
   activeTheme,
   onSelect,
   onCustom,
 }: {
   variant: 'light' | 'dark'
   currentThemeName: string
-  activeVariant: 'light' | 'dark' // The currently active theme variant
-  activeTheme: Base16Theme | undefined // The currently applied theme
+  activeTheme: Base16Theme | undefined // The currently applied theme (to restore on mouse leave)
   onSelect: (name: string) => void
   onCustom: () => void
 }) {
@@ -396,28 +392,25 @@ function ThemePicker({
 
   const themes = variant === 'light' ? getLightThemes() : getDarkThemes()
   const loading = isLoadingThemes()
-  // Only enable live preview if browsing themes for the currently active variant
-  const enableLivePreview = variant === activeVariant
-
+  // Always preview themes on hover, regardless of which variant is active
   const handlePreview = useCallback((theme: Base16Theme) => {
-    if (enableLivePreview) {
-      applyTheme(theme)
-    }
-  }, [enableLivePreview])
+    applyTheme(theme)
+  }, [])
 
   const handleMouseLeave = useCallback(() => {
-    if (enableLivePreview && activeTheme) {
+    if (activeTheme) {
       applyTheme(activeTheme)
     }
-  }, [enableLivePreview, activeTheme])
+  }, [activeTheme])
 
   const handleSelect = useCallback((theme: Base16Theme) => {
-    // Only apply the theme immediately if it's for the active variant
-    if (enableLivePreview) {
-      applyTheme(theme)
+    // Revert to active theme when selection is made
+    // (the selected theme will be applied through the settings store)
+    if (activeTheme) {
+      applyTheme(activeTheme)
     }
     onSelect(theme.name)
-  }, [onSelect, enableLivePreview])
+  }, [onSelect, activeTheme])
 
   return (
     <motion.div
