@@ -355,16 +355,14 @@ code {
   opacity: 0.8;
 }
 
-/* Completed task block - strikethrough the whole content */
+/* Completed task block - dim the entire block */
 .block-content--completed {
-  text-decoration: line-through;
   opacity: 0.6;
 }
 
-/* Don't strikethrough the status badge itself */
-.block-content--completed .task-status {
-  text-decoration: none;
-  opacity: 1;
+/* Content after a completed task status gets struck through */
+.task-content-struck {
+  text-decoration: line-through;
 }
 
 /* Bullet point */

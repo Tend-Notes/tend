@@ -252,13 +252,25 @@ export function BlockComponent({
     // Sort spans by start position
     spans.sort((a, b) => a.start - b.start)
 
+    // Check if this is a completed task (DONE or NEVER at start)
+    const completedKeywords = ['DONE', 'NEVER']
+    const isCompletedTask = taskMatch && completedKeywords.includes(taskMatch[1])
+
     // Build result
     let result = ''
     let lastIndex = 0
+    let afterTaskStatus = false
 
     for (const span of spans) {
       // Add text before this span
-      result += escapeHtml(content.slice(lastIndex, span.start))
+      const textBefore = escapeHtml(content.slice(lastIndex, span.start))
+      if (textBefore) {
+        if (afterTaskStatus && isCompletedTask) {
+          result += `<span class="task-content-struck">${textBefore}</span>`
+        } else {
+          result += textBefore
+        }
+      }
 
       // Check if cursor is inside this span
       const cursorInside = cursorRange &&
@@ -268,12 +280,19 @@ export function BlockComponent({
       if (span.type === 'task-status') {
         // Task status marker - styled badge that's clickable to cycle
         result += `<span class="${span.className}" data-task-keyword="${escapeHtml(span.taskKeyword!)}" style="color: var(--${span.taskColor}); cursor: pointer;">${escapeHtml(span.innerText)}</span>`
+        afterTaskStatus = true
       } else if (span.type === 'wiki-link') {
+        let linkHtml: string
         if (HIDE_WIKI_LINK_BRACKETS && !cursorInside) {
-          result += `<span class="${span.className}" data-page-name="${escapeHtml(span.pageName!)}" data-start="${span.start}" data-end="${span.end}">${escapeHtml(span.innerText)}</span>`
+          linkHtml = `<span class="${span.className}" data-page-name="${escapeHtml(span.pageName!)}" data-start="${span.start}" data-end="${span.end}">${escapeHtml(span.innerText)}</span>`
         } else {
           const focusClass = cursorInside ? ' wiki-link--focused' : ''
-          result += `<span class="${span.className}${focusClass}" data-page-name="${escapeHtml(span.pageName!)}" data-start="${span.start}" data-end="${span.end}">[[${escapeHtml(span.innerText)}]]</span>`
+          linkHtml = `<span class="${span.className}${focusClass}" data-page-name="${escapeHtml(span.pageName!)}" data-start="${span.start}" data-end="${span.end}">[[${escapeHtml(span.innerText)}]]</span>`
+        }
+        if (afterTaskStatus && isCompletedTask) {
+          result += `<span class="task-content-struck">${linkHtml}</span>`
+        } else {
+          result += linkHtml
         }
       } else if (span.type === 'heading-marker') {
         // Heading marker - always shown with subtle styling
@@ -281,12 +300,18 @@ export function BlockComponent({
       } else {
         // Format span
         const delim = span.delimiter!
+        let formatHtml: string
         if (cursorInside) {
           // Show delimiters when cursor is inside
-          result += `<span class="${span.className} fmt--focused">${escapeHtml(delim)}${escapeHtml(span.innerText)}${escapeHtml(delim)}</span>`
+          formatHtml = `<span class="${span.className} fmt--focused">${escapeHtml(delim)}${escapeHtml(span.innerText)}${escapeHtml(delim)}</span>`
         } else {
           // Hide delimiters
-          result += `<span class="${span.className}">${escapeHtml(span.innerText)}</span>`
+          formatHtml = `<span class="${span.className}">${escapeHtml(span.innerText)}</span>`
+        }
+        if (afterTaskStatus && isCompletedTask) {
+          result += `<span class="task-content-struck">${formatHtml}</span>`
+        } else {
+          result += formatHtml
         }
       }
 
@@ -294,7 +319,14 @@ export function BlockComponent({
     }
 
     // Add remaining text after last span
-    result += escapeHtml(content.slice(lastIndex))
+    const remainingText = escapeHtml(content.slice(lastIndex))
+    if (remainingText) {
+      if (afterTaskStatus && isCompletedTask) {
+        result += `<span class="task-content-struck">${remainingText}</span>`
+      } else {
+        result += remainingText
+      }
+    }
 
     return result
   }, [])
@@ -377,6 +409,9 @@ export function BlockComponent({
           if (newContent !== block.content) {
             lastContentRef.current = newContent
             onChange(block.uuid, newContent)
+
+            // Immediately re-render with new content (don't wait for React cycle)
+            el.innerHTML = renderContent(newContent, null)
           }
         }
       }
@@ -384,7 +419,7 @@ export function BlockComponent({
 
     el.addEventListener('click', handleClick)
     return () => el.removeEventListener('click', handleClick)
-  }, [block.uuid, block.content, taskStatuses, onChange, readonly])
+  }, [block.uuid, block.content, taskStatuses, onChange, readonly, renderContent])
 
   // Track cursor position to show/hide delimiters (wiki-links and formatting)
   useEffect(() => {
