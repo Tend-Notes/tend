@@ -31,7 +31,8 @@ pub async fn search(
         return Ok(Json(Vec::new()));
     }
 
-    let index = state.search_index.read().await;
+    let garden = state.garden.read().await;
+    let index = garden.search_index.read().await;
     let results = index.search(&query.q, query.limit)?;
 
     Ok(Json(results))

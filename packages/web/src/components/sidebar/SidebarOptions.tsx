@@ -812,39 +812,38 @@ function ContentTypeRow({
   )
 }
 
-// Graph section
+// Graph section - manages multiple gardens
 function GraphSection() {
   const { currentGraphId, setCurrentGraphId } = useSettingsStore()
 
-  // Placeholder graphs - in the future this would come from the server
+  // TODO: Fetch from /api/v1/gardens when backend is connected
   const graphs = [
-    { id: 'default', name: 'Default Garden', path: '~/notes' },
+    { id: 'default', name: 'Notes' },
   ]
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-base-03">
-        Select which graph (note collection) to work with.
+        Select which garden to work with.
       </p>
       {graphs.map((graph) => (
         <button
           key={graph.id}
           onClick={() => setCurrentGraphId(graph.id)}
-          className={`w-full flex items-center justify-between px-2 py-1.5 text-left rounded border transition-colors ${
+          className={`w-full px-2 py-1.5 text-left rounded border transition-colors ${
             currentGraphId === graph.id
               ? 'border-base-0D bg-base-01'
               : 'border-base-02 hover:border-base-03'
           }`}
         >
           <span className="text-xs text-base-05">{graph.name}</span>
-          <span className="text-xs text-base-03">{graph.path}</span>
         </button>
       ))}
       <button
         className="w-full py-1.5 text-xs text-base-04 hover:text-base-05 border border-dashed border-base-02 rounded transition-colors"
-        title="Create new graph (coming soon)"
+        title="Create new garden (coming soon)"
       >
-        + New graph
+        + New garden
       </button>
     </div>
   )

@@ -61,10 +61,16 @@ export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
         return
       }
 
-      // File is in version history. Check if we're ahead of remote (not yet backed up)
-      if (gitStatus.ahead && gitStatus.ahead > 0) {
+      // File is in version history. Check if we're synced with remote.
+      // "backed up" requires: a remote exists AND we're not ahead of it
+      if (!gitStatus.remote) {
+        // No remote configured - best we can say is "stored" (in local version history)
+        set({ status: 'stored', isChecking: false, lastCheck: Date.now() })
+      } else if (gitStatus.ahead && gitStatus.ahead > 0) {
+        // Have remote but ahead of it - stored but not yet backed up
         set({ status: 'stored', isChecking: false, lastCheck: Date.now() })
       } else {
+        // Have remote and not ahead - fully backed up
         set({ status: 'backed up', isChecking: false, lastCheck: Date.now() })
       }
     } catch (err) {

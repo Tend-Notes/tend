@@ -194,15 +194,65 @@ impl BackupManager {
             }
         });
 
+        // Calculate ahead/behind if we have a remote and upstream tracking
+        let (ahead, behind) = if remote.is_some() {
+            self.get_ahead_behind(&branch).unwrap_or((0, 0))
+        } else {
+            (0, 0)
+        };
+
         Ok(GitStatus {
             is_repo: true,
             has_changes,
             branch,
             remote,
-            ahead: 0, // TODO: Calculate ahead/behind
-            behind: 0,
+            ahead,
+            behind,
             changed_files,
         })
+    }
+
+    /// Get ahead/behind counts relative to the upstream tracking branch
+    fn get_ahead_behind(&self, branch: &Option<String>) -> Option<(u32, u32)> {
+        let branch_name = branch.as_ref()?;
+
+        // Get the upstream tracking branch
+        let upstream_output = Command::new("git")
+            .args(["rev-parse", "--abbrev-ref", &format!("{}@{{upstream}}", branch_name)])
+            .current_dir(&self.repo_path)
+            .output()
+            .ok()?;
+
+        if !upstream_output.status.success() {
+            // No upstream configured
+            return None;
+        }
+
+        // Get ahead/behind counts using rev-list
+        let output = Command::new("git")
+            .args([
+                "rev-list",
+                "--left-right",
+                "--count",
+                &format!("{}...{}@{{upstream}}", branch_name, branch_name),
+            ])
+            .current_dir(&self.repo_path)
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        let counts = String::from_utf8_lossy(&output.stdout);
+        let parts: Vec<&str> = counts.trim().split('\t').collect();
+        if parts.len() == 2 {
+            let ahead = parts[0].parse().unwrap_or(0);
+            let behind = parts[1].parse().unwrap_or(0);
+            Some((ahead, behind))
+        } else {
+            None
+        }
     }
 
     /// Parse git status --porcelain output into ChangedFile list

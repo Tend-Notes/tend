@@ -39,12 +39,14 @@ pub struct Graph {
 pub async fn get_graph(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Graph>, AppError> {
+    let garden = state.garden.read().await;
+
     let mut nodes = Vec::new();
     let mut edges_map: HashMap<(String, String), usize> = HashMap::new();
     let mut existing_pages: HashSet<String> = HashSet::new();
 
     // Collect all pages
-    let pages = state.file_manager.list_pages().await?;
+    let pages = garden.file_manager.list_pages().await?;
     for page_meta in &pages {
         existing_pages.insert(page_meta.name.clone());
         nodes.push(GraphNode {
@@ -56,7 +58,7 @@ pub async fn get_graph(
     }
 
     // Collect all journals
-    let journals = state.file_manager.list_journals().await?;
+    let journals = garden.file_manager.list_journals().await?;
     for journal_meta in &journals {
         existing_pages.insert(journal_meta.name.clone());
         nodes.push(GraphNode {
@@ -69,7 +71,7 @@ pub async fn get_graph(
 
     // Build edges from wiki-links
     for page_meta in &pages {
-        if let Ok(page) = state.file_manager.read_page(&page_meta.name).await {
+        if let Ok(page) = garden.file_manager.read_page(&page_meta.name).await {
             let links = page.all_wiki_links();
             for link in links {
                 // Only create edge if target exists
@@ -84,7 +86,7 @@ pub async fn get_graph(
     // Also check journals for links
     for journal_meta in &journals {
         if let Some(date) = journal_meta.journal_date {
-            if let Ok(page) = state.file_manager.read_journal(date).await {
+            if let Ok(page) = garden.file_manager.read_journal(date).await {
                 let links = page.all_wiki_links();
                 for link in links {
                     if existing_pages.contains(&link) {

@@ -42,7 +42,8 @@ pub struct DiffQuery {
 
 /// Get git status
 pub async fn status(State(state): State<Arc<AppState>>) -> Result<Json<GitStatus>, AppError> {
-    let status = state.backup_manager.status()?;
+    let garden = state.garden.read().await;
+    let status = garden.backup_manager.status()?;
     Ok(Json(status))
 }
 
@@ -50,10 +51,12 @@ pub async fn status(State(state): State<Arc<AppState>>) -> Result<Json<GitStatus
 pub async fn backup(State(state): State<Arc<AppState>>) -> Result<Json<BackupResult>, AppError> {
     state.broadcast(WsEvent::BackupStarted);
 
-    // Acquire exclusive lock on file manager
-    let _lock = state.file_manager.acquire_exclusive_lock().await;
+    let garden = state.garden.read().await;
 
-    match state.backup_manager.backup() {
+    // Acquire exclusive lock on file manager
+    let _lock = garden.file_manager.acquire_exclusive_lock().await;
+
+    match garden.backup_manager.backup() {
         Ok(result) => {
             state.broadcast(WsEvent::BackupCompleted {
                 commit_sha: result.commit_sha.clone(),
@@ -77,10 +80,12 @@ pub async fn commit(
 ) -> Result<Json<BackupResult>, AppError> {
     state.broadcast(WsEvent::BackupStarted);
 
-    // Acquire exclusive lock on file manager
-    let _lock = state.file_manager.acquire_exclusive_lock().await;
+    let garden = state.garden.read().await;
 
-    match state.backup_manager.commit(request.message.as_deref()) {
+    // Acquire exclusive lock on file manager
+    let _lock = garden.file_manager.acquire_exclusive_lock().await;
+
+    match garden.backup_manager.commit(request.message.as_deref()) {
         Ok(result) => {
             state.broadcast(WsEvent::BackupCompleted {
                 commit_sha: result.commit_sha.clone(),
@@ -102,7 +107,8 @@ pub async fn history(
     State(state): State<Arc<AppState>>,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<Vec<CommitInfo>>, AppError> {
-    let commits = state.backup_manager.history(query.limit, query.path.as_deref())?;
+    let garden = state.garden.read().await;
+    let commits = garden.backup_manager.history(query.limit, query.path.as_deref())?;
     Ok(Json(commits))
 }
 
@@ -112,7 +118,8 @@ pub async fn diff(
     Path(commit_sha): Path<String>,
     Query(query): Query<DiffQuery>,
 ) -> Result<Json<CommitDiff>, AppError> {
-    let diff = state.backup_manager.diff(&commit_sha, query.path.as_deref())?;
+    let garden = state.garden.read().await;
+    let diff = garden.backup_manager.diff(&commit_sha, query.path.as_deref())?;
     Ok(Json(diff))
 }
 
@@ -121,10 +128,12 @@ pub async fn restore(
     State(state): State<Arc<AppState>>,
     Json(request): Json<RestoreRequest>,
 ) -> Result<Json<BackupResult>, AppError> {
-    // Acquire exclusive lock on file manager
-    let _lock = state.file_manager.acquire_exclusive_lock().await;
+    let garden = state.garden.read().await;
 
-    state.backup_manager.restore(&request.commit, request.path.as_deref())?;
+    // Acquire exclusive lock on file manager
+    let _lock = garden.file_manager.acquire_exclusive_lock().await;
+
+    garden.backup_manager.restore(&request.commit, request.path.as_deref())?;
 
     // Return success result
     let message = if request.path.is_some() {
@@ -144,7 +153,9 @@ pub async fn restore(
 pub async fn push(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>, AppError> {
     state.broadcast(WsEvent::PushStarted);
 
-    match state.backup_manager.push() {
+    let garden = state.garden.read().await;
+
+    match garden.backup_manager.push() {
         Ok(result) => {
             state.broadcast(WsEvent::PushCompleted {
                 message: result.message.clone(),
@@ -162,9 +173,11 @@ pub async fn push(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>
 
 /// Pull from remote repository
 pub async fn pull(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>, AppError> {
-    // Acquire exclusive lock since pull modifies files
-    let _lock = state.file_manager.acquire_exclusive_lock().await;
+    let garden = state.garden.read().await;
 
-    let result = state.backup_manager.pull()?;
+    // Acquire exclusive lock since pull modifies files
+    let _lock = garden.file_manager.acquire_exclusive_lock().await;
+
+    let result = garden.backup_manager.pull()?;
     Ok(Json(result))
 }

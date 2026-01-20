@@ -13,6 +13,7 @@ mod journals;
 mod search;
 mod git;
 mod graph;
+mod gardens;
 
 /// Build the API router
 pub fn api_router() -> Router<Arc<AppState>> {
@@ -42,6 +43,13 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/git/restore", post(git::restore))
         .route("/git/push", post(git::push))
         .route("/git/pull", post(git::pull))
+        // Gardens
+        .route("/gardens", get(gardens::list_gardens))
+        .route("/gardens", post(gardens::create_garden))
+        .route("/gardens/{id}", delete(gardens::delete_garden))
+        .route("/gardens/{id}/restore", post(gardens::restore_garden))
+        .route("/gardens/{id}/permanent", delete(gardens::delete_archived_garden))
+        .route("/gardens/switch", post(gardens::switch_garden))
         // Health check
         .route("/health", get(health))
 }

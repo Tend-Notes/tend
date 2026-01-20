@@ -16,7 +16,8 @@ use crate::state::AppState;
 pub async fn list_pages(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<PageMeta>>, AppError> {
-    let pages = state.file_manager.list_pages().await?;
+    let garden = state.garden.read().await;
+    let pages = garden.file_manager.list_pages().await?;
     Ok(Json(pages))
 }
 
@@ -32,8 +33,10 @@ pub async fn create_page(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
+    let garden = state.garden.read().await;
+
     // Check if page already exists
-    if state.file_manager.page_exists(&req.name).await {
+    if garden.file_manager.page_exists(&req.name).await {
         return Err(AppError::BadRequest(format!(
             "Page '{}' already exists",
             req.name
@@ -47,11 +50,11 @@ pub async fn create_page(
     let block = Block::new(req.content.unwrap_or_default());
     page.add_block(block);
 
-    state.file_manager.write_page(&page).await?;
+    garden.file_manager.write_page(&page).await?;
 
     // Index the new page
     {
-        let mut index = state.search_index.write().await;
+        let mut index = garden.search_index.write().await;
         index.index_page(&page)?;
         index.commit()?;
     }
@@ -65,7 +68,8 @@ pub async fn get_page(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<Page>, AppError> {
-    let page = state.file_manager.read_page(&name).await?;
+    let garden = state.garden.read().await;
+    let page = garden.file_manager.read_page(&name).await?;
     Ok(Json(page))
 }
 
@@ -96,8 +100,10 @@ pub async fn update_page(
     Path(name): Path<String>,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
+    let garden = state.garden.read().await;
+
     // Read existing page or create new
-    let mut page = state
+    let mut page = garden
         .file_manager
         .read_page(&name)
         .await
@@ -149,11 +155,11 @@ pub async fn update_page(
     // Increment version and update timestamp
     page.version += 1;
     page.touch();
-    state.file_manager.write_page(&page).await?;
+    garden.file_manager.write_page(&page).await?;
 
     // Update search index
     {
-        let mut index = state.search_index.write().await;
+        let mut index = garden.search_index.write().await;
         index.index_page(&page)?;
         index.commit()?;
     }
@@ -167,11 +173,12 @@ pub async fn delete_page(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    state.file_manager.delete_page(&name).await?;
+    let garden = state.garden.read().await;
+    garden.file_manager.delete_page(&name).await?;
 
     // Remove from search index
     {
-        let mut index = state.search_index.write().await;
+        let mut index = garden.search_index.write().await;
         index.remove_page(&name)?;
         index.commit()?;
     }
@@ -197,6 +204,7 @@ pub async fn get_backlinks(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<BacklinkRef>>, AppError> {
+    let garden = state.garden.read().await;
     let mut backlinks = Vec::new();
 
     // Search for pages that link to this page
@@ -204,13 +212,13 @@ pub async fn get_backlinks(
 
     // Scan all pages for links
     // TODO: This is inefficient - we should maintain a link index
-    let pages = state.file_manager.list_pages().await?;
+    let pages = garden.file_manager.list_pages().await?;
     for page_meta in pages {
         if page_meta.name == name {
             continue;
         }
 
-        if let Ok(page) = state.file_manager.read_page(&page_meta.name).await {
+        if let Ok(page) = garden.file_manager.read_page(&page_meta.name).await {
             for block in page.blocks.values() {
                 if block.content.contains(&search_term) {
                     backlinks.push(BacklinkRef {
@@ -227,10 +235,10 @@ pub async fn get_backlinks(
     }
 
     // Also check journals
-    let journals = state.file_manager.list_journals().await?;
+    let journals = garden.file_manager.list_journals().await?;
     for journal_meta in journals {
         if let Some(date) = journal_meta.journal_date {
-            if let Ok(page) = state.file_manager.read_journal(date).await {
+            if let Ok(page) = garden.file_manager.read_journal(date).await {
                 for block in page.blocks.values() {
                     if block.content.contains(&search_term) {
                         backlinks.push(BacklinkRef {

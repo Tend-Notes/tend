@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { SidebarHistory } from './SidebarHistory'
 import { SidebarOptions } from './SidebarOptions'
 
 export type SidebarMode = 'navigation' | 'history' | 'graph' | 'options'
+
+// Resize constraints
+const MIN_WIDTH = 279
+const getMaxWidth = () => (typeof window !== 'undefined' ? window.innerWidth * 0.4 : 500)
 
 interface SidebarProps {
   mode: SidebarMode
@@ -14,7 +19,48 @@ interface SidebarProps {
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const { pages, journals, currentPageName, navigateToPage, navigateToJournal, loadTodaysJournal } =
     usePageStore()
-  const { sidebarOpen, sidebarWidth, toggleSidebar } = useUIStore()
+  const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
+
+  // Visual width during drag (can exceed bounds for bounceback effect)
+  const [visualWidth, setVisualWidth] = useState(sidebarWidth)
+  const [isResizing, setIsResizing] = useState(false)
+
+  // Sync visual width with store when not resizing
+  useEffect(() => {
+    if (!isResizing) {
+      setVisualWidth(sidebarWidth)
+    }
+  }, [sidebarWidth, isResizing])
+
+  // Handle resize with elastic overextension
+  const handleResize = useCallback((deltaX: number) => {
+    setIsResizing(true)
+    setVisualWidth((prev) => {
+      const newWidth = prev + deltaX
+      const maxWidth = getMaxWidth()
+
+      // Allow overextension with resistance (rubber band effect)
+      if (newWidth < MIN_WIDTH) {
+        // Resistance when pulling smaller than min
+        const overextension = MIN_WIDTH - newWidth
+        return MIN_WIDTH - overextension * 0.3
+      } else if (newWidth > maxWidth) {
+        // Resistance when pushing larger than max
+        const overextension = newWidth - maxWidth
+        return maxWidth + overextension * 0.3
+      }
+
+      return newWidth
+    })
+  }, [])
+
+  // Snap back to valid range on release
+  const handleResizeEnd = useCallback(() => {
+    const maxWidth = getMaxWidth()
+    const clampedWidth = Math.max(MIN_WIDTH, Math.min(maxWidth, visualWidth))
+    setSidebarWidth(clampedWidth)
+    setIsResizing(false)
+  }, [visualWidth, setSidebarWidth])
 
   // Get current page info for history
   const currentPage = pages.find(p => p.name === currentPageName)
@@ -141,13 +187,19 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
     }
   }
 
-  // Width animates between collapsed (32px) and expanded
-  const currentWidth = sidebarOpen ? sidebarWidth : 32
+  // Width: use visualWidth during resize (for bounceback), otherwise sidebarWidth
+  const displayWidth = isResizing ? visualWidth : sidebarWidth
+  const currentWidth = sidebarOpen ? displayWidth : 32
 
   return (
     <aside
-      className="sidebar flex flex-col overflow-hidden"
-      style={{ width: currentWidth, backgroundColor: 'var(--sidebar-bg)' }}
+      className="sidebar relative flex flex-col overflow-hidden"
+      style={{
+        width: currentWidth,
+        backgroundColor: 'var(--sidebar-bg)',
+        // Smooth spring animation when snapping back from overextension
+        transition: isResizing ? 'none' : 'width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)',
+      }}
     >
       {/* Collapsed state: just show toggle button */}
       {!sidebarOpen ? (
@@ -225,9 +277,78 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
               </svg>
             </button>
           </div>
+
+          {/* Resize handle on right edge */}
+          <ResizeHandle onResize={handleResize} onResizeEnd={handleResizeEnd} />
         </>
       )}
     </aside>
+  )
+}
+
+// Resize handle component with drag pill
+function ResizeHandle({
+  onResize,
+  onResizeEnd,
+}: {
+  onResize: (deltaX: number) => void
+  onResizeEnd: () => void
+}) {
+  const [isDragging, setIsDragging] = useState(false)
+  const [isHovered, setIsHovered] = useState(false)
+  const startXRef = useRef(0)
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+    startXRef.current = e.clientX
+  }, [])
+
+  useEffect(() => {
+    if (!isDragging) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - startXRef.current
+      startXRef.current = e.clientX
+      onResize(deltaX)
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+      onResizeEnd()
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+
+    // Change cursor globally while dragging
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isDragging, onResize, onResizeEnd])
+
+  return (
+    <div
+      className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center group"
+      onMouseDown={handleMouseDown}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      {/* Drag pill - always visible but subtle, more prominent on hover/drag */}
+      <div
+        className={`
+          w-1 h-12 rounded-full
+          transition-all duration-150 ease-out
+          ${isDragging ? 'bg-base-05 scale-y-110' : isHovered ? 'bg-base-04' : 'bg-base-02'}
+        `}
+      />
+    </div>
   )
 }
 
