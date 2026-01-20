@@ -30,6 +30,8 @@ pub struct CommitRequest {
 pub struct RestoreRequest {
     /// The commit SHA to restore to
     pub commit: String,
+    /// Optional file path to restore (e.g., "pages/foo.md"). If omitted, restores all files.
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,7 +116,7 @@ pub async fn diff(
     Ok(Json(diff))
 }
 
-/// Restore to a specific commit
+/// Restore to a specific commit, optionally for a single file
 pub async fn restore(
     State(state): State<Arc<AppState>>,
     Json(request): Json<RestoreRequest>,
@@ -122,13 +124,18 @@ pub async fn restore(
     // Acquire exclusive lock on file manager
     let _lock = state.file_manager.acquire_exclusive_lock().await;
 
-    state.backup_manager.restore(&request.commit)?;
+    state.backup_manager.restore(&request.commit, request.path.as_deref())?;
 
     // Return success result
+    let message = if request.path.is_some() {
+        "File restored successfully".to_string()
+    } else {
+        "Restored successfully".to_string()
+    };
     Ok(Json(BackupResult {
         success: true,
         commit_sha: Some(request.commit),
-        message: "Restored successfully".to_string(),
+        message,
         timestamp: chrono::Utc::now(),
     }))
 }

@@ -79,12 +79,14 @@ export function SidebarHistory({ onBack, pageName, isJournal }: SidebarHistoryPr
   }
 
   const handleRestore = async (sha: string) => {
-    if (!confirm(`Restore to commit ${sha.slice(0, 7)}? Your current changes will be saved first.`)) {
+    const target = filePath ? `this page to commit ${sha.slice(0, 7)}` : `all files to commit ${sha.slice(0, 7)}`
+    if (!confirm(`Restore ${target}? Your current changes will be saved first.`)) {
       return
     }
 
     try {
-      await api.git.restore(sha)
+      // Pass the file path to restore only the current page
+      await api.git.restore(sha, filePath)
       window.location.reload()
     } catch (err) {
       console.error('Failed to restore:', err)

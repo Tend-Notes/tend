@@ -134,10 +134,10 @@ export const git = {
     return fetchJson<CommitDiff>(`${API_BASE}/git/diff/${encodeURIComponent(commitSha)}${params}`)
   },
 
-  restore: (commitSha: string) =>
+  restore: (commitSha: string, path?: string) =>
     fetchJson<BackupResult>(`${API_BASE}/git/restore`, {
       method: 'POST',
-      body: JSON.stringify({ commit: commitSha }),
+      body: JSON.stringify({ commit: commitSha, path }),
     }),
 
   push: () =>

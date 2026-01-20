@@ -590,13 +590,19 @@ impl BackupManager {
         })
     }
 
-    /// Restore to a specific commit (checkout the files, don't reset history)
-    pub fn restore(&self, commit_sha: &str) -> Result<(), GitError> {
+    /// Restore to a specific commit, optionally for a single file only
+    /// If file_path is provided, only that file is restored; otherwise all files are restored.
+    pub fn restore(&self, commit_sha: &str, file_path: Option<&str>) -> Result<(), GitError> {
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
 
-        info!("Restoring to commit: {}", commit_sha);
+        let target_desc = if let Some(path) = file_path {
+            format!("{} from {}", path, &commit_sha[..7])
+        } else {
+            format!("all files to {}", &commit_sha[..7])
+        };
+        info!("Restoring {}", target_desc);
 
         // First, commit any current changes so we don't lose them
         let status = self.status()?;
@@ -604,9 +610,16 @@ impl BackupManager {
             self.commit(Some(&format!("Auto-save before restore to {}", &commit_sha[..7])))?;
         }
 
-        // Checkout the files from that commit (but don't change HEAD)
+        // Checkout the file(s) from that commit (but don't change HEAD)
+        let mut args = vec!["checkout", commit_sha, "--"];
+        if let Some(path) = file_path {
+            args.push(path);
+        } else {
+            args.push(".");
+        }
+
         let output = Command::new("git")
-            .args(["checkout", commit_sha, "--", "."])
+            .args(&args)
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -617,7 +630,12 @@ impl BackupManager {
         }
 
         // Auto-commit the restore
-        self.commit(Some(&format!("Restored to {}", &commit_sha[..7])))?;
+        let commit_msg = if let Some(path) = file_path {
+            format!("Restored {} to {}", path, &commit_sha[..7])
+        } else {
+            format!("Restored to {}", &commit_sha[..7])
+        };
+        self.commit(Some(&commit_msg))?;
 
         info!("Restore completed");
         Ok(())
