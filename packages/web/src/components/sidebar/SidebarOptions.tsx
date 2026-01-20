@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Sidebar options view - settings and configuration
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, ThemeMode, FontSizePreset, ContentType } from '../../stores/settingsStore'
 import {
@@ -10,6 +10,9 @@ import {
   findTheme,
   applyTheme,
   parseBase16Yaml,
+  getSystemThemePreference,
+  subscribeToThemes,
+  isLoadingThemes,
   type Base16Theme,
 } from '../../lib/themes'
 
@@ -159,9 +162,16 @@ function AppearanceSection() {
     }
   }
 
+  // Determine the effective theme variant (respecting system preference)
+  const effectiveVariant: 'light' | 'dark' =
+    themeMode === 'system' ? getSystemThemePreference() : themeMode
+
   // Get the current theme for each variant
   const currentLightTheme = customLightTheme?.parsed ?? findTheme(lightThemeName)
   const currentDarkTheme = customDarkTheme?.parsed ?? findTheme(darkThemeName)
+
+  // The currently active theme (what's actually applied)
+  const activeTheme = effectiveVariant === 'light' ? currentLightTheme : currentDarkTheme
 
   return (
     <div className="space-y-3">
@@ -200,6 +210,8 @@ function AppearanceSection() {
             <ThemePicker
               variant="light"
               currentThemeName={lightThemeName}
+              activeVariant={effectiveVariant}
+              activeTheme={activeTheme}
               onSelect={(name) => {
                 setLightThemeName(name)
                 setCustomLightTheme(null)
@@ -243,6 +255,8 @@ function AppearanceSection() {
             <ThemePicker
               variant="dark"
               currentThemeName={darkThemeName}
+              activeVariant={effectiveVariant}
+              activeTheme={activeTheme}
               onSelect={(name) => {
                 setDarkThemeName(name)
                 setCustomDarkTheme(null)
@@ -323,6 +337,16 @@ function AppearanceSection() {
                   className="w-14 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
                 />
                 <span className="text-xs text-base-03">px</span>
+                <button
+                  onClick={() => {
+                    setFontSizePreset('medium')
+                    setShowCustomFontSize(false)
+                  }}
+                  className="text-xs text-base-04 hover:text-base-05 transition-colors"
+                  title="Reset to medium"
+                >
+                  ×
+                </button>
               </div>
             </SettingsRow>
           </motion.div>
@@ -352,32 +376,48 @@ function ThemeSwatch({ theme, size = 'md' }: { theme: Base16Theme | undefined; s
 function ThemePicker({
   variant,
   currentThemeName,
+  activeVariant,
+  activeTheme,
   onSelect,
   onCustom,
 }: {
   variant: 'light' | 'dark'
   currentThemeName: string
+  activeVariant: 'light' | 'dark' // The currently active theme variant
+  activeTheme: Base16Theme | undefined // The currently applied theme
   onSelect: (name: string) => void
   onCustom: () => void
 }) {
+  // Subscribe to theme updates (for when themes finish loading from tinted-theming)
+  const [, forceUpdate] = useState({})
+  useEffect(() => {
+    return subscribeToThemes(() => forceUpdate({}))
+  }, [])
+
   const themes = variant === 'light' ? getLightThemes() : getDarkThemes()
-  const originalThemeRef = useRef(findTheme(currentThemeName))
+  const loading = isLoadingThemes()
+  // Only enable live preview if browsing themes for the currently active variant
+  const enableLivePreview = variant === activeVariant
 
   const handlePreview = useCallback((theme: Base16Theme) => {
-    applyTheme(theme)
-  }, [])
+    if (enableLivePreview) {
+      applyTheme(theme)
+    }
+  }, [enableLivePreview])
 
   const handleMouseLeave = useCallback(() => {
-    if (originalThemeRef.current) {
-      applyTheme(originalThemeRef.current)
+    if (enableLivePreview && activeTheme) {
+      applyTheme(activeTheme)
     }
-  }, [])
+  }, [enableLivePreview, activeTheme])
 
   const handleSelect = useCallback((theme: Base16Theme) => {
-    // Apply and persist
-    applyTheme(theme)
+    // Only apply the theme immediately if it's for the active variant
+    if (enableLivePreview) {
+      applyTheme(theme)
+    }
     onSelect(theme.name)
-  }, [onSelect])
+  }, [onSelect, enableLivePreview])
 
   return (
     <motion.div
@@ -406,6 +446,11 @@ function ThemePicker({
             <span className="text-xs">{theme.name}</span>
           </button>
         ))}
+        {loading && (
+          <div className="px-2 py-1.5 text-xs text-base-03">
+            Loading themes...
+          </div>
+        )}
         <div className="border-t border-base-02 mt-1 pt-1">
           <button
             onClick={onCustom}
