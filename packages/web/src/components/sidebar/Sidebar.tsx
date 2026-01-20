@@ -175,13 +175,27 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
           <div className="flex justify-end gap-1 p-[10px] border-t border-base-02">
             <button
               onClick={() => onModeChange(mode === 'graph' ? 'navigation' : 'graph')}
-              className={`p-2 rounded-lg transition-colors font-mono text-sm font-bold ${
+              className={`p-2 rounded-lg transition-colors ${
                 mode === 'graph' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
               }`}
               style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
               title="Graph view"
             >
-              G
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                {/* Central node */}
+                <circle cx="12" cy="12" r="3" />
+                {/* Radiating lines and outer nodes */}
+                <line x1="12" y1="12" x2="12" y2="3" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="12" cy="3" r="2" />
+                <line x1="12" y1="12" x2="20" y2="8" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="20" cy="8" r="2" />
+                <line x1="12" y1="12" x2="19" y2="17" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="19" cy="17" r="2" />
+                <line x1="12" y1="12" x2="5" y2="18" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="5" cy="18" r="2" />
+                <line x1="12" y1="12" x2="4" y2="9" stroke="currentColor" strokeWidth="1.5" />
+                <circle cx="4" cy="9" r="2" />
+              </svg>
             </button>
             <button
               onClick={() => onModeChange(mode === 'history' ? 'navigation' : 'history')}
