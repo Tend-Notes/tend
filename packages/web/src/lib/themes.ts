@@ -106,7 +106,7 @@ const CACHE_DURATION = 60 * 60 * 1000
 
 // GitHub API URL for tinted-theming base16 schemes
 const SCHEMES_API_URL = 'https://api.github.com/repos/tinted-theming/schemes/contents/base16'
-const RAW_CONTENT_BASE = 'https://raw.githubusercontent.com/tinted-theming/schemes/main/base16'
+const RAW_CONTENT_BASE = 'https://raw.githubusercontent.com/tinted-theming/schemes/spec-0.11/base16'
 
 // Listeners for theme updates
 type ThemeListener = (themes: Base16Theme[]) => void
