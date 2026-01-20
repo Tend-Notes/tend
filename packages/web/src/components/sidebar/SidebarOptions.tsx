@@ -812,15 +812,26 @@ function ContentTypeRow({
   )
 }
 
+// Archived garden type (matches API response)
+interface ArchivedGarden {
+  id: string
+  name: string
+  path: string
+  archived_at: string
+}
+
 // Graph section - manages multiple gardens
 function GraphSection() {
   const { currentGraphId, setCurrentGraphId } = useSettingsStore()
   const [gardens, setGardens] = useState<{ id: string; name: string }[]>([])
+  const [archivedGardens, setArchivedGardens] = useState<ArchivedGarden[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showNewForm, setShowNewForm] = useState(false)
   const [newGardenName, setNewGardenName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [confirmArchive, setConfirmArchive] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
   // Fetch gardens on mount
   useEffect(() => {
@@ -835,6 +846,7 @@ function GraphSection() {
       if (!response.ok) throw new Error('Failed to fetch gardens')
       const data = await response.json()
       setGardens(data.gardens)
+      setArchivedGardens(data.archived || [])
       // Update currentGraphId if not set or not found
       if (!currentGraphId || !data.gardens.find((g: { id: string }) => g.id === currentGraphId)) {
         setCurrentGraphId(data.active)
@@ -899,6 +911,64 @@ function GraphSection() {
     }
   }
 
+  const handleArchiveGarden = async (id: string) => {
+    if (id === currentGraphId) {
+      setError('Cannot archive the active garden')
+      return
+    }
+    try {
+      const response = await fetch(`/api/v1/gardens/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to archive garden')
+      }
+      // Move to archived list
+      const garden = gardens.find(g => g.id === id)
+      if (garden) {
+        setArchivedGardens([...archivedGardens, { ...garden, path: '', archived_at: new Date().toISOString() }])
+      }
+      setGardens(gardens.filter(g => g.id !== id))
+      setConfirmArchive(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive garden')
+    }
+  }
+
+  const handleRestoreGarden = async (id: string) => {
+    try {
+      const response = await fetch(`/api/v1/gardens/${encodeURIComponent(id)}/restore`, {
+        method: 'POST',
+      })
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to restore garden')
+      }
+      const garden = await response.json()
+      setGardens([...gardens, garden])
+      setArchivedGardens(archivedGardens.filter(g => g.id !== id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to restore garden')
+    }
+  }
+
+  const handleDeletePermanent = async (id: string) => {
+    try {
+      const response = await fetch(`/api/v1/gardens/${encodeURIComponent(id)}/permanent`, {
+        method: 'DELETE',
+      })
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to delete garden')
+      }
+      setArchivedGardens(archivedGardens.filter(g => g.id !== id))
+      setConfirmDelete(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete garden')
+    }
+  }
+
   return (
     <div className="space-y-3">
       <p className="text-xs text-base-03">
@@ -912,19 +982,113 @@ function GraphSection() {
       {loading ? (
         <p className="text-xs text-base-03">Loading gardens...</p>
       ) : (
-        gardens.map((garden) => (
-          <button
-            key={garden.id}
-            onClick={() => handleSwitchGarden(garden.id)}
-            className={`w-full px-2 py-1.5 text-left rounded border transition-colors ${
-              currentGraphId === garden.id
-                ? 'border-base-0D bg-base-01'
-                : 'border-base-02 hover:border-base-03'
-            }`}
-          >
-            <span className="text-xs text-base-05">{garden.name}</span>
-          </button>
-        ))
+        <>
+          {gardens.map((garden) => (
+            <div
+              key={garden.id}
+              className={`flex items-center justify-between px-2 py-1.5 rounded border transition-colors ${
+                currentGraphId === garden.id
+                  ? 'border-base-0D bg-base-01'
+                  : 'border-base-02 hover:border-base-03'
+              }`}
+            >
+              <button
+                onClick={() => handleSwitchGarden(garden.id)}
+                className="flex-1 text-left"
+              >
+                <span className="text-xs text-base-05">{garden.name}</span>
+              </button>
+              {currentGraphId === garden.id ? (
+                <span className="text-xs text-base-0D">Active</span>
+              ) : confirmArchive === garden.id ? (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleArchiveGarden(garden.id)
+                    }}
+                    className="px-1.5 py-0.5 text-xs text-base-08 bg-base-08/10 rounded hover:bg-base-08/20 transition-colors"
+                  >
+                    Archive
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setConfirmArchive(null)
+                    }}
+                    className="px-1.5 py-0.5 text-xs text-base-04 hover:text-base-05 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setConfirmArchive(garden.id)
+                  }}
+                  className="p-1 text-base-03 hover:text-base-08 transition-colors"
+                  title="Archive garden"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          ))}
+
+          {/* Archived gardens */}
+          {archivedGardens.length > 0 && (
+            <div className="pt-2 border-t border-base-02">
+              <p className="text-xs text-base-03 mb-2">Archived (auto-deleted after 15 days)</p>
+              {archivedGardens.map((garden) => (
+                <div
+                  key={garden.id}
+                  className="flex items-center justify-between px-2 py-1.5 rounded border border-base-02 bg-base-01/50 opacity-60 mb-1"
+                >
+                  <div className="flex-1 min-w-0">
+                    <span className="text-xs text-base-04">{garden.name}</span>
+                  </div>
+                  {confirmDelete === garden.id ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDeletePermanent(garden.id)}
+                        className="px-1.5 py-0.5 text-xs text-base-00 bg-base-08 rounded hover:bg-base-08/80 transition-colors"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(null)}
+                        className="px-1.5 py-0.5 text-xs text-base-04 hover:text-base-05 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleRestoreGarden(garden.id)}
+                        className="px-1.5 py-0.5 text-xs text-base-0D hover:bg-base-0D/10 rounded transition-colors"
+                      >
+                        Restore
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(garden.id)}
+                        className="p-1 text-base-08 hover:bg-base-08/10 rounded transition-colors"
+                        title="Permanently delete"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       <AnimatePresence>
