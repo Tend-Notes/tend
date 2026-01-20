@@ -11,6 +11,7 @@ import { usePageStore } from './stores/pageStore'
 import { useUIStore } from './stores/uiStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
 import { useWebSocket } from './hooks/useWebSocket'
+import { useTheme } from './hooks/useTheme'
 
 function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
@@ -29,6 +30,9 @@ function App() {
 
   // Initialize WebSocket connection for real-time updates
   useWebSocket()
+
+  // Apply theme based on user settings
+  useTheme()
 
   // Load initial data and handle URL
   useEffect(() => {
