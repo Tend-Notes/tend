@@ -17,6 +17,30 @@ export interface CustomTheme {
 // Font size presets
 export type FontSizePreset = 'small' | 'medium' | 'large' | 'custom'
 
+// Task status set choices
+export type TaskStatusSet = 'todo-doing-done' | 'now-later-never'
+
+// Task status configuration
+export interface TaskStatus {
+  keyword: string
+  label: string
+  color: string // CSS color variable name (e.g., 'base-0B' for green)
+}
+
+// Predefined status sets
+export const TASK_STATUS_SETS: Record<TaskStatusSet, TaskStatus[]> = {
+  'todo-doing-done': [
+    { keyword: 'TODO', label: 'TODO', color: 'base-0A' },    // Yellow
+    { keyword: 'DOING', label: 'DOING', color: 'base-0D' },  // Blue
+    { keyword: 'DONE', label: 'DONE', color: 'base-0B' },    // Green
+  ],
+  'now-later-never': [
+    { keyword: 'NOW', label: 'NOW', color: 'base-08' },      // Red (urgent)
+    { keyword: 'LATER', label: 'LATER', color: 'base-0A' },  // Yellow
+    { keyword: 'NEVER', label: 'NEVER', color: 'base-03' },  // Gray (dimmed)
+  ],
+}
+
 // Content type definition
 export interface ContentType {
   id: string
@@ -54,6 +78,9 @@ interface SettingsState {
   fontSizePreset: FontSizePreset
   customFontSize: number // only used when preset is 'custom'
 
+  // Tasks
+  taskStatusSet: TaskStatusSet
+
   // Storage (local git repo on server)
   gardenPath: string // path to the garden directory
 
@@ -80,6 +107,7 @@ interface SettingsState {
   setCustomDarkTheme: (theme: CustomTheme | null) => void
   setFontSizePreset: (preset: FontSizePreset) => void
   setCustomFontSize: (size: number) => void
+  setTaskStatusSet: (set: TaskStatusSet) => void
   setGardenPath: (path: string) => void
   setBackupEnabled: (enabled: boolean) => void
   setBackupRemoteUrl: (url: string) => void
@@ -94,6 +122,7 @@ interface SettingsState {
 
   // Computed
   getEffectiveFontSize: () => number
+  getTaskStatuses: () => TaskStatus[]
 }
 
 // Map presets to pixel values
@@ -114,6 +143,7 @@ export const useSettingsStore = create<SettingsState>()(
       customDarkTheme: null,
       fontSizePreset: 'medium',
       customFontSize: 16,
+      taskStatusSet: 'todo-doing-done' as TaskStatusSet,
       gardenPath: '',
       backupEnabled: false,
       backupRemoteUrl: '',
@@ -132,6 +162,7 @@ export const useSettingsStore = create<SettingsState>()(
       setFontSizePreset: (fontSizePreset) => set({ fontSizePreset }),
       setCustomFontSize: (customFontSize) =>
         set({ customFontSize: Math.max(10, Math.min(32, customFontSize)) }),
+      setTaskStatusSet: (taskStatusSet) => set({ taskStatusSet }),
       setGardenPath: (gardenPath) => set({ gardenPath }),
       setBackupEnabled: (backupEnabled) => set({ backupEnabled }),
       setBackupRemoteUrl: (backupRemoteUrl) => set({ backupRemoteUrl }),
@@ -161,6 +192,10 @@ export const useSettingsStore = create<SettingsState>()(
           return state.customFontSize
         }
         return FONT_SIZE_MAP[state.fontSizePreset]
+      },
+      getTaskStatuses: () => {
+        const state = get()
+        return TASK_STATUS_SETS[state.taskStatusSet]
       },
     }),
     {
