@@ -8,6 +8,7 @@ import {
   findTheme,
   getSystemThemePreference,
   subscribeToSystemTheme,
+  loadThemesFromTintedTheming,
   TEND_DARK,
   TEND_LIGHT,
   type Base16Theme,
@@ -29,6 +30,11 @@ export function useTheme() {
   // Subscribe to system theme changes
   useEffect(() => {
     return subscribeToSystemTheme(setSystemPreference)
+  }, [])
+
+  // Load themes from tinted-theming on mount
+  useEffect(() => {
+    loadThemesFromTintedTheming()
   }, [])
 
   // Determine which variant to use based on mode

@@ -66,7 +66,7 @@ export const TEND_LIGHT: Base16Theme = {
   palette: {
     base00: '#fafafa',
     base01: '#f0f0f0',
-    base02: '#e5e5e5',
+    base02: '#e0e0e0', // Slightly darker for visible button contrast
     base03: '#a0a1a7',
     base04: '#696c77',
     base05: '#383a42',
@@ -83,265 +83,157 @@ export const TEND_LIGHT: Base16Theme = {
   },
 }
 
-// Popular themes from tinted-theming for quick access
-export const POPULAR_THEMES: Base16Theme[] = [
-  TEND_DARK,
-  TEND_LIGHT,
-  {
-    system: 'base16',
-    name: 'Nord',
-    author: 'arcticicestudio',
-    variant: 'dark',
-    palette: {
-      base00: '#2e3440',
-      base01: '#3b4252',
-      base02: '#434c5e',
-      base03: '#4c566a',
-      base04: '#d8dee9',
-      base05: '#e5e9f0',
-      base06: '#eceff4',
-      base07: '#8fbcbb',
-      base08: '#bf616a',
-      base09: '#d08770',
-      base0A: '#ebcb8b',
-      base0B: '#a3be8c',
-      base0C: '#88c0d0',
-      base0D: '#81a1c1',
-      base0E: '#b48ead',
-      base0F: '#5e81ac',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Gruvbox Dark',
-    author: 'morhetz',
-    variant: 'dark',
-    palette: {
-      base00: '#282828',
-      base01: '#3c3836',
-      base02: '#504945',
-      base03: '#665c54',
-      base04: '#bdae93',
-      base05: '#d5c4a1',
-      base06: '#ebdbb2',
-      base07: '#fbf1c7',
-      base08: '#fb4934',
-      base09: '#fe8019',
-      base0A: '#fabd2f',
-      base0B: '#b8bb26',
-      base0C: '#8ec07c',
-      base0D: '#83a598',
-      base0E: '#d3869b',
-      base0F: '#d65d0e',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Gruvbox Light',
-    author: 'morhetz',
-    variant: 'light',
-    palette: {
-      base00: '#fbf1c7',
-      base01: '#ebdbb2',
-      base02: '#d5c4a1',
-      base03: '#bdae93',
-      base04: '#665c54',
-      base05: '#504945',
-      base06: '#3c3836',
-      base07: '#282828',
-      base08: '#9d0006',
-      base09: '#af3a03',
-      base0A: '#b57614',
-      base0B: '#79740e',
-      base0C: '#427b58',
-      base0D: '#076678',
-      base0E: '#8f3f71',
-      base0F: '#d65d0e',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Solarized Dark',
-    author: 'Ethan Schoonover',
-    variant: 'dark',
-    palette: {
-      base00: '#002b36',
-      base01: '#073642',
-      base02: '#586e75',
-      base03: '#657b83',
-      base04: '#839496',
-      base05: '#93a1a1',
-      base06: '#eee8d5',
-      base07: '#fdf6e3',
-      base08: '#dc322f',
-      base09: '#cb4b16',
-      base0A: '#b58900',
-      base0B: '#859900',
-      base0C: '#2aa198',
-      base0D: '#268bd2',
-      base0E: '#6c71c4',
-      base0F: '#d33682',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Solarized Light',
-    author: 'Ethan Schoonover',
-    variant: 'light',
-    palette: {
-      base00: '#fdf6e3',
-      base01: '#eee8d5',
-      base02: '#93a1a1',
-      base03: '#839496',
-      base04: '#657b83',
-      base05: '#586e75',
-      base06: '#073642',
-      base07: '#002b36',
-      base08: '#dc322f',
-      base09: '#cb4b16',
-      base0A: '#b58900',
-      base0B: '#859900',
-      base0C: '#2aa198',
-      base0D: '#268bd2',
-      base0E: '#6c71c4',
-      base0F: '#d33682',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Catppuccin Mocha',
-    author: 'Catppuccin',
-    variant: 'dark',
-    palette: {
-      base00: '#1e1e2e',
-      base01: '#181825',
-      base02: '#313244',
-      base03: '#45475a',
-      base04: '#585b70',
-      base05: '#cdd6f4',
-      base06: '#f5e0dc',
-      base07: '#b4befe',
-      base08: '#f38ba8',
-      base09: '#fab387',
-      base0A: '#f9e2af',
-      base0B: '#a6e3a1',
-      base0C: '#94e2d5',
-      base0D: '#89b4fa',
-      base0E: '#cba6f7',
-      base0F: '#f2cdcd',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Catppuccin Latte',
-    author: 'Catppuccin',
-    variant: 'light',
-    palette: {
-      base00: '#eff1f5',
-      base01: '#e6e9ef',
-      base02: '#ccd0da',
-      base03: '#bcc0cc',
-      base04: '#acb0be',
-      base05: '#4c4f69',
-      base06: '#dc8a78',
-      base07: '#7287fd',
-      base08: '#d20f39',
-      base09: '#fe640b',
-      base0A: '#df8e1d',
-      base0B: '#40a02b',
-      base0C: '#179299',
-      base0D: '#1e66f5',
-      base0E: '#8839ef',
-      base0F: '#dd7878',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Tokyo Night',
-    author: 'enkia',
-    variant: 'dark',
-    palette: {
-      base00: '#1a1b26',
-      base01: '#16161e',
-      base02: '#2f3549',
-      base03: '#444b6a',
-      base04: '#787c99',
-      base05: '#a9b1d6',
-      base06: '#cbccd1',
-      base07: '#d5d6db',
-      base08: '#f7768e',
-      base09: '#ff9e64',
-      base0A: '#e0af68',
-      base0B: '#9ece6a',
-      base0C: '#7dcfff',
-      base0D: '#7aa2f7',
-      base0E: '#bb9af7',
-      base0F: '#c0caf5',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Dracula',
-    author: 'Zeno Rocha',
-    variant: 'dark',
-    palette: {
-      base00: '#282936',
-      base01: '#3a3c4e',
-      base02: '#4d4f68',
-      base03: '#626483',
-      base04: '#62d6e8',
-      base05: '#e9e9f4',
-      base06: '#f1f2f8',
-      base07: '#f7f7fb',
-      base08: '#ea51b2',
-      base09: '#b45bcf',
-      base0A: '#00f769',
-      base0B: '#ebff87',
-      base0C: '#a1efe4',
-      base0D: '#62d6e8',
-      base0E: '#b45bcf',
-      base0F: '#00f769',
-    },
-  },
-  {
-    system: 'base16',
-    name: 'Rosé Pine',
-    author: 'Rosé Pine',
-    variant: 'dark',
-    palette: {
-      base00: '#191724',
-      base01: '#1f1d2e',
-      base02: '#26233a',
-      base03: '#6e6a86',
-      base04: '#908caa',
-      base05: '#e0def4',
-      base06: '#e0def4',
-      base07: '#524f67',
-      base08: '#eb6f92',
-      base09: '#f6c177',
-      base0A: '#ebbcba',
-      base0B: '#31748f',
-      base0C: '#9ccfd8',
-      base0D: '#c4a7e7',
-      base0E: '#f6c177',
-      base0F: '#524f67',
-    },
-  },
-]
+// Built-in themes (always available, even offline)
+export const BUILTIN_THEMES: Base16Theme[] = [TEND_DARK, TEND_LIGHT]
+
+// Theme cache for fetched themes
+interface ThemeCache {
+  themes: Base16Theme[]
+  lastFetched: number
+  isLoading: boolean
+  error: string | null
+}
+
+const themeCache: ThemeCache = {
+  themes: [...BUILTIN_THEMES],
+  lastFetched: 0,
+  isLoading: false,
+  error: null,
+}
+
+// Cache duration: 1 hour
+const CACHE_DURATION = 60 * 60 * 1000
+
+// GitHub API URL for tinted-theming base16 schemes
+const SCHEMES_API_URL = 'https://api.github.com/repos/tinted-theming/schemes/contents/base16'
+const RAW_CONTENT_BASE = 'https://raw.githubusercontent.com/tinted-theming/schemes/main/base16'
+
+// Listeners for theme updates
+type ThemeListener = (themes: Base16Theme[]) => void
+const listeners = new Set<ThemeListener>()
+
+export function subscribeToThemes(listener: ThemeListener): () => void {
+  listeners.add(listener)
+  // Immediately call with current themes
+  listener(themeCache.themes)
+  return () => listeners.delete(listener)
+}
+
+function notifyListeners() {
+  listeners.forEach((listener) => listener(themeCache.themes))
+}
+
+// Fetch available theme files from GitHub
+async function fetchThemeList(): Promise<string[]> {
+  const response = await fetch(SCHEMES_API_URL)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch theme list: ${response.status}`)
+  }
+  const files = await response.json()
+  return files
+    .filter((f: { name: string }) => f.name.endsWith('.yaml') && f.name !== 'README.md')
+    .map((f: { name: string }) => f.name.replace('.yaml', ''))
+}
+
+// Fetch a single theme's YAML content
+async function fetchThemeYaml(name: string): Promise<string> {
+  const response = await fetch(`${RAW_CONTENT_BASE}/${name}.yaml`)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch theme ${name}: ${response.status}`)
+  }
+  return response.text()
+}
+
+// Load themes from tinted-theming (called on app init)
+export async function loadThemesFromTintedTheming(): Promise<void> {
+  // Don't refetch if cache is fresh
+  if (Date.now() - themeCache.lastFetched < CACHE_DURATION && themeCache.themes.length > 2) {
+    return
+  }
+
+  if (themeCache.isLoading) {
+    return
+  }
+
+  themeCache.isLoading = true
+  themeCache.error = null
+
+  try {
+    const themeNames = await fetchThemeList()
+
+    // Fetch themes in batches to avoid rate limiting
+    const BATCH_SIZE = 10
+    const fetchedThemes: Base16Theme[] = []
+
+    for (let i = 0; i < themeNames.length; i += BATCH_SIZE) {
+      const batch = themeNames.slice(i, i + BATCH_SIZE)
+      const results = await Promise.allSettled(
+        batch.map(async (name) => {
+          const yaml = await fetchThemeYaml(name)
+          return parseBase16Yaml(yaml)
+        })
+      )
+
+      for (const result of results) {
+        if (result.status === 'fulfilled' && result.value) {
+          fetchedThemes.push(result.value)
+        }
+      }
+    }
+
+    // Merge with built-in themes (built-in takes precedence)
+    const builtinNames = new Set(BUILTIN_THEMES.map((t) => t.name))
+    const newThemes = [
+      ...BUILTIN_THEMES,
+      ...fetchedThemes.filter((t) => !builtinNames.has(t.name)),
+    ]
+
+    // Sort alphabetically (but keep Tend themes at top)
+    newThemes.sort((a, b) => {
+      if (a.name.startsWith('Tend') && !b.name.startsWith('Tend')) return -1
+      if (!a.name.startsWith('Tend') && b.name.startsWith('Tend')) return 1
+      return a.name.localeCompare(b.name)
+    })
+
+    themeCache.themes = newThemes
+    themeCache.lastFetched = Date.now()
+    notifyListeners()
+  } catch (error) {
+    themeCache.error = error instanceof Error ? error.message : 'Failed to load themes'
+    console.error('Failed to load themes from tinted-theming:', error)
+  } finally {
+    themeCache.isLoading = false
+  }
+}
+
+// Get all available themes (built-in + fetched)
+export function getAllThemes(): Base16Theme[] {
+  return themeCache.themes
+}
 
 // Get all dark themes
 export function getDarkThemes(): Base16Theme[] {
-  return POPULAR_THEMES.filter((t) => t.variant === 'dark')
+  return themeCache.themes.filter((t) => t.variant === 'dark')
 }
 
 // Get all light themes
 export function getLightThemes(): Base16Theme[] {
-  return POPULAR_THEMES.filter((t) => t.variant === 'light')
+  return themeCache.themes.filter((t) => t.variant === 'light')
 }
 
 // Find a theme by name
 export function findTheme(name: string): Base16Theme | undefined {
-  return POPULAR_THEMES.find((t) => t.name === name)
+  return themeCache.themes.find((t) => t.name === name)
+}
+
+// Check if themes are still loading
+export function isLoadingThemes(): boolean {
+  return themeCache.isLoading
+}
+
+// Get theme loading error
+export function getThemeError(): string | null {
+  return themeCache.error
 }
 
 // Parse a Base16 YAML string into a theme object
@@ -429,11 +321,27 @@ export function applyTheme(theme: Base16Theme): void {
   root.style.setProperty('--base0E', palette.base0E)
   root.style.setProperty('--base0F', palette.base0F)
 
-  // Set derived colors
-  root.style.setProperty(
-    '--sidebar-bg',
-    `color-mix(in srgb, ${palette.base00} 90%, black)`
-  )
+  // Set derived colors based on theme variant
+  if (theme.variant === 'light') {
+    // Light themes: darken sidebar and button backgrounds
+    root.style.setProperty(
+      '--sidebar-bg',
+      `color-mix(in srgb, ${palette.base00} 95%, ${palette.base03})`
+    )
+    // For light themes, buttons should be darker than the background
+    root.style.setProperty('--btn-bg', palette.base02)
+    root.style.setProperty('--btn-bg-hover', palette.base03)
+    root.style.setProperty('--btn-bg-active', palette.base01)
+  } else {
+    // Dark themes: standard behavior
+    root.style.setProperty(
+      '--sidebar-bg',
+      `color-mix(in srgb, ${palette.base00} 90%, black)`
+    )
+    root.style.setProperty('--btn-bg', palette.base02)
+    root.style.setProperty('--btn-bg-hover', palette.base03)
+    root.style.setProperty('--btn-bg-active', palette.base01)
+  }
 
   // Set color-scheme for native elements
   root.style.colorScheme = theme.variant
