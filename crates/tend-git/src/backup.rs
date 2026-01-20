@@ -307,8 +307,8 @@ impl BackupManager {
         Ok(commits)
     }
 
-    /// Get diff for a specific commit
-    pub fn diff(&self, commit_sha: &str) -> Result<CommitDiff, GitError> {
+    /// Get diff for a specific commit, optionally filtered to a specific file
+    pub fn diff(&self, commit_sha: &str, file_path: Option<&str>) -> Result<CommitDiff, GitError> {
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -334,8 +334,15 @@ impl BackupManager {
             .unwrap_or_else(Utc::now);
 
         // Get the diff (compare with parent, or show all for root commit)
+        // If file_path is provided, only show diff for that file
+        let mut args = vec!["diff-tree", "-p", "--root", commit_sha];
+        if let Some(path) = file_path {
+            args.push("--");
+            args.push(path);
+        }
+
         let diff_output = Command::new("git")
-            .args(["diff-tree", "-p", "--root", commit_sha])
+            .args(&args)
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;

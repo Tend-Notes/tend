@@ -54,6 +54,9 @@ export function SidebarHistory({ onBack, pageName, isJournal }: SidebarHistoryPr
     fetchHistory()
   }, [fetchHistory])
 
+  // Get the file path for the current page (for filtering diffs)
+  const filePath = pageName ? pageNameToFilePath(pageName, isJournal) : undefined
+
   const handleSelectCommit = async (sha: string) => {
     if (selectedCommit === sha) {
       setSelectedCommit(null)
@@ -64,7 +67,8 @@ export function SidebarHistory({ onBack, pageName, isJournal }: SidebarHistoryPr
     setSelectedCommit(sha)
     setIsLoadingDiff(true)
     try {
-      const diff = await api.git.diff(sha)
+      // Pass the file path to only show diff for the current page
+      const diff = await api.git.diff(sha, filePath)
       setCommitDiff(diff)
     } catch (err) {
       console.error('Failed to fetch diff:', err)

@@ -32,6 +32,12 @@ pub struct RestoreRequest {
     pub commit: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DiffQuery {
+    /// Filter by file path (e.g., "pages/foo.md")
+    pub path: Option<String>,
+}
+
 /// Get git status
 pub async fn status(State(state): State<Arc<AppState>>) -> Result<Json<GitStatus>, AppError> {
     let status = state.backup_manager.status()?;
@@ -102,8 +108,9 @@ pub async fn history(
 pub async fn diff(
     State(state): State<Arc<AppState>>,
     Path(commit_sha): Path<String>,
+    Query(query): Query<DiffQuery>,
 ) -> Result<Json<CommitDiff>, AppError> {
-    let diff = state.backup_manager.diff(&commit_sha)?;
+    let diff = state.backup_manager.diff(&commit_sha, query.path.as_deref())?;
     Ok(Json(diff))
 }
 

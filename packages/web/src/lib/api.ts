@@ -129,8 +129,10 @@ export const git = {
     return fetchJson<CommitInfo[]>(`${API_BASE}/git/history?${params}`)
   },
 
-  diff: (commitSha: string) =>
-    fetchJson<CommitDiff>(`${API_BASE}/git/diff/${encodeURIComponent(commitSha)}`),
+  diff: (commitSha: string, path?: string) => {
+    const params = path ? `?path=${encodeURIComponent(path)}` : ''
+    return fetchJson<CommitDiff>(`${API_BASE}/git/diff/${encodeURIComponent(commitSha)}${params}`)
+  },
 
   restore: (commitSha: string) =>
     fetchJson<BackupResult>(`${API_BASE}/git/restore`, {
