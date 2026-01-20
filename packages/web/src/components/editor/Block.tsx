@@ -613,6 +613,20 @@ export function BlockComponent({
         // Update the display
         editorRef.current.innerHTML = renderContent(content, { start: cursorOffset, end: cursorOffset })
         restoreCursor(editorRef.current, Math.min(cursorOffset, content.length))
+      } else {
+        // Check if we need to re-render for task status (when typing "TODO ", "DONE ", etc.)
+        const taskStatusRegex = buildTaskStatusRegex()
+        const hasTaskStatus = taskStatusRegex.test(content)
+        const displayedHasTaskStatus = editorRef.current.querySelector('.task-status') !== null
+
+        if (hasTaskStatus !== displayedHasTaskStatus) {
+          // Task status changed - re-render
+          const selection = window.getSelection()
+          const cursorOffset = selection ? getCursorOffset(editorRef.current, selection) : content.length
+
+          editorRef.current.innerHTML = renderContent(content, { start: cursorOffset, end: cursorOffset })
+          restoreCursor(editorRef.current, Math.min(cursorOffset, content.length))
+        }
       }
 
       if (content !== lastContentRef.current) {
