@@ -812,65 +812,60 @@ function ContentTypeRow({
   )
 }
 
+// Archived garden type (matches API response)
+interface ArchivedGarden {
+  id: string
+  name: string
+  path: string
+  archived_at: string
+}
+
 // Graph section - manages multiple gardens
 function GraphSection() {
-  const { currentGraphId, setCurrentGraphId } = useSettingsStore()
   const [gardens, setGardens] = useState<{ id: string; name: string }[]>([])
+  const [archivedGardens, setArchivedGardens] = useState<ArchivedGarden[]>([])
+  const [activeGardenId, setActiveGardenId] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [showNewForm, setShowNewForm] = useState(false)
+  const [showNewGarden, setShowNewGarden] = useState(false)
   const [newGardenName, setNewGardenName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [switching, setSwitching] = useState<string | null>(null)
+  const [confirmArchive, setConfirmArchive] = useState<string | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
-  // Fetch gardens on mount
+  // Fetch gardens from server
   useEffect(() => {
+    const fetchGardens = async () => {
+      try {
+        const { gardens: gardensApi } = await import('../../lib/api')
+        const response = await gardensApi.list()
+        setGardens(response.gardens)
+        setArchivedGardens(response.archived || [])
+        setActiveGardenId(response.active)
+        setError(null)
+      } catch (err) {
+        setError('Failed to load gardens')
+        console.error('Failed to fetch gardens:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
     fetchGardens()
   }, [])
 
-  const fetchGardens = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const response = await fetch('/api/v1/gardens')
-      if (!response.ok) throw new Error('Failed to fetch gardens')
-      const data = await response.json()
-      setGardens(data.gardens)
-      // Update currentGraphId if not set or not found
-      if (!currentGraphId || !data.gardens.find((g: { id: string }) => g.id === currentGraphId)) {
-        setCurrentGraphId(data.active)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load gardens')
-    } finally {
-      setLoading(false)
-    }
-  }
-
   const handleCreateGarden = async () => {
     if (!newGardenName.trim()) return
-
+    setCreating(true)
+    setError(null)
     try {
-      setCreating(true)
-      setError(null)
-      const response = await fetch('/api/v1/gardens', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newGardenName.trim(),
-          // Default path: base data dir + garden name
-          path: `~/.local/share/tend/${newGardenName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
-        }),
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to create garden')
-      }
-
-      // Refresh the list and reset form
-      await fetchGardens()
+      const { gardens: gardensApi } = await import('../../lib/api')
+      // Default path: base data dir + garden name slug
+      const path = `~/.local/share/tend/${newGardenName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`
+      const garden = await gardensApi.create(newGardenName, path)
+      setGardens([...gardens, garden])
+      setShowNewGarden(false)
       setNewGardenName('')
-      setShowNewForm(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create garden')
     } finally {
@@ -879,106 +874,250 @@ function GraphSection() {
   }
 
   const handleSwitchGarden = async (id: string) => {
+    if (id === activeGardenId) return
+    setSwitching(id)
+    setError(null)
     try {
-      const response = await fetch('/api/v1/gardens/switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      })
-
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.error || 'Failed to switch garden')
-      }
-
-      setCurrentGraphId(id)
-      // Reload the page to refresh all data for the new garden
+      const { gardens: gardensApi } = await import('../../lib/api')
+      await gardensApi.switch(id)
+      setActiveGardenId(id)
+      // Force reload to load the new garden's data
       window.location.reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to switch garden')
+      setSwitching(null)
+    }
+  }
+
+  const handleArchiveGarden = async (id: string) => {
+    if (id === activeGardenId) {
+      setError('Cannot archive the active garden')
+      return
+    }
+    try {
+      const { gardens: gardensApi } = await import('../../lib/api')
+      await gardensApi.archive(id)
+      // Move to archived list
+      const garden = gardens.find(g => g.id === id)
+      if (garden) {
+        setArchivedGardens([...archivedGardens, { ...garden, path: '', archived_at: new Date().toISOString() }])
+      }
+      setGardens(gardens.filter(g => g.id !== id))
+      setConfirmArchive(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive garden')
+    }
+  }
+
+  const handleRestoreGarden = async (id: string) => {
+    try {
+      const { gardens: gardensApi } = await import('../../lib/api')
+      const garden = await gardensApi.restore(id)
+      setGardens([...gardens, garden])
+      setArchivedGardens(archivedGardens.filter(g => g.id !== id))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to restore garden')
+    }
+  }
+
+  const handleDeletePermanent = async (id: string) => {
+    try {
+      const { gardens: gardensApi } = await import('../../lib/api')
+      await gardensApi.deletePermanent(id)
+      setArchivedGardens(archivedGardens.filter(g => g.id !== id))
+      setConfirmDelete(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete garden')
     }
   }
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-base-03">
-        Select which garden to work with.
+        Gardens are separate note collections. Each garden has its own pages, journals, and git history.
       </p>
-
-      {error && (
-        <p className="text-xs text-base-08">{error}</p>
-      )}
 
       {loading ? (
         <p className="text-xs text-base-03">Loading gardens...</p>
       ) : (
-        gardens.map((garden) => (
-          <button
-            key={garden.id}
-            onClick={() => handleSwitchGarden(garden.id)}
-            className={`w-full px-2 py-1.5 text-left rounded border transition-colors ${
-              currentGraphId === garden.id
-                ? 'border-base-0D bg-base-01'
-                : 'border-base-02 hover:border-base-03'
-            }`}
-          >
-            <span className="text-xs text-base-05">{garden.name}</span>
-          </button>
-        ))
-      )}
-
-      <AnimatePresence>
-        {showNewForm && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            className="overflow-hidden"
-          >
-            <div className="p-2 bg-base-01 border border-base-02 rounded space-y-2">
-              <input
-                type="text"
-                value={newGardenName}
-                onChange={(e) => setNewGardenName(e.target.value)}
-                placeholder="Garden name"
-                autoFocus
-                className="w-full bg-base-00 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateGarden()
-                  if (e.key === 'Escape') setShowNewForm(false)
-                }}
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCreateGarden}
-                  disabled={creating || !newGardenName.trim()}
-                  className="px-2 py-1 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
-                >
-                  {creating ? 'Creating...' : 'Create'}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowNewForm(false)
-                    setNewGardenName('')
-                  }}
-                  className="px-2 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
-                >
-                  Cancel
-                </button>
+        <>
+          {/* Garden list */}
+          {gardens.map((garden) => (
+            <div
+              key={garden.id}
+              className={`flex items-center justify-between px-2 py-2 rounded border transition-colors ${
+                activeGardenId === garden.id
+                  ? 'border-base-0D bg-base-01'
+                  : 'border-base-02 hover:border-base-03'
+              }`}
+            >
+              <button
+                onClick={() => handleSwitchGarden(garden.id)}
+                className="flex-1 text-left"
+                disabled={switching === garden.id}
+              >
+                <div className="text-xs text-base-05 font-medium">{garden.name}</div>
+              </button>
+              <div className="flex items-center gap-2">
+                {activeGardenId === garden.id ? (
+                  <span className="text-xs text-base-0D">Active</span>
+                ) : confirmArchive === garden.id ? (
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleArchiveGarden(garden.id)
+                      }}
+                      className="px-1.5 py-0.5 text-xs text-base-08 bg-base-08/10 rounded hover:bg-base-08/20 transition-colors"
+                    >
+                      Archive
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setConfirmArchive(null)
+                      }}
+                      className="px-1.5 py-0.5 text-xs text-base-04 hover:text-base-05 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setConfirmArchive(garden.id)
+                    }}
+                    className="p-1 text-base-03 hover:text-base-08 transition-colors"
+                    title="Archive garden"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                    </svg>
+                  </button>
+                )}
+                {switching === garden.id && (
+                  <span className="text-xs text-base-03">Switching...</span>
+                )}
               </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          ))}
 
-      {!showNewForm && (
-        <button
-          onClick={() => setShowNewForm(true)}
-          className="w-full py-1.5 text-xs text-base-04 hover:text-base-05 border border-dashed border-base-02 rounded transition-colors"
-        >
-          + New garden
-        </button>
+          {/* Archived gardens */}
+          {archivedGardens.length > 0 && (
+            <div className="pt-2 border-t border-base-02">
+              <p className="text-xs text-base-03 mb-2">Archived (auto-deleted after 15 days)</p>
+              {archivedGardens.map((garden) => (
+                <div
+                  key={garden.id}
+                  className="flex items-center justify-between px-2 py-1.5 rounded border border-base-02 bg-base-01/50 opacity-60 mb-1"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-base-04 font-medium">{garden.name}</div>
+                  </div>
+                  {confirmDelete === garden.id ? (
+                    <div className="flex flex-col gap-1 ml-2">
+                      <span className="text-xs text-base-08">Delete all files?</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleDeletePermanent(garden.id)}
+                          className="px-1.5 py-0.5 text-xs text-base-00 bg-base-08 rounded hover:bg-base-08/80 transition-colors"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={() => setConfirmDelete(null)}
+                          className="px-1.5 py-0.5 text-xs text-base-04 hover:text-base-05 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 ml-2">
+                      <button
+                        onClick={() => handleRestoreGarden(garden.id)}
+                        className="px-1.5 py-0.5 text-xs text-base-0D hover:bg-base-0D/10 rounded transition-colors"
+                      >
+                        Restore
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(garden.id)}
+                        className="p-1 text-base-08 hover:bg-base-08/10 rounded transition-colors"
+                        title="Permanently delete all files"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* New garden form */}
+          <AnimatePresence>
+            {showNewGarden && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="p-2 bg-base-01 border border-base-02 rounded space-y-2">
+                  <input
+                    type="text"
+                    value={newGardenName}
+                    onChange={(e) => setNewGardenName(e.target.value)}
+                    placeholder="Garden name"
+                    className="w-full bg-base-00 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateGarden()
+                      if (e.key === 'Escape') setShowNewGarden(false)
+                    }}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleCreateGarden}
+                      disabled={!newGardenName.trim() || creating}
+                      className="px-2 py-1 text-xs text-base-06 bg-base-02 rounded hover:bg-base-03 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {creating ? 'Creating...' : 'Create'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowNewGarden(false)
+                        setNewGardenName('')
+                      }}
+                      className="px-2 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Add garden button */}
+          {!showNewGarden && (
+            <button
+              onClick={() => setShowNewGarden(true)}
+              className="w-full py-1.5 text-xs text-base-04 hover:text-base-05 border border-dashed border-base-02 rounded transition-colors"
+            >
+              + New garden
+            </button>
+          )}
+        </>
+      )}
+
+      {error && (
+        <p className="text-xs text-base-08">
+          {error}
+        </p>
       )}
     </div>
   )
