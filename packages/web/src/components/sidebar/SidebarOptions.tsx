@@ -815,36 +815,171 @@ function ContentTypeRow({
 // Graph section - manages multiple gardens
 function GraphSection() {
   const { currentGraphId, setCurrentGraphId } = useSettingsStore()
+  const [gardens, setGardens] = useState<{ id: string; name: string }[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [showNewForm, setShowNewForm] = useState(false)
+  const [newGardenName, setNewGardenName] = useState('')
+  const [creating, setCreating] = useState(false)
 
-  // TODO: Fetch from /api/v1/gardens when backend is connected
-  const graphs = [
-    { id: 'default', name: 'Notes' },
-  ]
+  // Fetch gardens on mount
+  useEffect(() => {
+    fetchGardens()
+  }, [])
+
+  const fetchGardens = async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const response = await fetch('/api/v1/gardens')
+      if (!response.ok) throw new Error('Failed to fetch gardens')
+      const data = await response.json()
+      setGardens(data.gardens)
+      // Update currentGraphId if not set or not found
+      if (!currentGraphId || !data.gardens.find((g: { id: string }) => g.id === currentGraphId)) {
+        setCurrentGraphId(data.active)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load gardens')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCreateGarden = async () => {
+    if (!newGardenName.trim()) return
+
+    try {
+      setCreating(true)
+      setError(null)
+      const response = await fetch('/api/v1/gardens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newGardenName.trim(),
+          // Default path: base data dir + garden name
+          path: `~/.local/share/tend/${newGardenName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+        }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to create garden')
+      }
+
+      // Refresh the list and reset form
+      await fetchGardens()
+      setNewGardenName('')
+      setShowNewForm(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create garden')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleSwitchGarden = async (id: string) => {
+    try {
+      const response = await fetch('/api/v1/gardens/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        throw new Error(data.error || 'Failed to switch garden')
+      }
+
+      setCurrentGraphId(id)
+      // Reload the page to refresh all data for the new garden
+      window.location.reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to switch garden')
+    }
+  }
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-base-03">
         Select which garden to work with.
       </p>
-      {graphs.map((graph) => (
+
+      {error && (
+        <p className="text-xs text-base-08">{error}</p>
+      )}
+
+      {loading ? (
+        <p className="text-xs text-base-03">Loading gardens...</p>
+      ) : (
+        gardens.map((garden) => (
+          <button
+            key={garden.id}
+            onClick={() => handleSwitchGarden(garden.id)}
+            className={`w-full px-2 py-1.5 text-left rounded border transition-colors ${
+              currentGraphId === garden.id
+                ? 'border-base-0D bg-base-01'
+                : 'border-base-02 hover:border-base-03'
+            }`}
+          >
+            <span className="text-xs text-base-05">{garden.name}</span>
+          </button>
+        ))
+      )}
+
+      <AnimatePresence>
+        {showNewForm && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="p-2 bg-base-01 border border-base-02 rounded space-y-2">
+              <input
+                type="text"
+                value={newGardenName}
+                onChange={(e) => setNewGardenName(e.target.value)}
+                placeholder="Garden name"
+                autoFocus
+                className="w-full bg-base-00 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleCreateGarden()
+                  if (e.key === 'Escape') setShowNewForm(false)
+                }}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleCreateGarden}
+                  disabled={creating || !newGardenName.trim()}
+                  className="px-2 py-1 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
+                >
+                  {creating ? 'Creating...' : 'Create'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowNewForm(false)
+                    setNewGardenName('')
+                  }}
+                  className="px-2 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {!showNewForm && (
         <button
-          key={graph.id}
-          onClick={() => setCurrentGraphId(graph.id)}
-          className={`w-full px-2 py-1.5 text-left rounded border transition-colors ${
-            currentGraphId === graph.id
-              ? 'border-base-0D bg-base-01'
-              : 'border-base-02 hover:border-base-03'
-          }`}
+          onClick={() => setShowNewForm(true)}
+          className="w-full py-1.5 text-xs text-base-04 hover:text-base-05 border border-dashed border-base-02 rounded transition-colors"
         >
-          <span className="text-xs text-base-05">{graph.name}</span>
+          + New garden
         </button>
-      ))}
-      <button
-        className="w-full py-1.5 text-xs text-base-04 hover:text-base-05 border border-dashed border-base-02 rounded transition-colors"
-        title="Create new garden (coming soon)"
-      >
-        + New garden
-      </button>
+      )}
     </div>
   )
 }
