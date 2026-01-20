@@ -17,7 +17,8 @@ use crate::state::AppState;
 pub async fn list_journals(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<PageMeta>>, AppError> {
-    let journals = state.file_manager.list_journals().await?;
+    let garden = state.garden.read().await;
+    let journals = garden.file_manager.list_journals().await?;
     Ok(Json(journals))
 }
 
@@ -25,8 +26,9 @@ pub async fn list_journals(
 pub async fn get_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Page>, AppError> {
+    let garden = state.garden.read().await;
     let today = Local::now().date_naive();
-    let page = state.file_manager.read_journal(today).await?;
+    let page = garden.file_manager.read_journal(today).await?;
 
     // If the page is empty (new journal), create it with an empty block
     if page.blocks.is_empty() {
@@ -34,11 +36,11 @@ pub async fn get_today(
         let block = Block::new("");
         new_page.add_block(block);
 
-        state.file_manager.write_page(&new_page).await?;
+        garden.file_manager.write_page(&new_page).await?;
 
         // Index the new journal
         {
-            let mut index = state.search_index.write().await;
+            let mut index = garden.search_index.write().await;
             index.index_page(&new_page)?;
             index.commit()?;
         }
@@ -55,10 +57,11 @@ pub async fn get_journal(
     State(state): State<Arc<AppState>>,
     Path(date_str): Path<String>,
 ) -> Result<Json<Page>, AppError> {
+    let garden = state.garden.read().await;
     let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}", date_str)))?;
 
-    let page = state.file_manager.read_journal(date).await?;
+    let page = garden.file_manager.read_journal(date).await?;
     Ok(Json(page))
 }
 
@@ -68,11 +71,12 @@ pub async fn update_journal(
     Path(date_str): Path<String>,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
+    let garden = state.garden.read().await;
     let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}", date_str)))?;
 
     // Read existing journal or create new
-    let mut page = state
+    let mut page = garden
         .file_manager
         .read_journal(date)
         .await
@@ -124,11 +128,11 @@ pub async fn update_journal(
     // Increment version and update timestamp
     page.version += 1;
     page.touch();
-    state.file_manager.write_page(&page).await?;
+    garden.file_manager.write_page(&page).await?;
 
     // Update search index
     {
-        let mut index = state.search_index.write().await;
+        let mut index = garden.search_index.write().await;
         index.index_page(&page)?;
         index.commit()?;
     }

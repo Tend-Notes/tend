@@ -38,6 +38,11 @@ interface ConnectedEvent extends WsEventBase {
   type: 'connected'
 }
 
+interface GardenSwitchedEvent extends WsEventBase {
+  type: 'garden_switched'
+  garden_id: string
+}
+
 type WsEvent =
   | FileChangedEvent
   | PageUpdatedEvent
@@ -45,6 +50,7 @@ type WsEvent =
   | BackupCompletedEvent
   | BackupFailedEvent
   | ConnectedEvent
+  | GardenSwitchedEvent
 
 /**
  * Hook that maintains a WebSocket connection to the server for real-time updates.
@@ -124,6 +130,13 @@ export function useWebSocket() {
             // These are handled by the git store if needed
             // For now, just log them
             console.log('Backup event:', data.type)
+            break
+
+          case 'garden_switched':
+            // Garden was switched (by another client or this client)
+            // Reload the page to reflect the new garden
+            console.log('Garden switched to:', data.garden_id)
+            window.location.reload()
             break
 
           default:

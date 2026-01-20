@@ -42,9 +42,9 @@ export const useUIStore = create<UIState>()(
         set((state) => ({ sidebarOpen: !state.sidebarOpen })),
 
       setSidebarWidth: (width) => {
-        // Min: 15% smaller than default (279px), Max: 50% of viewport
+        // Min: 15% smaller than default (279px), Max: 40% of viewport
         const minWidth = 279
-        const maxWidth = typeof window !== 'undefined' ? window.innerWidth * 0.5 : 600
+        const maxWidth = typeof window !== 'undefined' ? window.innerWidth * 0.4 : 500
         set({ sidebarWidth: Math.max(minWidth, Math.min(maxWidth, width)) })
       },
 

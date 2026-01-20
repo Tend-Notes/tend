@@ -58,9 +58,10 @@ async fn main() -> anyhow::Result<()> {
                 info!("Running scheduled backup...");
                 backup_state.broadcast(WsEvent::BackupStarted);
 
-                // Acquire lock and run backup
-                let _lock = backup_state.file_manager.acquire_exclusive_lock().await;
-                match backup_state.backup_manager.backup() {
+                // Acquire garden lock and run backup
+                let garden = backup_state.garden.read().await;
+                let _lock = garden.file_manager.acquire_exclusive_lock().await;
+                match garden.backup_manager.backup() {
                     Ok(result) => {
                         if result.commit_sha.is_some() {
                             info!("Scheduled backup completed: {}", result.message);
@@ -84,10 +85,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Start file watcher for real-time updates
+    // Note: The file watcher watches the initial garden. When switching gardens,
+    // file change notifications from the old garden will be ignored since paths won't match.
+    // A proper solution would restart the watcher on garden switch.
     {
         let watcher_state = Arc::clone(&state);
-        let pending_writes = state.file_manager.pending_writes();
-        let root = config.data_dir.clone();
+        let garden = state.garden.read().await;
+        let pending_writes = garden.file_manager.pending_writes();
+        let root = garden.data_dir.clone();
+        drop(garden); // Release lock before spawning
 
         match SimpleFileWatcher::new(&root, pending_writes) {
             Ok(watcher) => {
@@ -97,9 +103,20 @@ async fn main() -> anyhow::Result<()> {
                     // Keep watcher alive
                     let _watcher = watcher;
 
-                    info!("File watcher started");
+                    info!("File watcher started for: {}", root.display());
 
                     while let Ok(event) = rx.recv().await {
+                        // Check if this is still the active garden
+                        let current_root = {
+                            let garden = watcher_state.garden.read().await;
+                            garden.data_dir.clone()
+                        };
+
+                        // Skip events if garden has changed
+                        if current_root != root {
+                            continue;
+                        }
+
                         // Convert file path to page name
                         let (path, event_type) = match &event {
                             FileEvent::Created(p) | FileEvent::Modified(p) => {

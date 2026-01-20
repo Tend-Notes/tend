@@ -151,6 +151,58 @@ export const git = {
     }),
 }
 
+// Garden types
+export interface Garden {
+  id: string
+  name: string
+  path: string
+}
+
+export interface ArchivedGarden {
+  id: string
+  name: string
+  path: string
+  archived_at: string  // snake_case from Rust API
+}
+
+export interface GardensResponse {
+  gardens: Garden[]
+  active: string
+  archived?: ArchivedGarden[]
+}
+
+// Gardens API
+export const gardens = {
+  list: () => fetchJson<GardensResponse>(`${API_BASE}/gardens`),
+
+  create: (name: string, path: string) =>
+    fetchJson<Garden>(`${API_BASE}/gardens`, {
+      method: 'POST',
+      body: JSON.stringify({ name, path }),
+    }),
+
+  archive: (id: string) =>
+    fetchJson<{ archived: string; message: string }>(`${API_BASE}/gardens/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
+
+  restore: (id: string) =>
+    fetchJson<Garden>(`${API_BASE}/gardens/${encodeURIComponent(id)}/restore`, {
+      method: 'POST',
+    }),
+
+  deletePermanent: (id: string) =>
+    fetchJson<{ deleted: string; message: string }>(`${API_BASE}/gardens/${encodeURIComponent(id)}/permanent`, {
+      method: 'DELETE',
+    }),
+
+  switch: (id: string) =>
+    fetchJson<{ active: string; message: string }>(`${API_BASE}/gardens/switch`, {
+      method: 'POST',
+      body: JSON.stringify({ id }),
+    }),
+}
+
 // Block data format for API requests
 interface BlockData {
   uuid: string

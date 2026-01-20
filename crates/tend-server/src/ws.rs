@@ -50,6 +50,9 @@ pub enum WsEvent {
 
     /// Connection established (sent on connect)
     Connected,
+
+    /// Garden was switched (hot-reload)
+    GardenSwitched { garden_id: String },
 }
 
 /// Sender for broadcasting events to all connected clients

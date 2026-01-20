@@ -9,7 +9,7 @@ export type SidebarMode = 'navigation' | 'history' | 'graph' | 'options'
 
 // Resize constraints
 const MIN_WIDTH = 279
-const getMaxWidth = () => (typeof window !== 'undefined' ? window.innerWidth * 0.5 : 600)
+const getMaxWidth = () => (typeof window !== 'undefined' ? window.innerWidth * 0.4 : 500)
 
 interface SidebarProps {
   mode: SidebarMode
@@ -333,8 +333,6 @@ function ResizeHandle({
     }
   }, [isDragging, onResize, onResizeEnd])
 
-  const showPill = isDragging || isHovered
-
   return (
     <div
       className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize flex items-center justify-center group"
@@ -342,13 +340,12 @@ function ResizeHandle({
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Drag pill - centered vertically */}
+      {/* Drag pill - always visible but subtle, more prominent on hover/drag */}
       <div
         className={`
           w-1 h-12 rounded-full
           transition-all duration-150 ease-out
-          ${showPill ? 'bg-base-04 opacity-100' : 'bg-base-03 opacity-0'}
-          ${isDragging ? 'bg-base-05 scale-y-110' : ''}
+          ${isDragging ? 'bg-base-05 scale-y-110' : isHovered ? 'bg-base-04' : 'bg-base-02'}
         `}
       />
     </div>

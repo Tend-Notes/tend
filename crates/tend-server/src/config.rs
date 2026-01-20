@@ -60,10 +60,71 @@ fn default_port() -> u16 {
         .unwrap_or(3000)
 }
 
+/// Get the base directory for all Tend data (gardens.json lives here)
+pub fn base_data_dir() -> PathBuf {
+    use directories::ProjectDirs;
+
+    // 1. Explicit environment variable override
+    if let Ok(path) = std::env::var("TEND_BASE_DIR") {
+        return PathBuf::from(path);
+    }
+
+    // 2. Check for system service path (running as tend user or root)
+    // NixOS/systemd uses StateDirectory=tend which creates /var/lib/tend
+    let system_path = PathBuf::from("/var/lib/tend");
+    if system_path.exists() {
+        return system_path;
+    }
+
+    // 3. XDG data directory for regular users (~/.local/share/tend on Linux)
+    if let Some(proj_dirs) = ProjectDirs::from("", "", "tend") {
+        let tend_dir = proj_dirs.data_dir().to_path_buf();
+        // Create if it doesn't exist
+        if !tend_dir.exists() {
+            let _ = std::fs::create_dir_all(&tend_dir);
+        }
+        return tend_dir;
+    }
+
+    // 4. Fallback to home directory
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".tend");
+    }
+
+    // 5. Last resort: current directory (development)
+    PathBuf::from("./data")
+}
+
 fn default_data_dir() -> PathBuf {
-    std::env::var("TEND_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("./data"))
+    // First check environment variable for specific garden path
+    if let Ok(path) = std::env::var("TEND_DATA_DIR") {
+        return PathBuf::from(path);
+    }
+
+    let base_dir = base_data_dir();
+
+    // Then check gardens.json for active garden
+    let gardens_path = base_dir.join("gardens.json");
+    if gardens_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&gardens_path) {
+            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(active_id) = config.get("active").and_then(|v| v.as_str()) {
+                    if let Some(gardens) = config.get("gardens").and_then(|v| v.as_array()) {
+                        for garden in gardens {
+                            if garden.get("id").and_then(|v| v.as_str()) == Some(active_id) {
+                                if let Some(path) = garden.get("path").and_then(|v| v.as_str()) {
+                                    return PathBuf::from(path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Default fallback: Notes garden in base directory
+    base_dir.join("Notes")
 }
 
 fn default_static_dir() -> PathBuf {
