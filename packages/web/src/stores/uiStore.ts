@@ -32,7 +32,7 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       sidebarOpen: false,
-      sidebarWidth: 285,
+      sidebarWidth: 328, // ~15% wider than previous default (285)
       backlinksOpen: false,
       graphOpen: false,
       searchOpen: false,
@@ -41,8 +41,12 @@ export const useUIStore = create<UIState>()(
       toggleSidebar: () =>
         set((state) => ({ sidebarOpen: !state.sidebarOpen })),
 
-      setSidebarWidth: (width) =>
-        set({ sidebarWidth: Math.max(200, Math.min(400, width)) }),
+      setSidebarWidth: (width) => {
+        // Min: 15% smaller than default (279px), Max: 50% of viewport
+        const minWidth = 279
+        const maxWidth = typeof window !== 'undefined' ? window.innerWidth * 0.5 : 600
+        set({ sidebarWidth: Math.max(minWidth, Math.min(maxWidth, width)) })
+      },
 
       toggleBacklinks: () =>
         set((state) => ({ backlinksOpen: !state.backlinksOpen })),
