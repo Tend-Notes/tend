@@ -4,6 +4,8 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useGitStore, SMART_THRESHOLDS } from '../stores/gitStore'
 import { usePageStore } from '../stores/pageStore'
+import { useActivityLogStore } from '../stores/activityLogStore'
+import { useSyncStatusStore } from '../stores/syncStatusStore'
 import * as api from '../lib/api'
 
 // Calculate total character count from blocks
@@ -23,6 +25,7 @@ export function useAutoCommit() {
   } = useGitStore()
 
   const { currentPage } = usePageStore()
+  const addLogEntry = useActivityLogStore((state) => state.addEntry)
 
   // Track previous character count to detect changes
   const prevCharCountRef = useRef<number>(0)
@@ -37,6 +40,7 @@ export function useAutoCommit() {
       const status = await api.git.status()
       if (!status.hasChanges) {
         console.log('[AutoCommit] No changes to commit')
+        // Don't log "no changes" - it would be noisy
         return
       }
 
@@ -45,11 +49,15 @@ export function useAutoCommit() {
         console.log('[AutoCommit] Success:', result.message)
         const totalChars = currentPage ? calculateTotalChars(currentPage.blocks) : 0
         recordCommit(totalChars)
+        addLogEntry('git_auto_commit', result.message || 'Auto-commit', result.commitSha?.slice(0, 7))
+        // Update sync status to "stored" (in version history)
+        useSyncStatusStore.getState().recordCommit()
       }
     } catch (err) {
       console.error('[AutoCommit] Failed:', err)
+      addLogEntry('git_error', 'Auto-commit failed', err instanceof Error ? err.message : 'Unknown error')
     }
-  }, [autoCommitEnabled, currentPage, recordCommit])
+  }, [autoCommitEnabled, currentPage, recordCommit, addLogEntry])
 
   // Track character changes when blocks update
   useEffect(() => {

@@ -25,6 +25,7 @@ interface BlockProps {
   onMoveBlockDown: (uuid: string) => void
   onPasteBlocks: (afterUuid: string) => void
   flatBlockOrder: string[]
+  readonly?: boolean
 }
 
 // Wiki-link state for autocomplete popup
@@ -104,6 +105,7 @@ export function BlockComponent({
   onMoveBlockDown,
   onPasteBlocks,
   flatBlockOrder,
+  readonly = false,
 }: BlockProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const lastContentRef = useRef(block.content)
@@ -1316,17 +1318,17 @@ export function BlockComponent({
         <div className="relative flex-1">
           <div
             ref={editorRef}
-            contentEditable
+            contentEditable={!readonly}
             suppressContentEditableWarning
-            className="block-content outline-none min-h-[1.5em] whitespace-pre-wrap"
-            onInput={handleInput}
-            onKeyDown={handleKeyDown}
-            onMouseDown={handleEditorMouseDown}
-            onFocus={handleEditorFocus}
-            onBlur={handleEditorBlur}
-            data-placeholder="Type something..."
+            className={`block-content outline-none min-h-[1.5em] whitespace-pre-wrap ${readonly ? 'cursor-default' : ''}`}
+            onInput={readonly ? undefined : handleInput}
+            onKeyDown={readonly ? undefined : handleKeyDown}
+            onMouseDown={readonly ? undefined : handleEditorMouseDown}
+            onFocus={readonly ? undefined : handleEditorFocus}
+            onBlur={readonly ? undefined : handleEditorBlur}
+            data-placeholder={readonly ? undefined : "Type something..."}
           />
-          <SmoothCaret containerRef={editorRef} isActive={isEditorFocused} />
+          {!readonly && <SmoothCaret containerRef={editorRef} isActive={isEditorFocused} />}
         </div>
       </div>
 

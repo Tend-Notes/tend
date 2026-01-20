@@ -7,6 +7,8 @@ import type { Page, PageMeta, Block } from '../types'
 import * as api from '../lib/api'
 import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
+import { useActivityLogStore } from './activityLogStore'
+import { useSyncStatusStore } from './syncStatusStore'
 
 interface PageState {
   // Current page/journal being viewed
@@ -59,15 +61,19 @@ interface PageState {
 }
 
 // Helper to build URL path for content
+// Encodes each path segment separately to preserve directory structure
 function buildUrlPath(type: 'page' | 'journal', name: string): string {
-  return `/${type}/${encodeURIComponent(name)}`
+  const encodedSegments = name.split('/').map(segment => encodeURIComponent(segment))
+  return `/${type}/${encodedSegments.join('/')}`
 }
 
 // Helper to parse URL path into type and name
+// Decodes each path segment separately to preserve directory structure
 function parseUrlPath(path: string): { type: 'page' | 'journal' | null; name: string | null } {
   const match = path.match(/^\/(page|journal)\/(.+)$/)
   if (match) {
-    return { type: match[1] as 'page' | 'journal', name: decodeURIComponent(match[2]) }
+    const decodedSegments = match[2].split('/').map(segment => decodeURIComponent(segment))
+    return { type: match[1] as 'page' | 'journal', name: decodedSegments.join('/') }
   }
   return { type: null, name: null }
 }
@@ -403,6 +409,9 @@ export const usePageStore = create<PageState>()(
         }
       })
 
+      // Update sync status to unsaved
+      useSyncStatusStore.getState().setUnsaved()
+
       // Debounced draft save (faster than server save for data loss prevention)
       if (draftTimeout) {
         clearTimeout(draftTimeout)
@@ -452,6 +461,9 @@ export const usePageStore = create<PageState>()(
           // Server save succeeded - clear the draft and pending save data
           pendingSaveData = null
           await draftStore.deleteDraft(pageName)
+          // Log the save activity and update sync status
+          useActivityLogStore.getState().addEntry('file_save', pageName)
+          useSyncStatusStore.getState().setSaved()
           set((state) => {
             state.hasUnsavedChanges = false
             if (state.currentPage && state.currentPage.name === pageName) {
@@ -600,6 +612,9 @@ export const usePageStore = create<PageState>()(
           }
 
           await draftStore.deleteDraft(pageName)
+          // Log the save activity and update sync status
+          useActivityLogStore.getState().addEntry('file_save', pageName)
+          useSyncStatusStore.getState().setSaved()
           set((state) => {
             state.hasUnsavedChanges = false
             if (state.currentPage && state.currentPage.name === pageName) {

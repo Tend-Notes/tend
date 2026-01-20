@@ -1,10 +1,25 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
+import { useEffect } from 'react'
 import { usePageStore } from '../../stores/pageStore'
+import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { OutlinerEditor } from '../editor/OutlinerEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
+import { ActivityLog } from '../ui/ActivityLog'
+import { SaveStatus } from '../ui/SaveStatus'
 
 export function MainContent() {
-  const { currentPage, isLoading, error, hasUnsavedChanges } = usePageStore()
+  const { currentPage, isLoading, error } = usePageStore()
+  const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
+
+  // Check git status when page changes
+  useEffect(() => {
+    if (currentPage) {
+      const filePath = currentPage.isJournal
+        ? `journals/${currentPage.journalDate}.md`
+        : `pages/${currentPage.name}.md`
+      checkGitStatus(filePath)
+    }
+  }, [currentPage?.name, currentPage?.isJournal, checkGitStatus])
 
   if (isLoading) {
     return (
@@ -36,18 +51,14 @@ export function MainContent() {
       <div className="flex-1 overflow-y-auto">
         {/* Key changes with page name to trigger crossfade animation */}
         <div key={currentPage.name} className="page-content max-w-2xl mx-auto px-6 py-12">
-          {/* Page title with unsaved indicator */}
+          {/* Page title with save status */}
           <div className="flex items-center gap-3 mb-8">
             <h1 className="text-xl font-semibold text-base-06">{currentPage.title}</h1>
-            {hasUnsavedChanges && (
-              <span className="text-xs text-base-03" title="Changes not yet saved to server">
-                (unsaved)
-              </span>
-            )}
+            <SaveStatus />
           </div>
 
           {/* Editor */}
-          <OutlinerEditor page={currentPage} />
+          <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
 
           {/* Backlinks panel - only show for non-journal pages */}
           {!currentPage.isJournal && (
@@ -55,6 +66,9 @@ export function MainContent() {
           )}
         </div>
       </div>
+
+      {/* Activity log at the bottom */}
+      <ActivityLog />
     </main>
   )
 }

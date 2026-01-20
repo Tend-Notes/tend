@@ -11,9 +11,10 @@ import { v4 as uuidv4 } from 'uuid'
 
 interface OutlinerEditorProps {
   page: Page
+  readonly?: boolean
 }
 
-export function OutlinerEditor({ page }: OutlinerEditorProps) {
+export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) {
   const updateCurrentPage = usePageStore((state) => state.updateCurrentPage)
   const { getSelectedUuids, hasMultiBlockSelection, clearSelection } = useSelectionStore()
 
@@ -914,6 +915,7 @@ export function OutlinerEditor({ page }: OutlinerEditorProps) {
         onMoveBlockDown={handleMoveBlockDown}
         onPasteBlocks={pasteBlocks}
         flatBlockOrder={flatBlockOrder}
+        readonly={readonly}
       >
         {!block.collapsed &&
           children.map((child) => renderBlock(child))}
