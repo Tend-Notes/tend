@@ -12,7 +12,7 @@ const shortcuts = [
     { keys: ['Alt', 'Shift', 'S'], description: 'Toggle sidebar' },
     { keys: ['Alt', 'Shift', 'F'], description: 'Search' },
     { keys: ['Alt', 'Shift', 'O'], description: 'Open options' },
-    { keys: ['?'], description: 'Show keyboard shortcuts' },
+    { keys: ['Ctrl', 'Shift', '/'], description: 'Show keyboard shortcuts' },
   ]},
   { category: 'Editor', items: [
     { keys: ['Enter'], description: 'Create new block' },
@@ -88,6 +88,7 @@ export function KeyboardHelp({ open, onClose }: KeyboardHelpProps) {
         <div className="mt-6 pt-4 border-t border-base-02 text-center">
           <span className="text-xs text-base-04">
             Press <kbd className="px-1.5 py-0.5 bg-base-02 text-base-05 rounded text-xs">Esc</kbd> or{' '}
+            <kbd className="px-1.5 py-0.5 bg-base-02 text-base-05 rounded text-xs">Ctrl</kbd>+
             <kbd className="px-1.5 py-0.5 bg-base-02 text-base-05 rounded text-xs">Shift</kbd>+
             <kbd className="px-1.5 py-0.5 bg-base-02 text-base-05 rounded text-xs">/</kbd> to close
           </span>

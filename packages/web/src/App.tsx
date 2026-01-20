@@ -82,8 +82,8 @@ function App() {
         }
       }
 
-      // Shift + / (?) - Toggle keyboard help (works even when editing)
-      if (e.shiftKey && e.key === '?') {
+      // Ctrl + Shift + / - Toggle keyboard help (works even when editing)
+      if (e.ctrlKey && e.shiftKey && e.code === 'Slash') {
         e.preventDefault()
         setKeyboardHelpOpen((prev) => !prev)
         return
