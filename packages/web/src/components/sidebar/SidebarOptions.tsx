@@ -976,6 +976,8 @@ function GardensSection() {
   const [newGardenEncrypted, setNewGardenEncrypted] = useState(false)
   const [newGardenPassphrase, setNewGardenPassphrase] = useState('')
   const [newGardenPassphraseConfirm, setNewGardenPassphraseConfirm] = useState('')
+  const [newGardenSearchEnabled, setNewGardenSearchEnabled] = useState(false)
+  const [newGardenIndexTtl, setNewGardenIndexTtl] = useState(6)
   const [creating, setCreating] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -1040,6 +1042,9 @@ function GardensSection() {
           // Default path: base data dir + garden name
           path: `~/.local/share/tend/${newGardenName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
           passphrase: newGardenEncrypted ? newGardenPassphrase : undefined,
+          // Search options for encrypted gardens
+          search_enabled: newGardenEncrypted ? newGardenSearchEnabled : undefined,
+          index_ttl_hours: newGardenEncrypted && newGardenSearchEnabled ? newGardenIndexTtl : undefined,
         }),
       })
 
@@ -1059,6 +1064,8 @@ function GardensSection() {
       setNewGardenEncrypted(false)
       setNewGardenPassphrase('')
       setNewGardenPassphraseConfirm('')
+      setNewGardenSearchEnabled(false)
+      setNewGardenIndexTtl(6)
       setShowNewForm(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create garden')
@@ -1449,6 +1456,49 @@ function GardensSection() {
                   <p className="text-[10px] text-base-0A leading-tight">
                     Warning: If you forget your passphrase, your notes cannot be recovered. There is no password reset.
                   </p>
+
+                  {/* Search options for encrypted gardens */}
+                  <div className="pt-2 border-t border-base-02 space-y-2">
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newGardenSearchEnabled}
+                        onChange={(e) => setNewGardenSearchEnabled(e.target.checked)}
+                        className="w-3.5 h-3.5 accent-base-0D mt-0.5"
+                      />
+                      <div>
+                        <span className="text-xs text-base-04">Enable full-text search</span>
+                        <p className="text-[10px] text-base-0A leading-tight">
+                          Creates a plaintext index in .tend/ for search. This exposes your note contents on disk.
+                        </p>
+                      </div>
+                    </label>
+
+                    {/* Index TTL (shown when search is enabled) */}
+                    {newGardenSearchEnabled && (
+                      <div className="pl-5 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-base-04">Auto-delete index after</span>
+                          <input
+                            type="number"
+                            min={0}
+                            max={168}
+                            value={newGardenIndexTtl}
+                            onChange={(e) => setNewGardenIndexTtl(Number(e.target.value))}
+                            className="w-12 bg-base-00 border border-base-02 rounded px-1.5 py-0.5 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                          />
+                          <span className="text-xs text-base-03">hours of non-use</span>
+                        </div>
+                        <p className="text-[10px] text-base-03 leading-tight">
+                          When you enable index expiration, the index will be recreated when it is next used. This may impact performance and will create a plaintext index until it auto-deletes. To keep the index indefinitely without deleting, set expiration to 0.
+                        </p>
+                      </div>
+                    )}
+
+                    <p className="text-[10px] text-base-08 leading-tight">
+                      Note: Filenames are NOT encrypted and remain visible on disk.
+                    </p>
+                  </div>
                 </div>
               )}
 

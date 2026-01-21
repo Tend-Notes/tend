@@ -4,6 +4,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { usePageStore } from '../../stores/pageStore'
 import * as api from '../../lib/api'
 import type { SearchResult } from '../../types'
+import type { SearchStatus } from '../../lib/api'
 
 export function SearchPanel() {
   const { searchOpen, closeSearch } = useUIStore()
@@ -12,23 +13,27 @@ export function SearchPanel() {
   const [results, setResults] = useState<SearchResult[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
+  const [searchStatus, setSearchStatus] = useState<SearchStatus | null>(null)
 
   // Search when query changes (debounced)
   useEffect(() => {
     if (!query.trim()) {
       setResults([])
+      setSearchStatus(null)
       return
     }
 
     const timeout = setTimeout(async () => {
       setIsLoading(true)
       try {
-        const searchResults = await api.search.query(query, 20)
-        setResults(searchResults)
+        const response = await api.search.query(query, 20)
+        setResults(response.results)
+        setSearchStatus(response.status || null)
         setSelectedIndex(0)
       } catch (e) {
         console.error('Search failed:', e)
         setResults([])
+        setSearchStatus(null)
       } finally {
         setIsLoading(false)
       }
@@ -42,6 +47,7 @@ export function SearchPanel() {
     if (searchOpen) {
       setQuery('')
       setResults([])
+      setSearchStatus(null)
       setSelectedIndex(0)
     }
   }, [searchOpen])
@@ -94,13 +100,39 @@ export function SearchPanel() {
         />
 
         <div className="max-h-96 overflow-y-auto">
+          {/* Search disabled warning for encrypted gardens */}
+          {searchStatus?.disabled && (
+            <div className="py-6 px-4 text-center">
+              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-base-0A/10 text-base-0A border border-base-0A/20">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m0 0v2m0-2h2m-2 0H10m9.364-7.536a9 9 0 11-12.728 0M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                <span className="text-sm">
+                  {searchStatus.message || 'Search is disabled for this encrypted garden'}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Index needs rebuilding */}
+          {searchStatus && !searchStatus.disabled && searchStatus.message && (
+            <div className="py-4 px-4 text-center">
+              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-base-0D/10 text-base-0D border border-base-0D/20">
+                <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                <span className="text-sm">{searchStatus.message}</span>
+              </div>
+            </div>
+          )}
+
           {isLoading && (
             <div className="py-4 text-center text-sm text-base-04">
               Searching...
             </div>
           )}
 
-          {!isLoading && query && results.length === 0 && (
+          {!isLoading && !searchStatus?.disabled && query && results.length === 0 && !searchStatus?.message && (
             <div className="py-6 text-center text-sm text-base-04">
               No results found
             </div>

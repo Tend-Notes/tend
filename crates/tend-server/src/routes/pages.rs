@@ -52,9 +52,9 @@ pub async fn create_page(
 
     garden.file_manager.write_page(&page).await?;
 
-    // Index the new page
-    {
-        let mut index = garden.search_index.write().await;
+    // Index the new page (if search is enabled)
+    if let Some(search_index) = &garden.search_index {
+        let mut index = search_index.write().await;
         index.index_page(&page)?;
         index.commit()?;
     }
@@ -157,9 +157,9 @@ pub async fn update_page(
     page.touch();
     garden.file_manager.write_page(&page).await?;
 
-    // Update search index
-    {
-        let mut index = garden.search_index.write().await;
+    // Update search index (if search is enabled)
+    if let Some(search_index) = &garden.search_index {
+        let mut index = search_index.write().await;
         index.index_page(&page)?;
         index.commit()?;
     }
@@ -176,9 +176,9 @@ pub async fn delete_page(
     let garden = state.garden.read().await;
     garden.file_manager.delete_page(&name).await?;
 
-    // Remove from search index
-    {
-        let mut index = garden.search_index.write().await;
+    // Remove from search index (if search is enabled)
+    if let Some(search_index) = &garden.search_index {
+        let mut index = search_index.write().await;
         index.remove_page(&name)?;
         index.commit()?;
     }

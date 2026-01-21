@@ -195,12 +195,26 @@ Tend supports optional encryption for gardens. When you create an encrypted gard
 - Files are stored as `.md.age` instead of `.md`
 - The passphrase is kept in memory while the garden is unlocked
 - When switching to an encrypted garden, you must enter the passphrase
-- The search index (in `.tend/`) contains decrypted snippets for search
+
+### What Is NOT Encrypted
+
+**Filenames are not encrypted.** Page names like `My Secret Project.md.age` remain visible in the filesystem. If your page titles contain sensitive information, consider using neutral names.
+
+### Search and Encrypted Gardens
+
+By default, **search is disabled** for encrypted gardens. This is a security measure because the search index stores the full plaintext content of all blocks.
+
+When creating an encrypted garden, you can choose to:
+
+1. **Disable search entirely** (default) - No search index is created. Searching an encrypted garden will show a message explaining this.
+
+2. **Enable search with auto-expiry** - A plaintext search index is created in `.tend/search_index/`. You can configure the index to auto-delete after a period of inactivity (default: 6 hours). The index will be rebuilt from scratch when you search again after expiry, which may cause brief delays for large gardens.
 
 ### Security Notes
 
 - **Passphrase recovery is not possible.** If you forget your passphrase, your notes cannot be recovered.
-- The search index contains text snippets. For maximum security, delete `.tend/` when not using the garden.
+- **Filenames are visible.** Only file contents are encrypted, not page names.
+- If search is enabled, the index in `.tend/` contains full block text. For maximum security, either disable search or delete `.tend/` when not using the garden.
 - Encryption only protects files at rest. Anyone with access to the running server can read decrypted content.
 
 ### Recovering Files Outside Tend

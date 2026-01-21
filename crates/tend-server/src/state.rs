@@ -4,6 +4,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::NaiveDate;
 use tend_core::{Page, PageMeta};
@@ -15,6 +16,31 @@ use tracing::info;
 
 use crate::config::{base_data_dir, Config, GitConfig};
 use crate::ws::{EventSender, WsEvent};
+
+/// Search configuration for a garden
+#[derive(Debug, Clone)]
+pub struct SearchConfig {
+    /// Whether search is enabled
+    pub enabled: bool,
+    /// Hours after last use before index is auto-deleted (0 = never)
+    pub ttl_hours: u32,
+}
+
+impl Default for SearchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl_hours: 0,
+        }
+    }
+}
+
+/// Garden info returned from config lookup
+struct GardenInfo {
+    path: String,
+    encrypted: bool,
+    search_config: SearchConfig,
+}
 
 /// Unified file manager that handles both encrypted and unencrypted gardens
 pub enum UnifiedFileManager {
@@ -124,10 +150,15 @@ impl UnifiedFileManager {
 pub struct GardenState {
     pub data_dir: PathBuf,
     pub file_manager: UnifiedFileManager,
-    pub search_index: Arc<RwLock<SearchIndex>>,
+    /// Search index - None if search is disabled for this garden
+    pub search_index: Option<Arc<RwLock<SearchIndex>>>,
     pub backup_manager: BackupManager,
     /// Whether this garden is encrypted
     pub encrypted: bool,
+    /// Search configuration
+    pub search_config: SearchConfig,
+    /// Last time the search index was used (for TTL tracking)
+    pub last_search_use: Arc<RwLock<Option<Instant>>>,
 }
 
 impl GardenState {
@@ -139,6 +170,7 @@ impl GardenState {
             UnifiedFileManager::Plain(file_manager),
             git_config,
             false,
+            SearchConfig::default(), // Search always enabled for unencrypted
         )
         .await
     }
@@ -148,6 +180,7 @@ impl GardenState {
         data_dir: PathBuf,
         passphrase: String,
         git_config: &GitConfig,
+        search_config: SearchConfig,
     ) -> anyhow::Result<Self> {
         // Verify passphrase first
         if !EncryptedFileManager::verify_passphrase(&data_dir, &passphrase)? {
@@ -160,6 +193,7 @@ impl GardenState {
             UnifiedFileManager::Encrypted(file_manager),
             git_config,
             true,
+            search_config,
         )
         .await
     }
@@ -170,49 +204,60 @@ impl GardenState {
         file_manager: UnifiedFileManager,
         git_config: &GitConfig,
         encrypted: bool,
+        search_config: SearchConfig,
     ) -> anyhow::Result<Self> {
-        // Initialize search index
-        let index_path = data_dir.join(".tend").join("search_index");
-        let search_index = SearchIndex::open(&index_path)?;
-        let search_index = Arc::new(RwLock::new(search_index));
-
         // Initialize backup manager
         let backup_manager = BackupManager::new(&data_dir, git_config.auto_push);
 
-        // Index existing pages
-        info!(
-            "Indexing pages for {} garden: {}",
-            if encrypted { "encrypted" } else { "plain" },
-            data_dir.display()
-        );
-        {
-            let mut index = search_index.write().await;
+        // Initialize search index only if search is enabled
+        let search_index = if search_config.enabled {
+            let index_path = data_dir.join(".tend").join("search_index");
+            let search_index = SearchIndex::open(&index_path)?;
+            let search_index = Arc::new(RwLock::new(search_index));
 
-            // Index pages
-            let pages = file_manager.list_pages().await?;
-            for page_meta in pages {
-                if let Ok(page) = file_manager.read_page(&page_meta.name).await {
-                    if let Err(e) = index.index_page(&page) {
-                        tracing::warn!("Failed to index page {}: {}", page_meta.name, e);
-                    }
-                }
-            }
+            // Index existing pages
+            info!(
+                "Indexing pages for {} garden: {}",
+                if encrypted { "encrypted" } else { "plain" },
+                data_dir.display()
+            );
+            {
+                let mut index = search_index.write().await;
 
-            // Index journals
-            let journals = file_manager.list_journals().await?;
-            for journal_meta in journals {
-                if let Some(date) = journal_meta.journal_date {
-                    if let Ok(page) = file_manager.read_journal(date).await {
+                // Index pages
+                let pages = file_manager.list_pages().await?;
+                for page_meta in pages {
+                    if let Ok(page) = file_manager.read_page(&page_meta.name).await {
                         if let Err(e) = index.index_page(&page) {
-                            tracing::warn!("Failed to index journal {}: {}", journal_meta.name, e);
+                            tracing::warn!("Failed to index page {}: {}", page_meta.name, e);
                         }
                     }
                 }
-            }
 
-            index.commit()?;
-        }
-        info!("Indexing complete for garden: {}", data_dir.display());
+                // Index journals
+                let journals = file_manager.list_journals().await?;
+                for journal_meta in journals {
+                    if let Some(date) = journal_meta.journal_date {
+                        if let Ok(page) = file_manager.read_journal(date).await {
+                            if let Err(e) = index.index_page(&page) {
+                                tracing::warn!("Failed to index journal {}: {}", journal_meta.name, e);
+                            }
+                        }
+                    }
+                }
+
+                index.commit()?;
+            }
+            info!("Indexing complete for garden: {}", data_dir.display());
+            Some(search_index)
+        } else {
+            info!(
+                "Search disabled for {} garden: {}",
+                if encrypted { "encrypted" } else { "plain" },
+                data_dir.display()
+            );
+            None
+        };
 
         Ok(Self {
             data_dir,
@@ -220,7 +265,41 @@ impl GardenState {
             search_index,
             backup_manager,
             encrypted,
+            search_config,
+            last_search_use: Arc::new(RwLock::new(None)),
         })
+    }
+
+    /// Check if the search index has expired based on TTL
+    pub async fn is_index_expired(&self) -> bool {
+        if self.search_config.ttl_hours == 0 {
+            return false; // No TTL, never expires
+        }
+
+        let last_use = self.last_search_use.read().await;
+        match *last_use {
+            Some(instant) => {
+                let elapsed = instant.elapsed();
+                elapsed.as_secs() > (self.search_config.ttl_hours as u64 * 3600)
+            }
+            None => false, // Never used, don't expire immediately
+        }
+    }
+
+    /// Mark the search index as used (resets TTL timer)
+    pub async fn touch_search_index(&self) {
+        let mut last_use = self.last_search_use.write().await;
+        *last_use = Some(Instant::now());
+    }
+
+    /// Delete the search index (for TTL expiry)
+    pub async fn delete_search_index(&self) -> anyhow::Result<()> {
+        let index_path = self.data_dir.join(".tend").join("search_index");
+        if index_path.exists() {
+            tokio::fs::remove_dir_all(&index_path).await?;
+            info!("Deleted expired search index: {}", index_path.display());
+        }
+        Ok(())
     }
 }
 
@@ -252,10 +331,10 @@ impl AppState {
     /// Switch to a different garden by ID.
     /// For encrypted gardens, returns an error indicating unlock is required.
     pub async fn switch_garden(&self, garden_id: &str) -> anyhow::Result<PathBuf> {
-        let (garden_path, encrypted) = self.get_garden_info(garden_id)?;
-        let new_data_dir = PathBuf::from(&garden_path);
+        let info = self.get_garden_info(garden_id)?;
+        let new_data_dir = PathBuf::from(&info.path);
 
-        if encrypted {
+        if info.encrypted {
             return Err(anyhow::anyhow!("UNLOCK_REQUIRED:{}", garden_id));
         }
 
@@ -290,13 +369,13 @@ impl AppState {
         garden_id: &str,
         passphrase: String,
     ) -> anyhow::Result<PathBuf> {
-        let (garden_path, encrypted) = self.get_garden_info(garden_id)?;
+        let info = self.get_garden_info(garden_id)?;
 
-        if !encrypted {
+        if !info.encrypted {
             return Err(anyhow::anyhow!("Garden '{}' is not encrypted", garden_id));
         }
 
-        let new_data_dir = PathBuf::from(&garden_path);
+        let new_data_dir = PathBuf::from(&info.path);
 
         info!(
             "Switching to encrypted garden: {} at {}",
@@ -305,8 +384,13 @@ impl AppState {
         );
 
         // Create new encrypted garden state (this verifies the passphrase)
-        let new_garden =
-            GardenState::new_encrypted(new_data_dir.clone(), passphrase, &self.config.git).await?;
+        let new_garden = GardenState::new_encrypted(
+            new_data_dir.clone(),
+            passphrase,
+            &self.config.git,
+            info.search_config,
+        )
+        .await?;
 
         // Swap the garden state
         {
@@ -324,8 +408,8 @@ impl AppState {
         Ok(new_data_dir)
     }
 
-    /// Get garden path and encryption status from config
-    fn get_garden_info(&self, garden_id: &str) -> anyhow::Result<(String, bool)> {
+    /// Get garden info from config
+    fn get_garden_info(&self, garden_id: &str) -> anyhow::Result<GardenInfo> {
         let gardens_path = base_data_dir().join("gardens.json");
         let content = std::fs::read_to_string(&gardens_path)
             .map_err(|e| anyhow::anyhow!("Failed to read gardens config: {}", e))?;
@@ -353,7 +437,25 @@ impl AppState {
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        Ok((path, encrypted))
+        let search_enabled = garden
+            .get("search_enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(!encrypted); // Default: enabled for unencrypted, disabled for encrypted
+
+        let ttl_hours = garden
+            .get("index_ttl_hours")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or(if encrypted { 6 } else { 0 });
+
+        Ok(GardenInfo {
+            path,
+            encrypted,
+            search_config: SearchConfig {
+                enabled: search_enabled,
+                ttl_hours,
+            },
+        })
     }
 
     /// Broadcast an event to all connected WebSocket clients

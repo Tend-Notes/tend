@@ -23,6 +23,23 @@ pub struct Garden {
     /// Whether this garden uses age encryption
     #[serde(default)]
     pub encrypted: bool,
+    /// Whether full-text search is enabled.
+    /// For encrypted gardens, enabling search creates a plaintext index in .tend/
+    /// Defaults to true for unencrypted gardens, false for encrypted.
+    #[serde(default = "default_search_enabled")]
+    pub search_enabled: bool,
+    /// Hours after last use before the search index is auto-deleted (encrypted gardens only).
+    /// Set to 0 to disable auto-deletion. Default is 6 hours.
+    #[serde(default = "default_index_ttl_hours")]
+    pub index_ttl_hours: u32,
+}
+
+fn default_search_enabled() -> bool {
+    true // Will be overridden to false for encrypted gardens at creation
+}
+
+fn default_index_ttl_hours() -> u32 {
+    6
 }
 
 /// Archived garden (kept for 15 days before permanent removal)
@@ -49,6 +66,16 @@ pub struct CreateGardenRequest {
     pub path: String,
     /// Optional passphrase for encrypted gardens. If provided, the garden will be encrypted.
     pub passphrase: Option<String>,
+    /// Whether to enable search for encrypted gardens.
+    /// Ignored for unencrypted gardens (always enabled).
+    /// When enabled, a plaintext search index is stored in .tend/
+    #[serde(default)]
+    pub search_enabled: Option<bool>,
+    /// Hours after last use before the search index is auto-deleted.
+    /// Only applies to encrypted gardens with search enabled.
+    /// Set to 0 to disable auto-deletion. Default is 6 hours.
+    #[serde(default)]
+    pub index_ttl_hours: Option<u32>,
 }
 
 /// Request to switch active garden
@@ -121,6 +148,8 @@ fn default_gardens_config() -> GardensConfig {
             name: "Notes".to_string(),
             path: default_path.to_string_lossy().to_string(),
             encrypted: false,
+            search_enabled: true,
+            index_ttl_hours: 0, // No TTL for unencrypted gardens
         }],
         active: "default".to_string(),
         archived: vec![],
@@ -201,11 +230,25 @@ pub async fn create_garden(
 
     // Store the expanded absolute path
     let encrypted = req.passphrase.is_some();
+
+    // For encrypted gardens: search disabled by default, 6hr TTL if enabled
+    // For unencrypted gardens: search always enabled, no TTL
+    let (search_enabled, index_ttl_hours) = if encrypted {
+        (
+            req.search_enabled.unwrap_or(false), // Default OFF for encrypted
+            req.index_ttl_hours.unwrap_or(6),    // Default 6 hours TTL
+        )
+    } else {
+        (true, 0) // Always on, no TTL for unencrypted
+    };
+
     let garden = Garden {
         id: id.clone(),
         name: req.name,
         path: garden_path.to_string_lossy().to_string(),
         encrypted,
+        search_enabled,
+        index_ttl_hours,
     };
 
     config.gardens.push(garden.clone());

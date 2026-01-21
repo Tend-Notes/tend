@@ -97,10 +97,23 @@ export const journals = {
     }),
 }
 
+/** Search status for encrypted gardens */
+export interface SearchStatus {
+  disabled: boolean
+  rebuilding: boolean
+  message?: string
+}
+
+/** Search response with status information */
+export interface SearchResponse {
+  results: SearchResult[]
+  status?: SearchStatus
+}
+
 // Search API
 export const search = {
   query: (q: string, limit = 20) =>
-    fetchJson<SearchResult[]>(`${API_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+    fetchJson<SearchResponse>(`${API_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 }
 
 // Graph API
@@ -189,6 +202,10 @@ export interface Garden {
   name: string
   path: string
   encrypted?: boolean
+  /** Whether full-text search is enabled (may expose plaintext in .tend/) */
+  searchEnabled?: boolean
+  /** Hours after last use before search index is auto-deleted (0 = never) */
+  indexTtlHours?: number
 }
 
 export interface ArchivedGarden {
@@ -196,6 +213,8 @@ export interface ArchivedGarden {
   name: string
   path: string
   encrypted?: boolean
+  searchEnabled?: boolean
+  indexTtlHours?: number
   archived_at: string  // snake_case from Rust API
 }
 
@@ -213,14 +232,32 @@ export interface SwitchResponse {
   garden_id?: string
 }
 
+/** Options for creating an encrypted garden */
+export interface CreateGardenOptions {
+  name: string
+  path: string
+  /** Passphrase for encryption. If provided, the garden will be encrypted. */
+  passphrase?: string
+  /** Enable search for encrypted gardens (creates plaintext index). Default: false for encrypted. */
+  searchEnabled?: boolean
+  /** Hours after last use before search index is auto-deleted. Default: 6 for encrypted. */
+  indexTtlHours?: number
+}
+
 // Gardens API
 export const gardens = {
   list: () => fetchJson<GardensResponse>(`${API_BASE}/gardens`),
 
-  create: (name: string, path: string, passphrase?: string) =>
+  create: (options: CreateGardenOptions) =>
     fetchJson<Garden>(`${API_BASE}/gardens`, {
       method: 'POST',
-      body: JSON.stringify({ name, path, passphrase }),
+      body: JSON.stringify({
+        name: options.name,
+        path: options.path,
+        passphrase: options.passphrase,
+        search_enabled: options.searchEnabled,
+        index_ttl_hours: options.indexTtlHours,
+      }),
     }),
 
   archive: (id: string) =>

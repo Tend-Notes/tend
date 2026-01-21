@@ -38,9 +38,9 @@ pub async fn get_today(
 
         garden.file_manager.write_page(&new_page).await?;
 
-        // Index the new journal
-        {
-            let mut index = garden.search_index.write().await;
+        // Index the new journal (if search is enabled)
+        if let Some(search_index) = &garden.search_index {
+            let mut index = search_index.write().await;
             index.index_page(&new_page)?;
             index.commit()?;
         }
@@ -130,9 +130,9 @@ pub async fn update_journal(
     page.touch();
     garden.file_manager.write_page(&page).await?;
 
-    // Update search index
-    {
-        let mut index = garden.search_index.write().await;
+    // Update search index (if search is enabled)
+    if let Some(search_index) = &garden.search_index {
+        let mut index = search_index.write().await;
         index.index_page(&page)?;
         index.commit()?;
     }
