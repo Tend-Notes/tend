@@ -45,7 +45,8 @@ pub async fn list_todos(
     let garden = state.garden.read().await;
 
     // Task status keywords to look for
-    let status_pattern = Regex::new(r"^(TODO|DOING|DONE|NOW|LATER|NEVER)\s+(.*)$")
+    // Match keyword at start, optionally followed by whitespace and content
+    let status_pattern = Regex::new(r"^(TODO|DOING|DONE|NOW|LATER|NEVER)(?:\s+(.*))?$")
         .expect("Invalid regex");
 
     let mut tasks = Vec::new();
@@ -57,7 +58,7 @@ pub async fn list_todos(
             for block in page.blocks.values() {
                 if let Some(captures) = status_pattern.captures(&block.content) {
                     let status = captures.get(1).unwrap().as_str().to_string();
-                    let content = captures.get(2).unwrap().as_str().to_string();
+                    let content = captures.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
 
                     tasks.push(TaskItem {
                         uuid: block.uuid.to_string(),
@@ -81,7 +82,7 @@ pub async fn list_todos(
                 for block in page.blocks.values() {
                     if let Some(captures) = status_pattern.captures(&block.content) {
                         let status = captures.get(1).unwrap().as_str().to_string();
-                        let content = captures.get(2).unwrap().as_str().to_string();
+                        let content = captures.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
 
                         tasks.push(TaskItem {
                             uuid: block.uuid.to_string(),

@@ -6,7 +6,7 @@ import { LayoutGroup } from 'framer-motion'
 import type { Page, Block } from '../../types'
 import { usePageStore } from '../../stores/pageStore'
 import { useSelectionStore } from '../../stores/selectionStore'
-import { BlockComponent } from './Block'
+import { BlockComponent, contentOffsetToDomOffset } from './Block'
 import { v4 as uuidv4 } from 'uuid'
 
 interface OutlinerEditorProps {
@@ -16,7 +16,7 @@ interface OutlinerEditorProps {
 
 export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) {
   const updateCurrentPage = usePageStore((state) => state.updateCurrentPage)
-  const { getSelectedUuids, hasMultiBlockSelection, clearSelection } = useSelectionStore()
+  const { getSelectedUuids, hasMultiBlockSelection, clearSelection, setFocusedBlock } = useSelectionStore()
 
   // Get blocks in tree order for rendering
   const rootBlocks = useMemo(() => {
@@ -129,6 +129,8 @@ export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) 
   // Focus a block's editor and position cursor
   // position can be: 'start', 'end', or a number for specific character offset
   const focusBlock = useCallback((blockUuid: string, position: 'start' | 'end' | number) => {
+    // Set focused block synchronously so Shift+Arrow selection works immediately
+    setFocusedBlock(blockUuid)
     requestAnimationFrame(() => {
       const blockEl = document.querySelector(`[data-block-id="${blockUuid}"]`)
       const editorEl = blockEl?.querySelector('[contenteditable]') as HTMLElement
@@ -182,7 +184,7 @@ export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) 
       selection.removeAllRanges()
       selection.addRange(range)
     })
-  }, [])
+  }, [setFocusedBlock])
 
   // Indent a block (make it a child of the previous sibling)
   const handleIndent = useCallback(
@@ -366,11 +368,16 @@ export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) 
     updateCurrentPage(blocks)
     clearSelection()
 
-    // Focus the block after the selection (or before if at end)
-    const lastSelectedIndex = flatBlockOrder.indexOf(selectedUuids[selectedUuids.length - 1])
-    const nextBlockUuid = flatBlockOrder[lastSelectedIndex + 1] || flatBlockOrder[lastSelectedIndex - selectedUuids.length]
-    if (nextBlockUuid && !selectedSet.has(nextBlockUuid)) {
-      focusBlock(nextBlockUuid, 'start')
+    // Focus the block before the selection at its end (more natural for deletion)
+    // If no block before, focus the first remaining block at start
+    const firstSelectedIndex = flatBlockOrder.indexOf(selectedUuids[0])
+    const blockBeforeUuid = firstSelectedIndex > 0 ? flatBlockOrder[firstSelectedIndex - 1] : null
+    const blockAfterUuid = flatBlockOrder[flatBlockOrder.indexOf(selectedUuids[selectedUuids.length - 1]) + 1]
+
+    if (blockBeforeUuid && !selectedSet.has(blockBeforeUuid)) {
+      focusBlock(blockBeforeUuid, 'end')
+    } else if (blockAfterUuid && !selectedSet.has(blockAfterUuid)) {
+      focusBlock(blockAfterUuid, 'start')
     }
   }, [getSelectedUuids, flatBlockOrder, getAllBlocks, updateCurrentPage, clearSelection, focusBlock])
 
@@ -866,6 +873,8 @@ export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) 
       updateCurrentPage(updatedBlocks)
 
       // Focus previous block at the merge point
+      // cursorPos is the content offset (in raw content with delimiters)
+      // We need to convert this to DOM offset since hidden delimiters make DOM shorter
       requestAnimationFrame(() => {
         const blockEl = document.querySelector(`[data-block-id="${previousBlock.uuid}"]`)
         const editorEl = blockEl?.querySelector('[contenteditable]') as HTMLElement
@@ -875,6 +884,11 @@ export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) 
 
         const selection = window.getSelection()
         if (!selection) return
+
+        // The merged content is now in the previous block
+        // Convert content offset to DOM offset accounting for hidden delimiters
+        const mergedContent = prevBlockInArray.content
+        const domCursorPos = contentOffsetToDomOffset(mergedContent, cursorPos, null)
 
         // Use TreeWalker to properly position cursor at the merge point,
         // accounting for formatted content (spans) that may wrap text nodes
@@ -887,9 +901,9 @@ export function OutlinerEditor({ page, readonly = false }: OutlinerEditorProps) 
 
         while ((node = walker.nextNode() as Text | null)) {
           const nodeLength = node.textContent?.length || 0
-          if (currentOffset + nodeLength >= cursorPos) {
+          if (currentOffset + nodeLength >= domCursorPos) {
             // Found the right node - position cursor at the merge point
-            const pos = cursorPos - currentOffset
+            const pos = domCursorPos - currentOffset
             range.setStart(node, pos)
             range.setEnd(node, pos)
             found = true

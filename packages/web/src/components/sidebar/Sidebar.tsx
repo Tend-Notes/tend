@@ -211,15 +211,40 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
         </div>
       ) : (
         <>
-          <div className="sidebar-content flex-1 flex flex-col overflow-hidden">
+          <div className="sidebar-content flex-1 flex flex-col overflow-hidden relative">
             {/* Key changes with mode to trigger animation */}
-            <div key={mode} className="sidebar-mode-content flex-1 flex flex-col overflow-hidden">
+            <div key={mode} className="sidebar-mode-content flex-1 flex flex-col overflow-hidden relative">
               {renderContent()}
             </div>
           </div>
 
-          {/* Bottom toolbar: Graph, Tags, History, Options - always visible when open */}
+          {/* Bottom toolbar: Tasks, Tags, Graph, History, Options - always visible when open */}
           <div className="flex justify-end gap-1 p-[10px] border-t border-base-02">
+            <button
+              onClick={() => onModeChange(mode === 'todos' ? 'navigation' : 'todos')}
+              className={`p-2 rounded-lg transition-colors ${
+                mode === 'todos' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+              }`}
+              style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+              title="Tasks"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => onModeChange(mode === 'tags' ? 'navigation' : 'tags')}
+              className={`p-2 rounded-lg transition-colors ${
+                mode === 'tags' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+              }`}
+              style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+              title="Tags"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+              </svg>
+            </button>
             <button
               onClick={() => onModeChange(mode === 'graph' ? 'navigation' : 'graph')}
               className={`p-2 rounded-lg transition-colors ${
@@ -242,31 +267,6 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 <circle cx="5" cy="18" r="2" />
                 <line x1="12" y1="12" x2="4" y2="9" stroke="currentColor" strokeWidth="1.5" />
                 <circle cx="4" cy="9" r="2" />
-              </svg>
-            </button>
-            <button
-              onClick={() => onModeChange(mode === 'tags' ? 'navigation' : 'tags')}
-              className={`p-2 rounded-lg transition-colors ${
-                mode === 'tags' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
-              }`}
-              style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
-              title="Tags"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
-              </svg>
-            </button>
-            <button
-              onClick={() => onModeChange(mode === 'todos' ? 'navigation' : 'todos')}
-              className={`p-2 rounded-lg transition-colors ${
-                mode === 'todos' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
-              }`}
-              style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
-              title="Tasks"
-            >
-              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
               </svg>
             </button>
             <button

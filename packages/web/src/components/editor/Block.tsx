@@ -75,17 +75,18 @@ interface FormatPattern {
 
 const FORMAT_PATTERNS: FormatPattern[] = [
   // Bold Italic: ***text*** (must come before bold and italic)
-  { key: '*', delimiter: '***', className: 'fmt-bold fmt-italic', regex: /\*\*\*([^*]+)\*\*\*/g, hideDelimiters: true },
+  // Requires trailing boundary (whitespace, punctuation, or end of string)
+  { key: '*', delimiter: '***', className: 'fmt-bold fmt-italic', regex: /\*\*\*([^*]+)\*\*\*(?=\s|[.,;:!?)\]}>]|$)/g, hideDelimiters: true },
   // Bold: **text** (must come before italic)
-  { key: '*', delimiter: '**', className: 'fmt-bold', regex: /(?<!\*)\*\*([^*]+)\*\*(?!\*)/g, hideDelimiters: true },
+  { key: '*', delimiter: '**', className: 'fmt-bold', regex: /(?<!\*)\*\*([^*]+)\*\*(?!\*)(?=\s|[.,;:!?)\]}>]|$)/g, hideDelimiters: true },
   // Italic: *text* (but not if preceded/followed by another *)
-  { key: '*', delimiter: '*', className: 'fmt-italic', regex: /(?<!\*)\*([^*]+)\*(?!\*)/g, hideDelimiters: true },
+  { key: '*', delimiter: '*', className: 'fmt-italic', regex: /(?<!\*)\*([^*]+)\*(?!\*)(?=\s|[.,;:!?)\]}>]|$)/g, hideDelimiters: true },
   // Strikethrough: ~~text~~
-  { key: '~', delimiter: '~~', className: 'fmt-strikethrough', regex: /~~([^~]+)~~/g, hideDelimiters: true },
+  { key: '~', delimiter: '~~', className: 'fmt-strikethrough', regex: /~~([^~]+)~~(?=\s|[.,;:!?)\]}>]|$)/g, hideDelimiters: true },
   // Underline: __text__
-  { key: '_', delimiter: '__', className: 'fmt-underline', regex: /__([^_]+)__/g, hideDelimiters: true },
+  { key: '_', delimiter: '__', className: 'fmt-underline', regex: /__([^_]+)__(?=\s|[.,;:!?)\]}>]|$)/g, hideDelimiters: true },
   // Highlight: ==text==
-  { key: '=', delimiter: '==', className: 'fmt-highlight', regex: /==([^=]+)==/g, hideDelimiters: true },
+  { key: '=', delimiter: '==', className: 'fmt-highlight', regex: /==([^=]+)==(?=\s|[.,;:!?)\]}>]|$)/g, hideDelimiters: true },
 ]
 
 // Detect heading level from content (1-4, or 0 if not a heading)
@@ -129,8 +130,29 @@ export function BlockComponent({
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
   const getTagColor = useTagStore((state) => state.getTagColor)
 
+  // Helper to get fresh flat block order from page store
+  // This is needed because the flatBlockOrder prop may be stale after state updates (e.g., after Enter creates a new block)
+  const getFreshFlatBlockOrder = useCallback((): string[] => {
+    const page = usePageStore.getState().currentPage
+    if (!page) return []
+    const result: string[] = []
+    const traverse = (uuids: string[]) => {
+      for (const uuid of uuids) {
+        const block = page.blocks[uuid]
+        if (block) {
+          result.push(uuid)
+          if (!block.collapsed && block.children.length > 0) {
+            traverse(block.children)
+          }
+        }
+      }
+    }
+    traverse(page.rootBlocks)
+    return result
+  }, [])
+
   // Selection state
-  const { setFocusedBlock, startSelection, extendSelection, extendSelectionInDirection, clearSelection, isInSelection, startDrag } = useSelectionStore()
+  const { setFocusedBlock, startSelection, extendSelection, extendSelectionInDirection, clearSelection, isInSelection, startDrag, hasMultiBlockSelection } = useSelectionStore()
   const isDragging = useSelectionStore((state) => state.isDragging)
   const isSelected = isInSelection(block.uuid, flatBlockOrder)
 
@@ -227,8 +249,8 @@ export function BlockComponent({
       })
     }
 
-    // Find wiki-links
-    const wikiRegex = /\[\[([^\]]+)\]\]/g
+    // Find wiki-links - require trailing boundary (whitespace, punctuation, or end of string)
+    const wikiRegex = /\[\[([^\]]+)\]\](?=\s|[.,;:!?)\]}>]|$)/g
     let match
     while ((match = wikiRegex.exec(content)) !== null) {
       spans.push({
@@ -332,10 +354,10 @@ export function BlockComponent({
         }
       }
 
-      // Check if cursor is inside this span
+      // Check if cursor is inside this span (strictly inside, not at boundaries)
       const cursorInside = cursorRange &&
-        cursorRange.start >= span.start &&
-        cursorRange.start <= span.end
+        cursorRange.start > span.start &&
+        cursorRange.start < span.end
 
       if (span.type === 'task-status') {
         // Task status marker - styled badge that's clickable to cycle
@@ -536,7 +558,8 @@ export function BlockComponent({
         if (cursorInWikiLink !== null) {
           setCursorInWikiLink(null)
           // Re-render without cursor focus - but only if content actually needs to change
-          const newHtml = renderContent(block.content, null)
+          // Use lastContentRef to avoid race condition with handleInput
+          const newHtml = renderContent(lastContentRef.current, null)
           if (el.innerHTML !== newHtml) {
             el.innerHTML = newHtml
           }
@@ -546,7 +569,10 @@ export function BlockComponent({
 
       // Get DOM cursor offset (in displayed text)
       const domCursorOffset = getCursorOffset(el, selection)
-      const content = block.content
+      // Use lastContentRef instead of block.content to avoid race condition
+      // handleInput updates lastContentRef synchronously, but block.content prop
+      // may not have updated yet from the React state update
+      const content = lastContentRef.current
 
       // Convert DOM offset to content offset by accounting for hidden delimiters
       // When delimiters are hidden, DOM text is shorter than content
@@ -768,57 +794,20 @@ export function BlockComponent({
     setSlashCommand((prev) => ({ ...prev, active: false }))
   }, [])
 
-  // Check if a wiki-link or formatting has become malformed and unlink it
-  const checkAndUnlinkBrokenMarkup = useCallback((content: string): string => {
-    let fixed = content
-
-    // Wiki-link patterns
-    // Pattern: [text]] (missing opening bracket)
-    fixed = fixed.replace(/(?<!\[)\[([^\[\]]+)\]\]/g, '$1')
-    // Pattern: [[text] (missing closing bracket)
-    fixed = fixed.replace(/\[\[([^\[\]]+)\](?!\])/g, '$1')
-
-    // Formatting patterns - detect broken delimiters
-    // Bold-italic: **text*** or ***text** -> unlink (must check before bold/italic)
-    fixed = fixed.replace(/(?<!\*)\*\*([^*]+)\*\*\*(?!\*)/g, '$1')
-    fixed = fixed.replace(/(?<!\*)\*\*\*([^*]+)\*\*(?!\*)/g, '$1')
-
-    // Bold: *text** or **text* -> unlink
-    fixed = fixed.replace(/(?<!\*)\*([^*]+)\*\*(?!\*)/g, '$1')
-    fixed = fixed.replace(/(?<!\*)\*\*([^*]+)\*(?!\*)/g, '$1')
-
-    // Strikethrough: ~text~~ or ~~text~ -> unlink
-    fixed = fixed.replace(/(?<!~)~([^~]+)~~(?!~)/g, '$1')
-    fixed = fixed.replace(/(?<!~)~~([^~]+)~(?!~)/g, '$1')
-
-    // Underline: _text__ or __text_ -> unlink
-    fixed = fixed.replace(/(?<!_)_([^_]+)__(?!_)/g, '$1')
-    fixed = fixed.replace(/(?<!_)__([^_]+)_(?!_)/g, '$1')
-
-    // Highlight: =text== or ==text= -> unlink
-    fixed = fixed.replace(/(?<!=)=([^=]+)==(?!=)/g, '$1')
-    fixed = fixed.replace(/(?<!=)==([^=]+)=(?!=)/g, '$1')
-
-    return fixed
-  }, [])
-
   const handleInput = () => {
     if (editorRef.current) {
-      // Get plain text content (strips HTML)
-      let content = editorRef.current.textContent || ''
+      // Get DOM text (may have hidden delimiters if elements are rendered)
+      const domText = editorRef.current.textContent || ''
+      const selection = window.getSelection()
+      const domCursorOffset = selection ? getCursorOffset(editorRef.current, selection) : domText.length
 
-      // Check for and fix broken markup (wiki-links and formatting)
-      const fixedContent = checkAndUnlinkBrokenMarkup(content)
-      if (fixedContent !== content) {
-        // A delimiter was deleted - unlink the markup
-        content = fixedContent
-        const selection = window.getSelection()
-        const cursorOffset = selection ? getCursorOffset(editorRef.current, selection) : 0
+      // Reconstruct the raw content (with delimiters) from DOM text
+      // This handles the case where delimiters are hidden (e.g., ***test*** shows as "test")
+      const content = reconstructContentFromDom(lastContentRef.current, domText)
 
-        // Update the display
-        editorRef.current.innerHTML = renderContent(content, { start: cursorOffset, end: cursorOffset })
-        restoreCursor(editorRef.current, Math.min(cursorOffset, content.length))
-      } else {
+      // Markup only renders when followed by whitespace/punctuation (via regex lookahead)
+      // so partial patterns like [[test] or **test* stay as plain text until completed
+      {
         // Check if we need to re-render for task status
         const taskStatusRegex = buildTaskStatusRegex()
         const hasTaskStatus = taskStatusRegex.test(content)
@@ -829,14 +818,39 @@ export function BlockComponent({
         const hasTag = tagRegex.test(content)
         const displayedHasTag = editorRef.current.querySelector('.tag-pill') !== null
 
-        // Re-render if task status or tag appeared/disappeared, OR if there's a task status
-        // (to maintain proper DOM structure for content after the badge)
-        if (hasTaskStatus !== displayedHasTaskStatus || hasTaskStatus || hasTag !== displayedHasTag || hasTag) {
-          const selection = window.getSelection()
-          const cursorOffset = selection ? getCursorOffset(editorRef.current, selection) : content.length
+        // Check if we need to re-render for wiki-links (with boundary check including end-of-string)
+        const hasWikiLink = /\[\[[^\]]+\]\](?=\s|[.,;:!?)\]}>]|$)/.test(content)
+        const displayedHasWikiLink = editorRef.current.querySelector('.wiki-link') !== null
 
-          editorRef.current.innerHTML = renderContent(content, { start: cursorOffset, end: cursorOffset })
-          restoreCursor(editorRef.current, Math.min(cursorOffset, content.length))
+        // Check if we need to re-render for formatting (bold, italic, etc.)
+        // FORMAT_PATTERNS already have boundary lookaheads, but we need fresh regex instances
+        const hasFormatting = FORMAT_PATTERNS.some(p => {
+          const freshRegex = new RegExp(p.regex.source, p.regex.flags)
+          return freshRegex.test(content)
+        })
+        const displayedHasFormatting = editorRef.current.querySelector('.fmt-bold, .fmt-italic, .fmt-strikethrough, .fmt-underline, .fmt-highlight') !== null
+
+        // Re-render ONLY if any styled element appeared or disappeared
+        // We should NOT re-render on every keystroke when elements exist
+        // The DOM is contenteditable and handles text changes natively
+        const needsRerender =
+          hasTaskStatus !== displayedHasTaskStatus ||
+          hasTag !== displayedHasTag ||
+          hasWikiLink !== displayedHasWikiLink ||
+          hasFormatting !== displayedHasFormatting
+
+        if (needsRerender) {
+          // When formatting disappears (delimiters become visible), the DOM cursor offset
+          // was relative to the OLD DOM (with hidden delimiters). We need to convert it
+          // using the PREVIOUS content state, not the new one.
+          const previousContent = lastContentRef.current
+          const contentCursorOffset = domOffsetToContentOffset(previousContent, domCursorOffset, null)
+
+          editorRef.current.innerHTML = renderContent(content, null) // null = not focused inside any span
+
+          // Convert content offset to new DOM offset (now with hidden delimiters)
+          const newDomOffset = contentOffsetToDomOffset(content, contentCursorOffset, null)
+          restoreCursor(editorRef.current, Math.min(newDomOffset, (editorRef.current.textContent || '').length))
         }
       }
 
@@ -1275,8 +1289,29 @@ export function BlockComponent({
       // Convert DOM offset to content offset, accounting for hidden delimiters
       const contentCursorOffset = domOffsetToContentOffset(rawContent, domCursorOffset, cursorInWikiLink)
 
-      const contentBefore = rawContent.substring(0, contentCursorOffset)
+      let contentBefore = rawContent.substring(0, contentCursorOffset)
       const contentAfter = rawContent.substring(contentCursorOffset)
+
+      // If cursor is at the end and content ends with an un-rendered pattern that would
+      // render with a boundary, add a trailing space. This handles the case where user
+      // types "**bold**" and presses Enter - we want it to render as bold.
+      if (contentAfter === '' && contentBefore.length > 0) {
+        // Check if content ends with a pattern that would render with a trailing space
+        const endsWithUnrenderedPattern =
+          // Wiki-link without boundary
+          /\[\[[^\]]+\]\]$/.test(contentBefore) ||
+          // Bold/italic/etc without boundary - check various patterns
+          /\*\*\*[^*]+\*\*\*$/.test(contentBefore) ||
+          /(?<!\*)\*\*[^*]+\*\*$/.test(contentBefore) ||
+          /(?<!\*)\*[^*]+\*$/.test(contentBefore) ||
+          /~~[^~]+~~$/.test(contentBefore) ||
+          /__[^_]+__$/.test(contentBefore) ||
+          /==[^=]+==$/.test(contentBefore)
+
+        if (endsWithUnrenderedPattern) {
+          contentBefore = contentBefore + ' '
+        }
+      }
 
       // Update current block with content before cursor
       if (contentBefore !== block.content) {
@@ -1288,6 +1323,8 @@ export function BlockComponent({
       // Create new block with content after cursor
       const newUuid = onCreateBlock(block.uuid, contentAfter)
       if (newUuid) {
+        // Set focused block synchronously so Shift+Arrow selection works immediately
+        setFocusedBlock(newUuid)
         // Focus new block after render
         requestAnimationFrame(() => {
           const newBlockEl = document.querySelector(`[data-block-id="${newUuid}"]`)
@@ -1300,7 +1337,12 @@ export function BlockComponent({
 
     // Backspace at start - merge with previous
     // Also handle deleting entire tags as atomic units
+    // Skip if there's a multi-block selection - let OutlinerEditor handle it
     if (e.key === 'Backspace') {
+      if (hasMultiBlockSelection(flatBlockOrder)) {
+        // Don't handle - let the event bubble up to OutlinerEditor
+        return
+      }
       const selection = window.getSelection()
       if (selection && selection.isCollapsed) {
         if (isAtStart(el, selection)) {
@@ -1332,7 +1374,12 @@ export function BlockComponent({
     }
 
     // Delete key - delete entire tag as atomic unit (forward delete)
+    // Skip if there's a multi-block selection - let OutlinerEditor handle it
     if (e.key === 'Delete') {
+      if (hasMultiBlockSelection(flatBlockOrder)) {
+        // Don't handle - let the event bubble up to OutlinerEditor
+        return
+      }
       const selection = window.getSelection()
       if (selection && selection.isCollapsed) {
         const domOffset = getCursorOffset(el, selection)
@@ -1410,16 +1457,18 @@ export function BlockComponent({
     // Shift+Arrow Up - extend selection upward
     if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault()
-      // Use the new method that extends from selection focus, not keyboard focus
-      extendSelectionInDirection('up', flatBlockOrder)
+      // Get fresh flat block order from page store (prop may be stale after Enter creates new block)
+      const freshFlatOrder = getFreshFlatBlockOrder()
+      extendSelectionInDirection('up', freshFlatOrder)
       return
     }
 
     // Shift+Arrow Down - extend selection downward
     if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
       e.preventDefault()
-      // Use the new method that extends from selection focus, not keyboard focus
-      extendSelectionInDirection('down', flatBlockOrder)
+      // Get fresh flat block order from page store (prop may be stale after Enter creates new block)
+      const freshFlatOrder = getFreshFlatBlockOrder()
+      extendSelectionInDirection('down', freshFlatOrder)
       return
     }
 
@@ -1578,9 +1627,10 @@ export function BlockComponent({
 
   // Helper: get span info at a content offset
   // Returns span info if offset is AT or INSIDE the span (not after it)
+  // Only considers "rendered" spans (those with hidden delimiters), i.e., with trailing boundary
   function getSpanAtContentOffset(content: string, offset: number): { start: number; end: number; delimiterLength: number } | null {
-    // Check wiki-links
-    const wikiRegex = /\[\[([^\]]+)\]\]/g
+    // Check wiki-links - use boundary-aware regex (only rendered wiki-links)
+    const wikiRegex = /\[\[([^\]]+)\]\](?=\s|[.,;:!?)\]}>]|$)/g
     let match
     while ((match = wikiRegex.exec(content)) !== null) {
       // offset < end (not <=) because position == end means AFTER the span
@@ -1589,7 +1639,7 @@ export function BlockComponent({
       }
     }
 
-    // Check format patterns
+    // Check format patterns (already have boundary lookaheads)
     for (const pattern of FORMAT_PATTERNS) {
       const regex = new RegExp(pattern.regex.source, 'g')
       while ((match = regex.exec(content)) !== null) {
@@ -1933,8 +1983,9 @@ function domOffsetToContentOffset(
   }
   const hiddenSpans: HiddenSpan[] = []
 
-  // Find wiki-links (delimiter: [[ and ]])
-  const wikiRegex = /\[\[([^\]]+)\]\]/g
+  // Find wiki-links - must use same boundary-aware regex as renderContent
+  // Only wiki-links followed by whitespace, punctuation, or end-of-string have hidden delimiters
+  const wikiRegex = /\[\[([^\]]+)\]\](?=\s|[.,;:!?)\]}>]|$)/g
   let match
   while ((match = wikiRegex.exec(content)) !== null) {
     const start = match.index
@@ -1946,7 +1997,7 @@ function domOffsetToContentOffset(
     }
   }
 
-  // Find format patterns
+  // Find format patterns (these already have boundary lookaheads in FORMAT_PATTERNS)
   for (const pattern of FORMAT_PATTERNS) {
     if (!pattern.hideDelimiters) continue
     const regex = new RegExp(pattern.regex.source, 'g')
@@ -2009,7 +2060,7 @@ function domOffsetToContentOffset(
 // Helper: convert raw content offset to DOM text offset
 // This is the reverse of domOffsetToContentOffset
 // currentFocusedSpan tells us which span (if any) is currently showing delimiters
-function contentOffsetToDomOffset(
+export function contentOffsetToDomOffset(
   content: string,
   contentOffset: number,
   currentFocusedSpan: { start: number; end: number } | null
@@ -2022,8 +2073,9 @@ function contentOffsetToDomOffset(
   }
   const hiddenSpans: HiddenSpan[] = []
 
-  // Find wiki-links
-  const wikiRegex = /\[\[([^\]]+)\]\]/g
+  // Find wiki-links - must use same boundary-aware regex as renderContent
+  // Only wiki-links followed by whitespace, punctuation, or end-of-string have hidden delimiters
+  const wikiRegex = /\[\[([^\]]+)\]\](?=\s|[.,;:!?)\]}>]|$)/g
   let match
   while ((match = wikiRegex.exec(content)) !== null) {
     const start = match.index
@@ -2094,4 +2146,130 @@ function contentOffsetToDomOffset(
 
   // Cursor is after all spans
   return domPos + (contentOffset - contentPos)
+}
+
+// Helper: reconstruct raw content from DOM text when delimiters are hidden
+// Takes the previous raw content (with delimiters) and the current DOM text (without delimiters)
+// and figures out where text was inserted/deleted to produce new raw content
+function reconstructContentFromDom(
+  previousContent: string,
+  domText: string
+): string {
+  // Find all hidden spans in the previous content
+  interface HiddenSpan {
+    contentStart: number
+    contentEnd: number
+    delimiterLength: number
+    innerText: string
+    fullText: string // includes delimiters
+  }
+  const hiddenSpans: HiddenSpan[] = []
+
+  // Find wiki-links
+  const wikiRegex = /\[\[([^\]]+)\]\](?=\s|[.,;:!?)\]}>]|$)/g
+  let match
+  while ((match = wikiRegex.exec(previousContent)) !== null) {
+    if (HIDE_WIKI_LINK_BRACKETS) {
+      hiddenSpans.push({
+        contentStart: match.index,
+        contentEnd: match.index + match[0].length,
+        delimiterLength: 2,
+        innerText: match[1],
+        fullText: match[0],
+      })
+    }
+  }
+
+  // Find format patterns
+  for (const pattern of FORMAT_PATTERNS) {
+    if (!pattern.hideDelimiters) continue
+    const regex = new RegExp(pattern.regex.source, 'g')
+    while ((match = regex.exec(previousContent)) !== null) {
+      const start = match.index
+      const end = match.index + match[0].length
+      const overlaps = hiddenSpans.some(s =>
+        (start >= s.contentStart && start < s.contentEnd) ||
+        (end > s.contentStart && end <= s.contentEnd)
+      )
+      if (!overlaps) {
+        hiddenSpans.push({
+          contentStart: start,
+          contentEnd: end,
+          delimiterLength: pattern.delimiter.length,
+          innerText: match[1],
+          fullText: match[0],
+        })
+      }
+    }
+  }
+
+  // If no hidden spans, DOM text IS the content
+  if (hiddenSpans.length === 0) {
+    return domText
+  }
+
+  hiddenSpans.sort((a, b) => a.contentStart - b.contentStart)
+
+  // Build the expected DOM text from previous content (for comparison)
+  let expectedDomText = ''
+  let contentPos = 0
+  for (const span of hiddenSpans) {
+    expectedDomText += previousContent.slice(contentPos, span.contentStart)
+    expectedDomText += span.innerText
+    contentPos = span.contentEnd
+  }
+  expectedDomText += previousContent.slice(contentPos)
+
+  // If DOM text matches expected, no change - return previous content
+  if (domText === expectedDomText) {
+    return previousContent
+  }
+
+  // Special case: DOM text equals previous content exactly
+  // This happens when delimiters became visible (e.g., deleted trailing space after **bold**)
+  if (domText === previousContent) {
+    return previousContent
+  }
+
+  // Special case: Check if DOM text is the raw content with a simple edit
+  // This handles the case where hidden delimiters became visible due to boundary removal
+  // In this case, we should work with raw content directly, not expected DOM text
+  const domLongerThanExpected = domText.length > expectedDomText.length
+
+  // If the DOM is showing raw delimiters (longer than expected), just use domText as content
+  if (domLongerThanExpected && hiddenSpans.length > 0) {
+    // The delimiters are now visible in DOM - just return the DOM text as the new content
+    return domText
+  }
+
+  // Find where the change occurred by comparing domText with expectedDomText
+  // Find common prefix length
+  let prefixLen = 0
+  while (prefixLen < domText.length && prefixLen < expectedDomText.length && domText[prefixLen] === expectedDomText[prefixLen]) {
+    prefixLen++
+  }
+
+  // Find common suffix length (but not overlapping with prefix)
+  let suffixLen = 0
+  while (
+    suffixLen < domText.length - prefixLen &&
+    suffixLen < expectedDomText.length - prefixLen &&
+    domText[domText.length - 1 - suffixLen] === expectedDomText[expectedDomText.length - 1 - suffixLen]
+  ) {
+    suffixLen++
+  }
+
+  // The change is:
+  // - In expectedDomText: characters from prefixLen to (expectedDomText.length - suffixLen) were removed
+  // - In domText: characters from prefixLen to (domText.length - suffixLen) were inserted
+  const insertedText = domText.slice(prefixLen, domText.length - suffixLen)
+
+  // Convert DOM prefix position to content position
+  const contentPrefixPos = domOffsetToContentOffset(previousContent, prefixLen, null)
+  const contentSuffixPos = domOffsetToContentOffset(previousContent, expectedDomText.length - suffixLen, null)
+
+  // Reconstruct: content before change + inserted text + content after change
+  const newContent = previousContent.slice(0, contentPrefixPos) + insertedText + previousContent.slice(contentSuffixPos)
+
+  return newContent
 }

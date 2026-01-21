@@ -14,12 +14,16 @@ type FilterMode = 'all' | 'active' | 'completed'
 type SortMode = 'status' | 'page'
 
 // Get color for a status keyword
+// Returns CSS variable name like 'base0A' (without hyphen, for use as --base0A)
 function getStatusColor(status: string): string {
   for (const statuses of Object.values(TASK_STATUS_SETS)) {
     const found = statuses.find(s => s.keyword === status)
-    if (found) return found.color
+    if (found) {
+      // Convert 'base-0A' to 'base0A' for CSS variable
+      return found.color.replace('-', '')
+    }
   }
-  return 'base-05'
+  return 'base05'
 }
 
 // Is this a "completed" status?
@@ -34,8 +38,11 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
   const [filter, setFilter] = useState<FilterMode>('active')
   const [sort, setSort] = useState<SortMode>('status')
 
-  const { navigateToPage, navigateToJournal } = usePageStore()
+  const { navigateToPage, navigateToJournal, currentPage } = usePageStore()
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
+
+  // Track current page version to trigger re-fetch on save
+  const pageVersion = currentPage?.version
 
   // Fetch tasks from backend
   useEffect(() => {
@@ -59,7 +66,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
 
     fetchTasks()
     return () => { cancelled = true }
-  }, [])
+  }, [pageVersion]) // Re-fetch when page version changes (after save)
 
   // Filter tasks
   const filteredTasks = useMemo(() => {
@@ -202,12 +209,14 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
         {taskStatuses.map((status) => {
           const count = statusCounts[status.keyword] || 0
           if (count === 0) return null
+          // Convert 'base-0A' to 'base0A' for CSS variable
+          const cssColor = status.color.replace('-', '')
           return (
             <span
               key={status.keyword}
               className="text-xs px-2 py-0.5 rounded"
               style={{
-                backgroundColor: `var(--${status.color})`,
+                backgroundColor: `var(--${cssColor})`,
                 color: 'var(--base00)',
               }}
             >

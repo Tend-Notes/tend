@@ -18,12 +18,17 @@ export function WikiLinkPopup({ query, position, onSelect, onClose }: WikiLinkPo
   const [loading, setLoading] = useState(true)
   const popupRef = useRef<HTMLDivElement>(null)
 
-  // Load pages on mount
+  // Load all sheets (pages + journals) on mount
   useEffect(() => {
-    api.pages.list().then((allPages) => {
-      setPages(allPages)
-      setLoading(false)
-    })
+    Promise.all([api.pages.list(), api.journals.list()])
+      .then(([allPages, allJournals]) => {
+        // Combine pages and journals, pages first
+        setPages([...allPages, ...allJournals])
+        setLoading(false)
+      })
+      .catch(() => {
+        setLoading(false)
+      })
   }, [])
 
   // Filter pages by query

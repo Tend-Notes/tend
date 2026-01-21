@@ -13,6 +13,7 @@ use crate::state::AppState;
 
 /// A node in the knowledge graph
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GraphNode {
     pub id: String,
     pub label: String,

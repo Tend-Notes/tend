@@ -13,12 +13,11 @@ interface SidebarTagsProps {
 type SortMode = 'alpha' | 'count'
 
 export function SidebarTags({ onBack }: SidebarTagsProps) {
-  const { selectedTag, selectTag, getTagColor, setTagColor, getTagDescription, setTagDescription } = useTagStore()
-  const currentPage = usePageStore((state) => state.currentPage)
+  const { getTagColor, setTagColor } = useTagStore()
+  const { currentPage, navigateToPage } = usePageStore()
 
-  // Local state for editing description
-  const [editingDescription, setEditingDescription] = useState(false)
-  const [descriptionValue, setDescriptionValue] = useState('')
+  // Tag currently being color-edited (inline)
+  const [editingColorTag, setEditingColorTag] = useState<string | null>(null)
 
   // Sort mode and direction
   const [sortMode, setSortMode] = useState<SortMode>('alpha')
@@ -99,31 +98,21 @@ export function SidebarTags({ onBack }: SidebarTagsProps) {
     }
   }, [refreshCounter])
 
-  // Handle tag selection
+  // Handle tag name click - navigate to tag page
   const handleTagClick = useCallback((tagName: string) => {
-    if (selectedTag === tagName) {
-      selectTag(null)
-    } else {
-      selectTag(tagName)
-      setDescriptionValue(getTagDescription(tagName) || '')
-      setEditingDescription(false)
-    }
-  }, [selectedTag, selectTag, getTagDescription])
+    navigateToPage(`tags/${tagName}`)
+  }, [navigateToPage])
 
-  // Handle description save
-  const handleDescriptionSave = useCallback(() => {
-    if (selectedTag) {
-      setTagDescription(selectedTag, descriptionValue)
-      setEditingDescription(false)
-    }
-  }, [selectedTag, descriptionValue, setTagDescription])
+  // Handle color pill click - toggle color editor
+  const handleColorPillClick = useCallback((tagName: string, e: React.MouseEvent) => {
+    e.stopPropagation() // Don't trigger tag navigation
+    setEditingColorTag(editingColorTag === tagName ? null : tagName)
+  }, [editingColorTag])
 
   // Handle color change
-  const handleColorChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    if (selectedTag) {
-      setTagColor(selectedTag, e.target.value)
-    }
-  }, [selectedTag, setTagColor])
+  const handleColorChange = useCallback((tagName: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    setTagColor(tagName, e.target.value)
+  }, [setTagColor])
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -197,125 +186,65 @@ export function SidebarTags({ onBack }: SidebarTagsProps) {
           <ul className="space-y-1">
             {sortedTags.map((tag) => {
               const color = getTagColor(tag.name)
-              const isSelected = selectedTag === tag.name
+              const isEditingColor = editingColorTag === tag.name
 
               return (
-                <li key={tag.name}>
-                  <button
-                    onClick={() => handleTagClick(tag.name)}
-                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-lg transition-colors ${
-                      isSelected
-                        ? 'bg-base-02'
-                        : 'hover:bg-base-01'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
+                <li key={tag.name} className="relative">
+                  <div className="flex items-center gap-1">
+                    {/* Color pill - click to edit color */}
+                    <button
+                      onClick={(e) => handleColorPillClick(tag.name, e)}
+                      className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
+                        isEditingColor ? 'bg-base-02' : 'hover:bg-base-01'
+                      }`}
+                      title="Edit tag color"
+                    >
                       <span
-                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        className="block w-3 h-3 rounded-full"
                         style={{ backgroundColor: color }}
                       />
+                    </button>
+
+                    {/* Tag name - click to navigate */}
+                    <button
+                      onClick={() => handleTagClick(tag.name)}
+                      className="flex-1 flex items-center justify-between px-2 py-1.5 rounded-lg transition-colors hover:bg-base-01"
+                    >
                       <span className="text-sm text-base-05">#{tag.name}</span>
+                      {tag.count > 0 && (
+                        <span className="text-xs text-base-04">{tag.count}</span>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Inline color picker (shown when editing) */}
+                  {isEditingColor && (
+                    <div className="mt-1 ml-1 p-2 bg-base-01 rounded-lg border border-base-02 flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={color}
+                        onChange={(e) => handleColorChange(tag.name, e)}
+                        className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent"
+                        style={{ padding: 0 }}
+                      />
+                      <span className="text-xs text-base-04 font-mono">{color}</span>
+                      <button
+                        onClick={() => setEditingColorTag(null)}
+                        className="ml-auto p-1 text-base-04 hover:text-base-05 transition-colors"
+                        title="Close"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
                     </div>
-                    {tag.count > 0 && (
-                      <span className="text-xs text-base-04">{tag.count}</span>
-                    )}
-                  </button>
+                  )}
                 </li>
               )
             })}
           </ul>
         )}
       </div>
-
-      {/* Tag detail panel (when a tag is selected) */}
-      {selectedTag && (
-        <div className="border-t border-base-02 p-3 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span
-                className="w-4 h-4 rounded-full flex-shrink-0"
-                style={{ backgroundColor: getTagColor(selectedTag) }}
-              />
-              <span className="text-sm font-medium text-base-06">#{selectedTag}</span>
-            </div>
-            <button
-              onClick={() => selectTag(null)}
-              className="p-1 text-base-04 hover:text-base-05 transition-colors"
-              title="Close"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Color picker */}
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-base-04">Color:</label>
-            <input
-              type="color"
-              value={getTagColor(selectedTag)}
-              onChange={handleColorChange}
-              className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent"
-              style={{ padding: 0 }}
-            />
-            <span className="text-xs text-base-04 font-mono">{getTagColor(selectedTag)}</span>
-          </div>
-
-          {/* Description */}
-          <div className="space-y-1">
-            <label className="text-xs text-base-04">Description:</label>
-            {editingDescription ? (
-              <div className="space-y-2">
-                <textarea
-                  value={descriptionValue}
-                  onChange={(e) => setDescriptionValue(e.target.value)}
-                  className="w-full px-2 py-1.5 text-sm bg-base-01 border border-base-02 rounded-lg text-base-05 resize-none focus:outline-none focus:border-base-0D"
-                  rows={3}
-                  placeholder="What is this tag about?"
-                  autoFocus
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleDescriptionSave}
-                    className="px-3 py-1 text-xs bg-base-0D text-base-00 rounded hover:opacity-90 transition-opacity"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={() => {
-                      setEditingDescription(false)
-                      setDescriptionValue(getTagDescription(selectedTag) || '')
-                    }}
-                    className="px-3 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => {
-                  setDescriptionValue(getTagDescription(selectedTag) || '')
-                  setEditingDescription(true)
-                }}
-                className="w-full text-left px-2 py-1.5 text-sm bg-base-01 border border-base-02 rounded-lg text-base-05 hover:border-base-03 transition-colors min-h-[2.5rem]"
-              >
-                {getTagDescription(selectedTag) || (
-                  <span className="text-base-04 italic">Click to add description...</span>
-                )}
-              </button>
-            )}
-          </div>
-
-          {/* Usage count */}
-          <div className="space-y-1">
-            <label className="text-xs text-base-04">
-              Used in: {allTags.find(t => t.name === selectedTag)?.count || 0} block(s) across all pages
-            </label>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
