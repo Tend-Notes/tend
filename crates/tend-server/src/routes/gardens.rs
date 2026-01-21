@@ -20,6 +20,9 @@ pub struct Garden {
     pub id: String,
     pub name: String,
     pub path: String,
+    /// Whether this garden uses age encryption
+    #[serde(default)]
+    pub encrypted: bool,
 }
 
 /// Archived garden (kept for 15 days before permanent removal)
@@ -44,12 +47,21 @@ pub struct GardensResponse {
 pub struct CreateGardenRequest {
     pub name: String,
     pub path: String,
+    /// Optional passphrase for encrypted gardens. If provided, the garden will be encrypted.
+    pub passphrase: Option<String>,
 }
 
 /// Request to switch active garden
 #[derive(Debug, Deserialize)]
 pub struct SwitchGardenRequest {
     pub id: String,
+}
+
+/// Request to unlock an encrypted garden
+#[derive(Debug, Deserialize)]
+pub struct UnlockGardenRequest {
+    pub id: String,
+    pub passphrase: String,
 }
 
 /// Gardens config file structure
@@ -108,6 +120,7 @@ fn default_gardens_config() -> GardensConfig {
             id: "default".to_string(),
             name: "Notes".to_string(),
             path: default_path.to_string_lossy().to_string(),
+            encrypted: false,
         }],
         active: "default".to_string(),
         archived: vec![],
@@ -187,16 +200,36 @@ pub async fn create_garden(
     }
 
     // Store the expanded absolute path
+    let encrypted = req.passphrase.is_some();
     let garden = Garden {
         id: id.clone(),
         name: req.name,
         path: garden_path.to_string_lossy().to_string(),
+        encrypted,
     };
 
     config.gardens.push(garden.clone());
 
     save_gardens_config(&config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
+
+    // If encrypted, store the passphrase hash for unlock verification
+    // Note: The actual passphrase is needed at runtime to decrypt files,
+    // so we create a test file to verify the passphrase on unlock
+    if let Some(passphrase) = &req.passphrase {
+        // Create a verification file that can be used to check the passphrase
+        let verify_content = "tend-encryption-verification";
+        let encrypted_verify = tend_storage::encrypt(verify_content, passphrase)
+            .map_err(|e| AppError::Internal(format!("Failed to encrypt verification file: {}", e)))?;
+
+        let verify_path = garden_path.join(".tend").join("encryption.verify");
+        std::fs::create_dir_all(verify_path.parent().unwrap())
+            .map_err(|e| AppError::Internal(format!("Failed to create .tend directory: {}", e)))?;
+        std::fs::write(&verify_path, encrypted_verify)
+            .map_err(|e| AppError::Internal(format!("Failed to write verification file: {}", e)))?;
+
+        tracing::info!("Created encrypted garden: {}", garden.name);
+    }
 
     Ok(Json(garden))
 }
@@ -455,15 +488,27 @@ pub async fn delete_archived_garden(
 }
 
 /// Switch active garden (hot-reloads the garden state)
+/// For encrypted gardens, returns a special response indicating unlock is required.
 pub async fn switch_garden(
     State(state): State<Arc<AppState>>,
     Json(req): Json<SwitchGardenRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let mut config = load_gardens_config();
 
-    // Verify the garden exists
-    if !config.gardens.iter().any(|g| g.id == req.id) {
-        return Err(AppError::NotFound(format!("Garden '{}' not found", req.id)));
+    // Verify the garden exists and check if encrypted
+    let garden = config
+        .gardens
+        .iter()
+        .find(|g| g.id == req.id)
+        .ok_or_else(|| AppError::NotFound(format!("Garden '{}' not found", req.id)))?;
+
+    // If encrypted, return unlock_required response
+    if garden.encrypted {
+        return Ok(Json(serde_json::json!({
+            "unlock_required": true,
+            "garden_id": req.id,
+            "message": "This garden is encrypted. Please provide passphrase to unlock."
+        })));
     }
 
     config.active = req.id.clone();
@@ -481,4 +526,51 @@ pub async fn switch_garden(
         "active": req.id,
         "message": "Garden switched successfully."
     })))
+}
+
+/// Unlock an encrypted garden with passphrase
+pub async fn unlock_garden(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<UnlockGardenRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let mut config = load_gardens_config();
+
+    // Verify the garden exists and is encrypted
+    let garden = config
+        .gardens
+        .iter()
+        .find(|g| g.id == req.id)
+        .ok_or_else(|| AppError::NotFound(format!("Garden '{}' not found", req.id)))?;
+
+    if !garden.encrypted {
+        return Err(AppError::BadRequest(format!(
+            "Garden '{}' is not encrypted",
+            req.id
+        )));
+    }
+
+    // Try to unlock with the provided passphrase
+    match state
+        .switch_garden_encrypted(&req.id, req.passphrase)
+        .await
+    {
+        Ok(_) => {
+            config.active = req.id.clone();
+            save_gardens_config(&config)
+                .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
+
+            Ok(Json(serde_json::json!({
+                "active": req.id,
+                "message": "Garden unlocked and switched successfully."
+            })))
+        }
+        Err(e) => {
+            let err_msg = e.to_string();
+            if err_msg.contains("Invalid passphrase") {
+                Err(AppError::Unauthorized("Invalid passphrase".to_string()))
+            } else {
+                Err(AppError::Internal(format!("Failed to unlock garden: {}", e)))
+            }
+        }
+    }
 }

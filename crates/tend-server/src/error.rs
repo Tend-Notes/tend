@@ -11,6 +11,7 @@ use serde_json::json;
 pub enum AppError {
     NotFound(String),
     BadRequest(String),
+    Unauthorized(String),
     Internal(String),
     Storage(tend_storage::StorageError),
     Search(tend_search::SearchError),
@@ -32,6 +33,10 @@ impl IntoResponse for AppError {
             AppError::BadRequest(msg) => {
                 let body = Json(json!({ "error": msg }));
                 (StatusCode::BAD_REQUEST, body).into_response()
+            }
+            AppError::Unauthorized(msg) => {
+                let body = Json(json!({ "error": msg }));
+                (StatusCode::UNAUTHORIZED, body).into_response()
             }
             AppError::Internal(msg) => {
                 let body = Json(json!({ "error": msg }));
