@@ -35,7 +35,95 @@
           darwin.apple_sdk.frameworks.SystemConfiguration
         ];
 
+        # Build the frontend using pnpm
+        frontend = pkgs.stdenv.mkDerivation {
+          pname = "tend-frontend";
+          version = "0.1.0";
+          src = ./packages/web;
+
+          nativeBuildInputs = with pkgs; [
+            nodejs_22
+            nodePackages.pnpm
+          ];
+
+          # pnpm needs a writable home
+          HOME = "/tmp";
+
+          buildPhase = ''
+            runHook preBuild
+
+            # Configure pnpm to use a local store
+            export PNPM_HOME="$TMPDIR/pnpm"
+            mkdir -p "$PNPM_HOME"
+
+            # Install dependencies
+            pnpm install --frozen-lockfile
+
+            # Build
+            pnpm run build
+
+            runHook postBuild
+          '';
+
+          installPhase = ''
+            runHook preInstall
+            cp -r dist $out
+            runHook postInstall
+          '';
+        };
+
+        # Build the Rust backend
+        backend = pkgs.rustPlatform.buildRustPackage {
+          pname = "tend-server";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+
+          inherit nativeBuildInputs buildInputs;
+
+          # Only build the server binary
+          cargoBuildFlags = [ "-p" "tend-server" ];
+
+          meta = with pkgs.lib; {
+            description = "Tend backend server";
+            license = licenses.mit;
+          };
+        };
+
+        # Combined package with static files
+        tend = pkgs.stdenv.mkDerivation {
+          pname = "tend";
+          version = "0.1.0";
+
+          dontUnpack = true;
+          dontBuild = true;
+
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+
+          installPhase = ''
+            mkdir -p $out/bin $out/share/tend/static
+
+            # Copy backend binary
+            cp ${backend}/bin/tend-server $out/bin/tend-server
+
+            # Copy frontend static files
+            cp -r ${frontend}/* $out/share/tend/static/
+
+            # Create wrapper that sets TEND_STATIC_DIR
+            makeWrapper $out/bin/tend-server $out/bin/tend \
+              --set-default TEND_STATIC_DIR "$out/share/tend/static"
+          '';
+
+          meta = with pkgs.lib; {
+            description = "A digital garden for your thoughts";
+            homepage = "https://github.com/crawfordlong/tend";
+            license = licenses.mit; # Note: With Commons Clause
+            mainProgram = "tend";
+          };
+        };
+
       in {
+        # Development shell
         devShells.default = pkgs.mkShell {
           inherit nativeBuildInputs buildInputs;
 
@@ -46,15 +134,12 @@
             cargo-edit
 
             # Node.js
-            nodejs_20
+            nodejs_22
             nodePackages.pnpm
 
             # Tools
             git
             jq
-
-            # Optional: for database exploration
-            # sqlite
           ];
 
           shellHook = ''
@@ -78,29 +163,16 @@
           RUST_BACKTRACE = "1";
         };
 
-        # Package for production build
-        packages.default = pkgs.rustPlatform.buildRustPackage {
-          pname = "tend";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
+        # Production packages
+        packages = {
+          default = tend;
+          inherit tend backend frontend;
+        };
 
-          inherit nativeBuildInputs buildInputs;
-
-          # Build frontend first
-          preBuild = ''
-            cd packages/web
-            ${pkgs.nodePackages.pnpm}/bin/pnpm install --frozen-lockfile
-            ${pkgs.nodePackages.pnpm}/bin/pnpm build
-            cd ../..
-          '';
-
-          meta = with pkgs.lib; {
-            description = "A digital garden for your thoughts";
-            homepage = "https://github.com/yourusername/tend";
-            license = licenses.mit; # Note: With Commons Clause
-            maintainers = [ ];
-          };
+        # For `nix run`
+        apps.default = {
+          type = "app";
+          program = "${tend}/bin/tend";
         };
       }
     ) // {
@@ -113,6 +185,19 @@
           options.services.tend = {
             enable = mkEnableOption "Tend digital garden";
 
+            package = mkOption {
+              type = types.package;
+              default = self.packages.${pkgs.system}.default;
+              defaultText = literalExpression "pkgs.tend";
+              description = "The Tend package to use";
+            };
+
+            host = mkOption {
+              type = types.str;
+              default = "127.0.0.1";
+              description = "Address to bind to. Use 0.0.0.0 to listen on all interfaces.";
+            };
+
             port = mkOption {
               type = types.port;
               default = 3000;
@@ -122,7 +207,7 @@
             dataDir = mkOption {
               type = types.path;
               default = "/var/lib/tend";
-              description = "Directory for storing data";
+              description = "Directory for storing garden data";
             };
 
             user = mkOption {
@@ -135,6 +220,12 @@
               type = types.str;
               default = "tend";
               description = "Group to run Tend as";
+            };
+
+            openFirewall = mkOption {
+              type = types.bool;
+              default = false;
+              description = "Whether to open the firewall for the Tend port";
             };
 
             gitBackup = {
@@ -151,6 +242,23 @@
                 default = false;
                 description = "Automatically push to remote after backup";
               };
+
+              remoteUrl = mkOption {
+                type = types.nullOr types.str;
+                default = null;
+                description = "Git remote URL for push/pull operations";
+              };
+            };
+
+            extraEnvironment = mkOption {
+              type = types.attrsOf types.str;
+              default = {};
+              description = "Extra environment variables for the Tend service";
+              example = literalExpression ''
+                {
+                  RUST_LOG = "debug";
+                }
+              '';
             };
           };
 
@@ -164,28 +272,30 @@
 
             users.groups.${cfg.group} = {};
 
+            networking.firewall.allowedTCPPorts = mkIf cfg.openFirewall [ cfg.port ];
+
             systemd.services.tend = {
               description = "Tend Digital Garden";
               after = [ "network.target" ];
               wantedBy = [ "multi-user.target" ];
 
               environment = {
-                TEND_DATA_DIR = cfg.dataDir;
+                TEND_GARDEN_PATH = cfg.dataDir;
                 TEND_PORT = toString cfg.port;
-                TEND_HOST = "0.0.0.0";
-                TEND_GIT_ENABLED = if cfg.gitBackup.enable then "true" else "false";
-                TEND_GIT_BACKUP_INTERVAL = toString cfg.gitBackup.intervalMinutes;
-                TEND_GIT_AUTO_PUSH = if cfg.gitBackup.autoPush then "true" else "false";
+                TEND_HOST = cfg.host;
+                TEND_BACKUP_INTERVAL_MINUTES = toString cfg.gitBackup.intervalMinutes;
+                TEND_AUTO_PUSH = if cfg.gitBackup.autoPush then "true" else "false";
                 RUST_LOG = "info";
-              };
+              } // cfg.extraEnvironment;
 
               serviceConfig = {
                 Type = "simple";
                 User = cfg.user;
                 Group = cfg.group;
-                ExecStart = "${self.packages.${pkgs.system}.default}/bin/tend";
+                ExecStart = "${cfg.package}/bin/tend";
                 Restart = "on-failure";
                 RestartSec = 5;
+                WorkingDirectory = cfg.dataDir;
 
                 # Hardening
                 NoNewPrivileges = true;
@@ -193,10 +303,21 @@
                 ProtectSystem = "strict";
                 ProtectHome = true;
                 ReadWritePaths = [ cfg.dataDir ];
+                CapabilityBoundingSet = "";
+                AmbientCapabilities = "";
+                ProtectKernelTunables = true;
+                ProtectKernelModules = true;
+                ProtectControlGroups = true;
+                RestrictNamespaces = true;
+                LockPersonality = true;
+                RestrictRealtime = true;
+                RestrictSUIDSGID = true;
+                RemoveIPC = true;
+                PrivateMounts = true;
               };
             };
 
-            # Initialize git repo if not exists
+            # Initialize git repo and directory structure
             systemd.services.tend-init = {
               description = "Initialize Tend data directory";
               before = [ "tend.service" ];
@@ -206,16 +327,36 @@
                 Type = "oneshot";
                 User = cfg.user;
                 Group = cfg.group;
+                RemainAfterExit = true;
               };
 
               script = ''
+                # Create directory structure
+                mkdir -p "${cfg.dataDir}/pages" "${cfg.dataDir}/journals"
+
+                # Initialize git if not already done
                 if [ ! -d "${cfg.dataDir}/.git" ]; then
-                  ${pkgs.git}/bin/git init "${cfg.dataDir}"
-                  mkdir -p "${cfg.dataDir}/pages" "${cfg.dataDir}/journals"
+                  ${pkgs.git}/bin/git -C "${cfg.dataDir}" init
+                  ${pkgs.git}/bin/git -C "${cfg.dataDir}" config user.name "Tend"
+                  ${pkgs.git}/bin/git -C "${cfg.dataDir}" config user.email "tend@localhost"
                 fi
+
+                ${optionalString (cfg.gitBackup.remoteUrl != null) ''
+                  # Set up remote if configured
+                  if ! ${pkgs.git}/bin/git -C "${cfg.dataDir}" remote get-url origin >/dev/null 2>&1; then
+                    ${pkgs.git}/bin/git -C "${cfg.dataDir}" remote add origin "${cfg.gitBackup.remoteUrl}"
+                  else
+                    ${pkgs.git}/bin/git -C "${cfg.dataDir}" remote set-url origin "${cfg.gitBackup.remoteUrl}"
+                  fi
+                ''}
               '';
             };
           };
         };
+
+      # Overlay for including in other flakes
+      overlays.default = final: prev: {
+        tend = self.packages.${final.system}.default;
+      };
     };
 }

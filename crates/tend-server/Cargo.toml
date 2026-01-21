@@ -44,3 +44,6 @@ chrono = { workspace = true }
 
 # Regex
 regex = { workspace = true }
+
+# URL encoding for Logseq import
+urlencoding = "2.1"

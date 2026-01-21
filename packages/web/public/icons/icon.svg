@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="64" fill="#181818"/>
+  <!-- T-handle grip -->
+  <rect x="136" y="56" width="240" height="44" rx="22" fill="#e8e8e8"/>
+  <!-- Handle shaft -->
+  <rect x="236" y="100" width="40" height="64" rx="4" fill="#e8e8e8"/>
+  <!-- Trowel blade - elongated pointed scoop -->
+  <path d="M256 164 L320 200 C332 240 328 320 310 380 L256 448 L202 380 C184 320 180 240 192 200 Z" fill="#e8e8e8"/>
+</svg>

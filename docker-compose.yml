@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT WITH Commons-Clause
+# Docker Compose for Tend
+#
+# Usage:
+#   docker compose up -d
+#
+# The garden data is persisted in the ./data directory by default.
+# Override TEND_GARDEN_PATH to change the location.
+
+services:
+  tend:
+    build: .
+    image: tend:latest
+    container_name: tend
+    restart: unless-stopped
+    ports:
+      - "${TEND_PORT:-3000}:3000"
+    volumes:
+      - ${TEND_GARDEN_PATH:-./data}:/data
+    environment:
+      - TEND_HOST=0.0.0.0
+      - TEND_PORT=3000
+      - TEND_GARDEN_PATH=/data
+      - TEND_STATIC_DIR=/app/static
+      - RUST_LOG=${RUST_LOG:-info}
+      # Git configuration (optional)
+      - GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-Tend}
+      - GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-tend@localhost}
+      - GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-Tend}
+      - GIT_COMMITTER_EMAIL=${GIT_COMMITTER_EMAIL:-tend@localhost}
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s

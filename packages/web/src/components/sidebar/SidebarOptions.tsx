@@ -21,7 +21,7 @@ interface SidebarOptionsProps {
 }
 
 // Section IDs
-type SectionId = 'appearance' | 'tasks' | 'backup' | 'content-types' | 'gardens'
+type SectionId = 'appearance' | 'tasks' | 'backup' | 'content-types' | 'gardens' | 'import'
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
@@ -29,6 +29,7 @@ const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'backup', label: 'Backup' },
   { id: 'content-types', label: 'Content Types' },
   { id: 'gardens', label: 'Gardens' },
+  { id: 'import', label: 'Import' },
 ]
 
 export function SidebarOptions({ onBack }: SidebarOptionsProps) {
@@ -70,6 +71,7 @@ export function SidebarOptions({ onBack }: SidebarOptionsProps) {
             {id === 'backup' && <BackupSection />}
             {id === 'content-types' && <ContentTypesSection />}
             {id === 'gardens' && <GardensSection />}
+            {id === 'import' && <ImportSection />}
           </CollapsibleSection>
         ))}
       </div>
@@ -1286,6 +1288,167 @@ function GardensSection() {
           + New garden
         </button>
       )}
+    </div>
+  )
+}
+
+// Import section
+function ImportSection() {
+  const [sourcePath, setSourcePath] = useState('')
+  const [overwrite, setOverwrite] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{
+    pagesImported: number
+    journalsImported: number
+    skipped: number
+    brokenLinks: { sourceFile: string; target: string }[]
+    warnings: string[]
+    dryRun: boolean
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleImport = async (dryRun: boolean) => {
+    if (!sourcePath.trim()) {
+      setError('Please enter a source path')
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+    setResult(null)
+
+    try {
+      const { importApi } = await import('../../lib/api')
+      const res = await importApi.logseq({
+        sourcePath: sourcePath.trim(),
+        overwrite,
+        dryRun,
+      })
+      setResult(res)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Import failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-base-03">
+        Import an existing Logseq graph into this garden.
+      </p>
+
+      {/* Source path */}
+      <div className="space-y-1">
+        <label className="text-xs text-base-04">Logseq graph path</label>
+        <input
+          type="text"
+          value={sourcePath}
+          onChange={(e) => setSourcePath(e.target.value)}
+          placeholder="/path/to/logseq/graph"
+          className="w-full bg-base-01 border border-base-02 rounded px-2 py-1.5 text-xs text-base-05 focus:outline-none focus:border-base-04"
+        />
+        <p className="text-xs text-base-03">
+          The path to your Logseq graph directory on the server.
+        </p>
+      </div>
+
+      {/* Overwrite option */}
+      <SettingsRow label="Overwrite existing">
+        <Toggle checked={overwrite} onChange={setOverwrite} />
+      </SettingsRow>
+      <p className="text-xs text-base-03">
+        {overwrite
+          ? 'Existing files will be replaced.'
+          : 'Existing files will be skipped.'}
+      </p>
+
+      {/* Action buttons */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => handleImport(true)}
+          disabled={loading}
+          className="px-2 py-1 text-xs text-base-04 hover:text-base-05 border border-base-02 rounded transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Checking...' : 'Preview'}
+        </button>
+        <button
+          onClick={() => handleImport(false)}
+          disabled={loading}
+          className="px-2 py-1 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Importing...' : 'Import'}
+        </button>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <p className="text-xs text-base-08">{error}</p>
+      )}
+
+      {/* Results */}
+      <AnimatePresence>
+        {result && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="p-2 bg-base-01 border border-base-02 rounded space-y-2">
+              <p className="text-xs text-base-05 font-medium">
+                {result.dryRun ? 'Preview Results' : 'Import Complete'}
+              </p>
+              <div className="text-xs text-base-04 space-y-1">
+                <p>Pages: {result.pagesImported}</p>
+                <p>Journals: {result.journalsImported}</p>
+                {result.skipped > 0 && <p>Skipped: {result.skipped}</p>}
+              </div>
+
+              {/* Warnings */}
+              {result.warnings.length > 0 && (
+                <div className="pt-2 border-t border-base-02">
+                  <p className="text-xs text-base-09 font-medium mb-1">Warnings</p>
+                  <ul className="text-xs text-base-04 space-y-0.5">
+                    {result.warnings.slice(0, 5).map((w, i) => (
+                      <li key={i}>• {w}</li>
+                    ))}
+                    {result.warnings.length > 5 && (
+                      <li className="text-base-03">...and {result.warnings.length - 5} more</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {/* Broken links */}
+              {result.brokenLinks.length > 0 && (
+                <div className="pt-2 border-t border-base-02">
+                  <p className="text-xs text-base-08 font-medium mb-1">
+                    Broken Links ({result.brokenLinks.length})
+                  </p>
+                  <ul className="text-xs text-base-04 space-y-0.5 max-h-24 overflow-y-auto">
+                    {result.brokenLinks.slice(0, 10).map((link, i) => (
+                      <li key={i}>
+                        <span className="text-base-03">{link.sourceFile}:</span>{' '}
+                        <span className="text-base-08">[[{link.target}]]</span>
+                      </li>
+                    ))}
+                    {result.brokenLinks.length > 10 && (
+                      <li className="text-base-03">...and {result.brokenLinks.length - 10} more</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+
+              {result.dryRun && (
+                <p className="text-xs text-base-03 italic">
+                  This was a preview. Click Import to apply changes.
+                </p>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
