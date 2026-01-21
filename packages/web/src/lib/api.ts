@@ -235,6 +235,36 @@ export const gardens = {
     }),
 }
 
+// Import types
+export interface ImportLogseqRequest {
+  sourcePath: string
+  overwrite?: boolean
+  dryRun?: boolean
+}
+
+export interface BrokenLink {
+  sourceFile: string
+  target: string
+}
+
+export interface ImportResult {
+  pagesImported: number
+  journalsImported: number
+  skipped: number
+  brokenLinks: BrokenLink[]
+  warnings: string[]
+  dryRun: boolean
+}
+
+// Import API
+export const importApi = {
+  logseq: (req: ImportLogseqRequest) =>
+    fetchJson<ImportResult>(`${API_BASE}/import/logseq`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+}
+
 // Block data format for API requests
 interface BlockData {
   uuid: string

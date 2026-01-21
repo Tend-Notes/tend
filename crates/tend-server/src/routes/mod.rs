@@ -16,6 +16,7 @@ mod graph;
 mod gardens;
 mod tags;
 mod todos;
+mod import;
 
 /// Build the API router
 pub fn api_router() -> Router<Arc<AppState>> {
@@ -56,6 +57,8 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/gardens/{id}/restore", post(gardens::restore_garden))
         .route("/gardens/{id}/permanent", delete(gardens::delete_archived_garden))
         .route("/gardens/switch", post(gardens::switch_garden))
+        // Import
+        .route("/import/logseq", post(import::import_logseq))
         // Health check
         .route("/health", get(health))
 }
