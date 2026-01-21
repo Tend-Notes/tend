@@ -967,15 +967,21 @@ interface ArchivedGarden {
 // Gardens section - manages multiple gardens
 function GardensSection() {
   const { currentGraphId, setCurrentGraphId } = useSettingsStore()
-  const [gardens, setGardens] = useState<{ id: string; name: string }[]>([])
+  const [gardens, setGardens] = useState<{ id: string; name: string; encrypted?: boolean }[]>([])
   const [archivedGardens, setArchivedGardens] = useState<ArchivedGarden[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [showNewForm, setShowNewForm] = useState(false)
   const [newGardenName, setNewGardenName] = useState('')
+  const [newGardenEncrypted, setNewGardenEncrypted] = useState(false)
+  const [newGardenPassphrase, setNewGardenPassphrase] = useState('')
+  const [newGardenPassphraseConfirm, setNewGardenPassphraseConfirm] = useState('')
   const [creating, setCreating] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [unlockGardenId, setUnlockGardenId] = useState<string | null>(null)
+  const [unlockPassphrase, setUnlockPassphrase] = useState('')
+  const [unlocking, setUnlocking] = useState(false)
 
   // Fetch gardens on mount
   useEffect(() => {
@@ -1005,6 +1011,24 @@ function GardensSection() {
   const handleCreateGarden = async () => {
     if (!newGardenName.trim()) return
 
+    // Validate passphrase if encrypted
+    if (newGardenEncrypted) {
+      if (!newGardenPassphrase) {
+        setError('Please enter a passphrase for the encrypted garden')
+        return
+      }
+      if (newGardenPassphrase !== newGardenPassphraseConfirm) {
+        setError('Passphrases do not match')
+        return
+      }
+      if (newGardenPassphrase.length < 4) {
+        // Soft warning, not blocking
+        if (!confirm('Your passphrase is very short. This may make your garden easier to crack. Continue anyway?')) {
+          return
+        }
+      }
+    }
+
     try {
       setCreating(true)
       setError(null)
@@ -1015,6 +1039,7 @@ function GardensSection() {
           name: newGardenName.trim(),
           // Default path: base data dir + garden name
           path: `~/.local/share/tend/${newGardenName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+          passphrase: newGardenEncrypted ? newGardenPassphrase : undefined,
         }),
       })
 
@@ -1023,9 +1048,17 @@ function GardensSection() {
         throw new Error(data.error || 'Failed to create garden')
       }
 
+      // Show warning about remembering passphrase
+      if (newGardenEncrypted) {
+        alert('IMPORTANT: Remember your passphrase! If you forget it, your notes cannot be recovered. There is no password reset.')
+      }
+
       // Refresh the list and reset form
       await fetchGardens()
       setNewGardenName('')
+      setNewGardenEncrypted(false)
+      setNewGardenPassphrase('')
+      setNewGardenPassphraseConfirm('')
       setShowNewForm(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create garden')
@@ -1047,11 +1080,52 @@ function GardensSection() {
         throw new Error(data.error || 'Failed to switch garden')
       }
 
+      const data = await response.json()
+
+      // Check if unlock is required
+      if (data.unlock_required) {
+        setUnlockGardenId(id)
+        setUnlockPassphrase('')
+        return
+      }
+
       setCurrentGraphId(id)
       // Reload the page to refresh all data for the new garden
       window.location.reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to switch garden')
+    }
+  }
+
+  const handleUnlockGarden = async () => {
+    if (!unlockGardenId || !unlockPassphrase) return
+
+    try {
+      setUnlocking(true)
+      setError(null)
+      const response = await fetch('/api/v1/gardens/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: unlockGardenId, passphrase: unlockPassphrase }),
+      })
+
+      if (!response.ok) {
+        const data = await response.json()
+        if (response.status === 401) {
+          throw new Error('Invalid passphrase')
+        }
+        throw new Error(data.error || 'Failed to unlock garden')
+      }
+
+      setCurrentGraphId(unlockGardenId)
+      setUnlockGardenId(null)
+      setUnlockPassphrase('')
+      // Reload the page to refresh all data for the new garden
+      window.location.reload()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to unlock garden')
+    } finally {
+      setUnlocking(false)
     }
   }
 
@@ -1138,8 +1212,13 @@ function GardensSection() {
             >
               <button
                 onClick={() => handleSwitchGarden(garden.id)}
-                className="flex-1 text-left"
+                className="flex-1 text-left flex items-center gap-1.5"
               >
+                {garden.encrypted && (
+                  <svg className="w-3 h-3 text-base-0A flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                )}
                 <span className="text-xs text-base-05">{garden.name}</span>
               </button>
               {currentGraphId === garden.id ? (
@@ -1235,6 +1314,73 @@ function GardensSection() {
         </>
       )}
 
+      {/* Unlock dialog for encrypted gardens */}
+      <AnimatePresence>
+        {unlockGardenId && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-base-00/80 flex items-center justify-center z-50"
+            onClick={() => {
+              setUnlockGardenId(null)
+              setUnlockPassphrase('')
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-base-01 border border-base-02 rounded-lg p-4 max-w-sm w-full mx-4 space-y-3"
+            >
+              <div className="flex items-center gap-2">
+                <svg className="w-5 h-5 text-base-0A" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                <h3 className="text-sm font-medium text-base-05">Unlock Encrypted Garden</h3>
+              </div>
+              <p className="text-xs text-base-04">
+                This garden is encrypted. Enter your passphrase to unlock it.
+              </p>
+              <input
+                type="password"
+                value={unlockPassphrase}
+                onChange={(e) => setUnlockPassphrase(e.target.value)}
+                placeholder="Passphrase"
+                autoFocus
+                className="w-full bg-base-00 border border-base-02 rounded px-2 py-1.5 text-sm text-base-05 focus:outline-none focus:border-base-04"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleUnlockGarden()
+                  if (e.key === 'Escape') {
+                    setUnlockGardenId(null)
+                    setUnlockPassphrase('')
+                  }
+                }}
+              />
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => {
+                    setUnlockGardenId(null)
+                    setUnlockPassphrase('')
+                  }}
+                  className="px-3 py-1.5 text-xs text-base-04 hover:text-base-05 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUnlockGarden}
+                  disabled={unlocking || !unlockPassphrase}
+                  className="px-3 py-1.5 text-xs text-base-00 bg-base-0D hover:bg-base-0D/80 rounded transition-colors disabled:opacity-50"
+                >
+                  {unlocking ? 'Unlocking...' : 'Unlock'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {showNewForm && (
           <motion.div
@@ -1253,14 +1399,63 @@ function GardensSection() {
                 autoFocus
                 className="w-full bg-base-00 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateGarden()
+                  if (e.key === 'Enter' && !newGardenEncrypted) handleCreateGarden()
                   if (e.key === 'Escape') setShowNewForm(false)
                 }}
               />
+
+              {/* Encryption toggle */}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newGardenEncrypted}
+                  onChange={(e) => {
+                    setNewGardenEncrypted(e.target.checked)
+                    if (!e.target.checked) {
+                      setNewGardenPassphrase('')
+                      setNewGardenPassphraseConfirm('')
+                    }
+                  }}
+                  className="w-3.5 h-3.5 accent-base-0D"
+                />
+                <span className="text-xs text-base-04 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                  </svg>
+                  Encrypt garden
+                </span>
+              </label>
+
+              {/* Passphrase fields (shown when encryption is enabled) */}
+              {newGardenEncrypted && (
+                <div className="space-y-2 pt-1">
+                  <input
+                    type="password"
+                    value={newGardenPassphrase}
+                    onChange={(e) => setNewGardenPassphrase(e.target.value)}
+                    placeholder="Passphrase"
+                    className="w-full bg-base-00 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                  />
+                  <input
+                    type="password"
+                    value={newGardenPassphraseConfirm}
+                    onChange={(e) => setNewGardenPassphraseConfirm(e.target.value)}
+                    placeholder="Confirm passphrase"
+                    className="w-full bg-base-00 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleCreateGarden()
+                    }}
+                  />
+                  <p className="text-[10px] text-base-0A leading-tight">
+                    Warning: If you forget your passphrase, your notes cannot be recovered. There is no password reset.
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateGarden}
-                  disabled={creating || !newGardenName.trim()}
+                  disabled={creating || !newGardenName.trim() || (newGardenEncrypted && (!newGardenPassphrase || newGardenPassphrase !== newGardenPassphraseConfirm))}
                   className="px-2 py-1 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
                 >
                   {creating ? 'Creating...' : 'Create'}
@@ -1269,6 +1464,9 @@ function GardensSection() {
                   onClick={() => {
                     setShowNewForm(false)
                     setNewGardenName('')
+                    setNewGardenEncrypted(false)
+                    setNewGardenPassphrase('')
+                    setNewGardenPassphraseConfirm('')
                   }}
                   className="px-2 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
                 >
