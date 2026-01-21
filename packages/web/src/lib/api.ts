@@ -188,12 +188,14 @@ export interface Garden {
   id: string
   name: string
   path: string
+  encrypted?: boolean
 }
 
 export interface ArchivedGarden {
   id: string
   name: string
   path: string
+  encrypted?: boolean
   archived_at: string  // snake_case from Rust API
 }
 
@@ -203,14 +205,22 @@ export interface GardensResponse {
   archived?: ArchivedGarden[]
 }
 
+// Response type for switch - may indicate unlock required
+export interface SwitchResponse {
+  active?: string
+  message: string
+  unlock_required?: boolean
+  garden_id?: string
+}
+
 // Gardens API
 export const gardens = {
   list: () => fetchJson<GardensResponse>(`${API_BASE}/gardens`),
 
-  create: (name: string, path: string) =>
+  create: (name: string, path: string, passphrase?: string) =>
     fetchJson<Garden>(`${API_BASE}/gardens`, {
       method: 'POST',
-      body: JSON.stringify({ name, path }),
+      body: JSON.stringify({ name, path, passphrase }),
     }),
 
   archive: (id: string) =>
@@ -229,9 +239,15 @@ export const gardens = {
     }),
 
   switch: (id: string) =>
-    fetchJson<{ active: string; message: string }>(`${API_BASE}/gardens/switch`, {
+    fetchJson<SwitchResponse>(`${API_BASE}/gardens/switch`, {
       method: 'POST',
       body: JSON.stringify({ id }),
+    }),
+
+  unlock: (id: string, passphrase: string) =>
+    fetchJson<{ active: string; message: string }>(`${API_BASE}/gardens/unlock`, {
+      method: 'POST',
+      body: JSON.stringify({ id, passphrase }),
     }),
 }
 

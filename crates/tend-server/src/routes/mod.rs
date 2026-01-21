@@ -57,6 +57,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/gardens/{id}/restore", post(gardens::restore_garden))
         .route("/gardens/{id}/permanent", delete(gardens::delete_archived_garden))
         .route("/gardens/switch", post(gardens::switch_garden))
+        .route("/gardens/unlock", post(gardens::unlock_garden))
         // Import
         .route("/import/logseq", post(import::import_logseq))
         // Health check

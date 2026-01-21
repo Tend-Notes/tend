@@ -1,0 +1,400 @@
+// SPDX-License-Identifier: MIT WITH Commons-Clause
+//! Encrypted file system operations for Tend
+//!
+//! Wraps FileManager to provide transparent encryption/decryption of markdown files
+//! using age encryption.
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use chrono::NaiveDate;
+use tend_core::parser::{is_journal_filename, parse_journal_filename, parse_markdown};
+use tend_core::serializer::serialize_page;
+use tend_core::{Page, PageMeta};
+use tokio::sync::RwLock;
+use tracing::{debug, info};
+
+use crate::encryption::{decrypt, encrypt, EncryptionError};
+use crate::error::StorageError;
+
+/// File extension for encrypted files
+const ENCRYPTED_EXT: &str = "md.age";
+
+/// Manages encrypted file operations for a garden
+pub struct EncryptedFileManager {
+    /// Root path of the garden
+    root: PathBuf,
+
+    /// Passphrase for encryption/decryption (held in memory)
+    passphrase: String,
+
+    /// Lock for write operations
+    write_lock: Arc<RwLock<()>>,
+
+    /// Set of paths we're currently writing
+    pending_writes: Arc<RwLock<HashSet<PathBuf>>>,
+}
+
+impl EncryptedFileManager {
+    /// Create a new EncryptedFileManager for an encrypted garden
+    pub fn new(root: impl AsRef<Path>, passphrase: String) -> Result<Self, StorageError> {
+        let root = root.as_ref().to_path_buf();
+
+        // Ensure directories exist
+        std::fs::create_dir_all(root.join("pages"))?;
+        std::fs::create_dir_all(root.join("journals"))?;
+
+        info!("Initialized encrypted garden at: {}", root.display());
+
+        Ok(Self {
+            root,
+            passphrase,
+            write_lock: Arc::new(RwLock::new(())),
+            pending_writes: Arc::new(RwLock::new(HashSet::new())),
+        })
+    }
+
+    /// Verify the passphrase is correct by decrypting the verification file
+    pub fn verify_passphrase(root: impl AsRef<Path>, passphrase: &str) -> Result<bool, StorageError> {
+        let verify_path = root.as_ref().join(".tend").join("encryption.verify");
+
+        if !verify_path.exists() {
+            return Err(StorageError::Other(
+                "Encryption verification file not found".to_string(),
+            ));
+        }
+
+        let encrypted = std::fs::read(&verify_path)?;
+
+        match decrypt(&encrypted, passphrase) {
+            Ok(content) => {
+                if content == "tend-encryption-verification" {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            Err(EncryptionError::WrongPassphrase) => Ok(false),
+            Err(e) => Err(StorageError::Other(format!(
+                "Failed to verify passphrase: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Get the root path
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Get path to an encrypted page file
+    fn page_path(&self, name: &str) -> PathBuf {
+        self.root
+            .join("pages")
+            .join(format!("{}.{}", name, ENCRYPTED_EXT))
+    }
+
+    /// Get path to an encrypted journal file
+    fn journal_path(&self, date: NaiveDate) -> PathBuf {
+        let filename = date.format(&format!("%Y-%m-%d.{}", ENCRYPTED_EXT)).to_string();
+        self.root.join("journals").join(filename)
+    }
+
+    /// Check if a path is one we're currently writing
+    pub async fn is_pending_write(&self, path: &Path) -> bool {
+        self.pending_writes.read().await.contains(path)
+    }
+
+    /// Get a reference to pending writes for the watcher
+    pub fn pending_writes(&self) -> Arc<RwLock<HashSet<PathBuf>>> {
+        Arc::clone(&self.pending_writes)
+    }
+
+    /// List all encrypted pages
+    pub async fn list_pages(&self) -> Result<Vec<PageMeta>, StorageError> {
+        let pages_dir = self.root.join("pages");
+        let mut pages = Vec::new();
+
+        let mut entries = tokio::fs::read_dir(&pages_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+
+            // Check for .md.age extension
+            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
+                if name.ends_with(&format!(".{}", ENCRYPTED_EXT)) {
+                    let page_name = name.strip_suffix(&format!(".{}", ENCRYPTED_EXT)).unwrap();
+                    match self.read_page(page_name).await {
+                        Ok(page) => pages.push(PageMeta::from(&page)),
+                        Err(e) => {
+                            debug!("Failed to read encrypted page {}: {}", page_name, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        pages.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        Ok(pages)
+    }
+
+    /// List all encrypted journals
+    pub async fn list_journals(&self) -> Result<Vec<PageMeta>, StorageError> {
+        let journals_dir = self.root.join("journals");
+        let mut journals = Vec::new();
+
+        let mut entries = tokio::fs::read_dir(&journals_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                // Check for encrypted journal format: YYYY-MM-DD.md.age
+                if filename.ends_with(&format!(".{}", ENCRYPTED_EXT)) {
+                    let base_name = filename.strip_suffix(".age").unwrap();
+                    if is_journal_filename(base_name) {
+                        if let Some(date) = parse_journal_filename(base_name) {
+                            match self.read_journal(date).await {
+                                Ok(page) => journals.push(PageMeta::from(&page)),
+                                Err(e) => {
+                                    debug!("Failed to read encrypted journal {}: {}", filename, e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        journals.sort_by(|a, b| b.journal_date.cmp(&a.journal_date));
+        Ok(journals)
+    }
+
+    /// Read and decrypt a page by name
+    pub async fn read_page(&self, name: &str) -> Result<Page, StorageError> {
+        let path = self.page_path(name);
+
+        if !path.exists() {
+            return Err(StorageError::NotFound(name.to_string()));
+        }
+
+        let encrypted = tokio::fs::read(&path).await?;
+        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
+            EncryptionError::WrongPassphrase => {
+                StorageError::Other("Wrong passphrase".to_string())
+            }
+            _ => StorageError::Other(format!("Decryption failed: {}", e)),
+        })?;
+
+        let mut page = parse_markdown(&content, name)
+            .map_err(|e| StorageError::ParseError(e.to_string()))?;
+
+        // Get file metadata for timestamps
+        let metadata = tokio::fs::metadata(&path).await?;
+        if let Ok(modified) = metadata.modified() {
+            page.modified_at = modified.into();
+        }
+        if let Ok(created) = metadata.created() {
+            page.created_at = created.into();
+        }
+
+        Ok(page)
+    }
+
+    /// Read and decrypt a journal by date
+    pub async fn read_journal(&self, date: NaiveDate) -> Result<Page, StorageError> {
+        let path = self.journal_path(date);
+
+        if !path.exists() {
+            // Return an empty journal page (not an error)
+            return Ok(Page::new_journal(date));
+        }
+
+        let encrypted = tokio::fs::read(&path).await?;
+        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
+            EncryptionError::WrongPassphrase => {
+                StorageError::Other("Wrong passphrase".to_string())
+            }
+            _ => StorageError::Other(format!("Decryption failed: {}", e)),
+        })?;
+
+        let name = date.format("%Y-%m-%d").to_string();
+        let mut page = parse_markdown(&content, &name)
+            .map_err(|e| StorageError::ParseError(e.to_string()))?;
+
+        // Set journal-specific fields
+        page.is_journal = true;
+        page.journal_date = Some(date);
+        page.title = date.format("%A, %B %-d, %Y").to_string();
+
+        // Get file metadata for timestamps
+        let metadata = tokio::fs::metadata(&path).await?;
+        if let Ok(modified) = metadata.modified() {
+            page.modified_at = modified.into();
+        }
+        if let Ok(created) = metadata.created() {
+            page.created_at = created.into();
+        }
+
+        Ok(page)
+    }
+
+    /// Encrypt and write a page
+    pub async fn write_page(&self, page: &Page) -> Result<(), StorageError> {
+        let path = if page.is_journal {
+            self.journal_path(page.journal_date.unwrap_or_else(|| {
+                chrono::Local::now().date_naive()
+            }))
+        } else {
+            self.page_path(&page.name)
+        };
+
+        self.write_file(&path, page).await
+    }
+
+    /// Encrypt and write a page to a specific path
+    async fn write_file(&self, path: &Path, page: &Page) -> Result<(), StorageError> {
+        // Acquire read lock
+        let _guard = self.write_lock.read().await;
+
+        let content = serialize_page(page);
+        let encrypted = encrypt(&content, &self.passphrase)
+            .map_err(|e| StorageError::Other(format!("Encryption failed: {}", e)))?;
+
+        let tmp_path = path.with_extension("tmp");
+
+        // Mark as pending write
+        {
+            let mut pending = self.pending_writes.write().await;
+            pending.insert(path.to_path_buf());
+        }
+
+        // Write encrypted content to temp file
+        tokio::fs::write(&tmp_path, &encrypted).await?;
+
+        // Atomic rename
+        tokio::fs::rename(&tmp_path, path).await?;
+
+        // Remove from pending writes after a short delay
+        let pending_writes = Arc::clone(&self.pending_writes);
+        let path_buf = path.to_path_buf();
+        tokio::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            let mut pending = pending_writes.write().await;
+            pending.remove(&path_buf);
+        });
+
+        debug!("Wrote encrypted page: {}", path.display());
+
+        Ok(())
+    }
+
+    /// Delete an encrypted page
+    pub async fn delete_page(&self, name: &str) -> Result<(), StorageError> {
+        let path = self.page_path(name);
+
+        if !path.exists() {
+            return Err(StorageError::NotFound(name.to_string()));
+        }
+
+        let _guard = self.write_lock.read().await;
+
+        {
+            let mut pending = self.pending_writes.write().await;
+            pending.insert(path.clone());
+        }
+
+        tokio::fs::remove_file(&path).await?;
+
+        info!("Deleted encrypted page: {}", name);
+
+        Ok(())
+    }
+
+    /// Check if an encrypted page exists
+    pub async fn page_exists(&self, name: &str) -> bool {
+        self.page_path(name).exists()
+    }
+
+    /// Check if an encrypted journal exists
+    pub async fn journal_exists(&self, date: NaiveDate) -> bool {
+        self.journal_path(date).exists()
+    }
+
+    /// Acquire exclusive lock (for git backup)
+    pub async fn acquire_exclusive_lock(&self) -> tokio::sync::RwLockWriteGuard<'_, ()> {
+        info!("Acquiring exclusive lock for backup");
+        self.write_lock.write().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    async fn setup() -> (TempDir, EncryptedFileManager) {
+        let temp_dir = TempDir::new().unwrap();
+        let passphrase = "test-passphrase";
+
+        // Create verification file
+        let verify_path = temp_dir.path().join(".tend").join("encryption.verify");
+        std::fs::create_dir_all(verify_path.parent().unwrap()).unwrap();
+        let verify_content = encrypt("tend-encryption-verification", passphrase).unwrap();
+        std::fs::write(&verify_path, verify_content).unwrap();
+
+        let efm = EncryptedFileManager::new(temp_dir.path(), passphrase.to_string()).unwrap();
+        (temp_dir, efm)
+    }
+
+    #[tokio::test]
+    async fn test_verify_passphrase() {
+        let (temp_dir, _efm) = setup().await;
+
+        assert!(EncryptedFileManager::verify_passphrase(temp_dir.path(), "test-passphrase").unwrap());
+        assert!(!EncryptedFileManager::verify_passphrase(temp_dir.path(), "wrong-passphrase").unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_encrypted_write_and_read_page() {
+        let (_temp_dir, efm) = setup().await;
+
+        let mut page = Page::new("Secret Page");
+        let block = tend_core::Block::new("Top secret content!");
+        page.add_block(block);
+
+        efm.write_page(&page).await.unwrap();
+
+        let read_page = efm.read_page("Secret Page").await.unwrap();
+        assert_eq!(read_page.name, "Secret Page");
+        assert_eq!(read_page.blocks.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_encrypted_journal() {
+        let (_temp_dir, efm) = setup().await;
+
+        let date = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
+        let mut page = Page::new_journal(date);
+        let block = tend_core::Block::new("Encrypted journal entry");
+        page.add_block(block);
+
+        efm.write_page(&page).await.unwrap();
+
+        let read_page = efm.read_journal(date).await.unwrap();
+        assert!(read_page.is_journal);
+        assert_eq!(read_page.journal_date, Some(date));
+    }
+
+    #[tokio::test]
+    async fn test_list_encrypted_pages() {
+        let (_temp_dir, efm) = setup().await;
+
+        for name in ["Page A", "Page B", "Page C"] {
+            let mut page = Page::new(name);
+            page.add_block(tend_core::Block::new("Content"));
+            efm.write_page(&page).await.unwrap();
+        }
+
+        let pages = efm.list_pages().await.unwrap();
+        assert_eq!(pages.len(), 3);
+    }
+}

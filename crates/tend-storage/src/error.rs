@@ -22,4 +22,10 @@ pub enum StorageError {
 
     #[error("Watch error: {0}")]
     WatchError(String),
+
+    #[error("Encryption error: {0}")]
+    Encryption(String),
+
+    #[error("{0}")]
+    Other(String),
 }

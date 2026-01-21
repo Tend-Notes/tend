@@ -57,6 +57,9 @@ notify-debouncer-full = "0.5"
 # Markdown
 comrak = "0.29"
 
+# Encryption
+age = "0.11"
+
 # Configuration
 toml = "0.8"
 directories = "5"
