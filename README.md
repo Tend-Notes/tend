@@ -185,6 +185,48 @@ Files are Logseq-compatible Markdown with block IDs:
     id:: b2c3d4e5-f6a7-8901-bcde-f12345678901
 ```
 
+## Encryption
+
+Tend supports optional encryption for gardens. When you create an encrypted garden, all your notes are encrypted at rest using [age](https://age-encryption.org/), a modern encryption tool.
+
+### How It Works
+
+- Encryption is chosen when creating a new garden (cannot be added later)
+- Files are stored as `.md.age` instead of `.md`
+- The passphrase is kept in memory while the garden is unlocked
+- When switching to an encrypted garden, you must enter the passphrase
+- The search index (in `.tend/`) contains decrypted snippets for search
+
+### Security Notes
+
+- **Passphrase recovery is not possible.** If you forget your passphrase, your notes cannot be recovered.
+- The search index contains text snippets. For maximum security, delete `.tend/` when not using the garden.
+- Encryption only protects files at rest. Anyone with access to the running server can read decrypted content.
+
+### Recovering Files Outside Tend
+
+Encrypted files use the standard age format and can be decrypted using the `age` command-line tool:
+
+```bash
+# Install age (available on macOS, Linux, Windows)
+# macOS: brew install age
+# Linux: apt install age / dnf install age
+# Windows: scoop install age / winget install age
+
+# Decrypt a single file
+age -d -o "My Page.md" "pages/My Page.md.age"
+
+# Decrypt all files in a garden
+cd /path/to/garden
+for f in pages/*.age journals/*.age; do
+  age -d -o "${f%.age}" "$f"
+done
+
+# age will prompt for your passphrase interactively
+```
+
+This means you're never locked into Tend - your notes remain accessible with standard tools.
+
 ## Development
 
 ### Prerequisites
