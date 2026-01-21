@@ -221,6 +221,26 @@ cargo run -p tend-server
 
 The frontend dev server proxies API requests to the backend.
 
+## Acknowledgements
+
+Tend is built with these excellent open source projects:
+
+**Backend**
+- [Axum](https://github.com/tokio-rs/axum) - Web framework
+- [Tokio](https://tokio.rs) - Async runtime
+- [Tantivy](https://github.com/quickwit-oss/tantivy) - Full-text search engine
+- [Comrak](https://github.com/kivikakk/comrak) - Markdown parser
+
+**Frontend**
+- [React](https://react.dev) - UI framework
+- [Zustand](https://github.com/pmndrs/zustand) - State management
+- [cmdk](https://cmdk.paco.me) - Command palette
+- [D3](https://d3js.org) - Graph visualization
+- [Tailwind CSS](https://tailwindcss.com) - Styling
+
+**Theming**
+- [tinted-theming](https://github.com/tinted-theming/home) - Base16/Base24 color schemes
+
 ## License
 
 MIT with Commons Clause. See [LICENSE](LICENSE) for details.
