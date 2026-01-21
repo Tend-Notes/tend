@@ -226,20 +226,20 @@ The frontend dev server proxies API requests to the backend.
 Tend is built with these excellent open source projects:
 
 **Backend**
-- [Axum](https://github.com/tokio-rs/axum) - Web framework
-- [Tokio](https://tokio.rs) - Async runtime
-- [Tantivy](https://github.com/quickwit-oss/tantivy) - Full-text search engine
-- [Comrak](https://github.com/kivikakk/comrak) - Markdown parser
+- [Axum](https://github.com/tokio-rs/axum) - Web framework (MIT)
+- [Tokio](https://tokio.rs) - Async runtime (MIT)
+- [Tantivy](https://github.com/quickwit-oss/tantivy) - Full-text search engine (MIT)
+- [Comrak](https://github.com/kivikakk/comrak) - Markdown parser (BSD-2-Clause)
 
 **Frontend**
-- [React](https://react.dev) - UI framework
-- [Zustand](https://github.com/pmndrs/zustand) - State management
-- [cmdk](https://cmdk.paco.me) - Command palette
-- [D3](https://d3js.org) - Graph visualization
-- [Tailwind CSS](https://tailwindcss.com) - Styling
+- [React](https://react.dev) - UI framework (MIT)
+- [Zustand](https://github.com/pmndrs/zustand) - State management (MIT)
+- [cmdk](https://cmdk.paco.me) - Command palette (MIT)
+- [D3](https://d3js.org) - Graph visualization (ISC)
+- [Tailwind CSS](https://tailwindcss.com) - Styling (MIT)
 
 **Theming**
-- [tinted-theming](https://github.com/tinted-theming/home) - Base16/Base24 color schemes
+- [tinted-theming](https://github.com/tinted-theming/home) - Base16/Base24 color schemes (MIT)
 
 ## License
 
