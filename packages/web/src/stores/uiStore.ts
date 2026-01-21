@@ -4,10 +4,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+// Sidebar modes
+export type SidebarMode = 'navigation' | 'history' | 'graph' | 'options' | 'tags' | 'todos'
+
 interface UIState {
   // Sidebar
   sidebarOpen: boolean
   sidebarWidth: number
+  sidebarMode: SidebarMode
 
   // Panels
   backlinksOpen: boolean
@@ -20,6 +24,7 @@ interface UIState {
   // Actions
   toggleSidebar: () => void
   setSidebarWidth: (width: number) => void
+  setSidebarMode: (mode: SidebarMode) => void
   toggleBacklinks: () => void
   toggleGraph: () => void
   toggleSearch: () => void
@@ -33,6 +38,7 @@ export const useUIStore = create<UIState>()(
     (set) => ({
       sidebarOpen: false,
       sidebarWidth: 328, // ~15% wider than previous default (285)
+      sidebarMode: 'navigation' as SidebarMode,
       backlinksOpen: false,
       graphOpen: false,
       searchOpen: false,
@@ -47,6 +53,8 @@ export const useUIStore = create<UIState>()(
         const maxWidth = typeof window !== 'undefined' ? window.innerWidth * 0.4 : 500
         set({ sidebarWidth: Math.max(minWidth, Math.min(maxWidth, width)) })
       },
+
+      setSidebarMode: (mode) => set({ sidebarMode: mode }),
 
       toggleBacklinks: () =>
         set((state) => ({ backlinksOpen: !state.backlinksOpen })),

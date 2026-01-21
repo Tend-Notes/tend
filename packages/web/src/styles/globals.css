@@ -316,6 +316,23 @@ code {
   text-decoration: underline;
 }
 
+/* Tag pill styles - colored background pills */
+.tag-pill {
+  display: inline-block;
+  background-color: color-mix(in srgb, var(--tag-color) 20%, transparent);
+  color: var(--tag-color);
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 0.9em;
+  cursor: pointer;
+  user-select: all; /* Select entire tag as unit */
+  transition: background-color var(--duration-fast) var(--ease-out);
+}
+
+.tag-pill:hover {
+  background-color: color-mix(in srgb, var(--tag-color) 35%, transparent);
+}
+
 /* Task markers (legacy) */
 .task-marker {
   font-weight: 600;
@@ -360,8 +377,16 @@ code {
   opacity: 0.6;
 }
 
+/* Content after a task status - reset styling to prevent inheritance from badge */
+.task-content {
+  font-weight: normal;
+  font-size: inherit;
+}
+
 /* Content after a completed task status gets struck through */
 .task-content-struck {
+  font-weight: normal;
+  font-size: inherit;
   text-decoration: line-through;
 }
 
@@ -447,7 +472,7 @@ code {
 .block {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 12px;
   padding: 2px 0;
   border-radius: 3px;
   transition: background-color var(--duration-normal) var(--ease-out);

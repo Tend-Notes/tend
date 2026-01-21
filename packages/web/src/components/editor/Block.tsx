@@ -5,10 +5,12 @@ import { useRef, useEffect, ReactNode, KeyboardEvent, MouseEvent as ReactMouseEv
 import { motion, AnimatePresence } from 'framer-motion'
 import type { Block } from '../../types'
 import { WikiLinkPopup } from './WikiLinkPopup'
+import { SlashCommandPopup, type SlashCommand } from './SlashCommandPopup'
 import { SmoothCaret } from './SmoothCaret'
 import { usePageStore } from '../../stores/pageStore'
 import { useSelectionStore } from '../../stores/selectionStore'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
+import { useTagStore } from '../../stores/tagStore'
 
 interface BlockProps {
   block: Block
@@ -125,6 +127,7 @@ export function BlockComponent({
   const lastContentRef = useRef(block.content)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
+  const getTagColor = useTagStore((state) => state.getTagColor)
 
   // Selection state
   const { setFocusedBlock, startSelection, extendSelection, extendSelectionInDirection, clearSelection, isInSelection, startDrag } = useSelectionStore()
@@ -133,6 +136,19 @@ export function BlockComponent({
 
   // Wiki-link autocomplete state
   const [wikiLink, setWikiLink] = useState<WikiLinkState>({
+    active: false,
+    query: '',
+    startOffset: 0,
+    position: { top: 0, left: 0 },
+  })
+
+  // Slash command state
+  const [slashCommand, setSlashCommand] = useState<{
+    active: boolean
+    query: string
+    startOffset: number
+    position: { top: number; left: number }
+  }>({
     active: false,
     query: '',
     startOffset: 0,
@@ -161,13 +177,15 @@ export function BlockComponent({
     interface Span {
       start: number
       end: number
-      type: 'wiki-link' | 'format' | 'heading-marker' | 'task-status'
+      type: 'wiki-link' | 'format' | 'heading-marker' | 'task-status' | 'tag'
       className: string
       innerText: string
       delimiter?: string
       pageName?: string
       taskKeyword?: string
       taskColor?: string
+      tagName?: string
+      tagColor?: string
     }
 
     const spans: Span[] = []
@@ -249,6 +267,45 @@ export function BlockComponent({
       }
     }
 
+    // Find tags (#tagname) - must be preceded by whitespace or start of string
+    // AND followed by whitespace or punctuation or end of string
+    // Tag names can contain letters, numbers, underscores, hyphens
+    // Using a simpler regex without lookbehind for better compatibility
+    const tagRegex = /(^|\s)#([a-zA-Z][a-zA-Z0-9_-]*)(?=\s|[^\w-]|$)/g
+    while ((match = tagRegex.exec(content)) !== null) {
+      // Adjust start position to exclude the leading whitespace if present
+      const leadingSpace = match[1]
+      const start = match.index + leadingSpace.length
+      const end = match.index + match[0].length
+      const tagName = match[2]
+
+      // Skip tags that end at cursor position AND at end of content (user is still typing)
+      // This prevents color cycling while typing a tag name
+      const isAtEndOfContent = end === content.length
+      const cursorAtEnd = cursorRange && cursorRange.start === end
+      if (isAtEndOfContent && cursorAtEnd) {
+        continue
+      }
+
+      // Check for overlap with existing spans
+      const overlaps = spans.some(s =>
+        (start >= s.start && start < s.end) ||
+        (end > s.start && end <= s.end) ||
+        (start <= s.start && end >= s.end)
+      )
+      if (!overlaps) {
+        spans.push({
+          start,
+          end,
+          type: 'tag',
+          className: 'tag-pill',
+          innerText: tagName,
+          tagName,
+          tagColor: getTagColor(tagName),
+        })
+      }
+    }
+
     // Sort spans by start position
     spans.sort((a, b) => a.start - b.start)
 
@@ -267,6 +324,9 @@ export function BlockComponent({
       if (textBefore) {
         if (afterTaskStatus && isCompletedTask) {
           result += `<span class="task-content-struck">${textBefore}</span>`
+        } else if (afterTaskStatus) {
+          // Wrap in span to prevent style inheritance from task status badge
+          result += `<span class="task-content">${textBefore}</span>`
         } else {
           result += textBefore
         }
@@ -279,7 +339,7 @@ export function BlockComponent({
 
       if (span.type === 'task-status') {
         // Task status marker - styled badge that's clickable to cycle
-        result += `<span class="${span.className}" data-task-keyword="${escapeHtml(span.taskKeyword!)}" style="color: var(--${span.taskColor}); cursor: pointer;">${escapeHtml(span.innerText)}</span>`
+        result += `<span class="${span.className}" data-task-keyword="${escapeHtml(span.taskKeyword!)}" style="color: var(--${span.taskColor}); cursor: pointer;">${escapeHtml(span.taskKeyword!)}</span>`
         afterTaskStatus = true
       } else if (span.type === 'wiki-link') {
         let linkHtml: string
@@ -297,6 +357,16 @@ export function BlockComponent({
       } else if (span.type === 'heading-marker') {
         // Heading marker - always shown with subtle styling
         result += `<span class="${span.className}">${escapeHtml(span.innerText)}</span>`
+      } else if (span.type === 'tag') {
+        // Tag pill - styled with background color, atomic unit
+        const tagHtml = `<span class="${span.className}" data-tag-name="${escapeHtml(span.tagName!)}" style="--tag-color: ${span.tagColor};">#${escapeHtml(span.tagName!)}</span>`
+        if (afterTaskStatus && isCompletedTask) {
+          result += `<span class="task-content-struck">${tagHtml}</span>`
+        } else if (afterTaskStatus) {
+          result += `<span class="task-content">${tagHtml}</span>`
+        } else {
+          result += tagHtml
+        }
       } else {
         // Format span
         const delim = span.delimiter!
@@ -323,13 +393,16 @@ export function BlockComponent({
     if (remainingText) {
       if (afterTaskStatus && isCompletedTask) {
         result += `<span class="task-content-struck">${remainingText}</span>`
+      } else if (afterTaskStatus) {
+        // Wrap in span to prevent style inheritance from task status badge
+        result += `<span class="task-content">${remainingText}</span>`
       } else {
         result += remainingText
       }
     }
 
     return result
-  }, [])
+  }, [getTagColor])
 
   // Sync content from props when it changes externally
   useEffect(() => {
@@ -420,6 +493,30 @@ export function BlockComponent({
     el.addEventListener('click', handleClick)
     return () => el.removeEventListener('click', handleClick)
   }, [block.uuid, block.content, taskStatuses, onChange, readonly, renderContent])
+
+  // Handle tag clicks - navigate to tag page
+  useEffect(() => {
+    const el = editorRef.current
+    if (!el) return
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (target.classList.contains('tag-pill')) {
+        e.preventDefault()
+        e.stopPropagation()
+        const tagName = target.dataset.tagName
+        if (tagName) {
+          // Navigate to tag page
+          window.history.pushState({ type: 'tag', name: tagName }, '', `/tags/${encodeURIComponent(tagName)}`)
+          // TODO: Implement tag page view - for now just navigate
+          navigateToPage(`tags/${tagName}`)
+        }
+      }
+    }
+
+    el.addEventListener('click', handleClick)
+    return () => el.removeEventListener('click', handleClick)
+  }, [navigateToPage])
 
   // Track cursor position to show/hide delimiters (wiki-links and formatting)
   useEffect(() => {
@@ -563,6 +660,114 @@ export function BlockComponent({
     }
   }, [wikiLink.active, renderContent])
 
+  // Check for slash command trigger pattern
+  const checkSlashCommandTrigger = useCallback(() => {
+    const el = editorRef.current
+    if (!el) return
+
+    const selection = window.getSelection()
+    if (!selection || !selection.isCollapsed) return
+
+    const cursorOffset = getCursorOffset(el, selection)
+    const content = el.textContent || ''
+
+    // Look for / at start of block or after whitespace
+    const beforeCursor = content.substring(0, cursorOffset)
+
+    // Find the last / that could start a slash command
+    // It must be at position 0 or after whitespace
+    let slashPos = -1
+    for (let i = beforeCursor.length - 1; i >= 0; i--) {
+      if (beforeCursor[i] === '/') {
+        // Check if at start or after whitespace
+        if (i === 0 || /\s/.test(beforeCursor[i - 1])) {
+          slashPos = i
+          break
+        }
+      } else if (/\s/.test(beforeCursor[i])) {
+        // Hit whitespace without finding /, stop searching
+        break
+      }
+    }
+
+    if (slashPos !== -1) {
+      const query = beforeCursor.substring(slashPos + 1)
+      // Only show popup if query is short (command search)
+      if (query.length <= 20 && !/\s/.test(query)) {
+        const range = selection.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+
+        setSlashCommand({
+          active: true,
+          query,
+          startOffset: slashPos,
+          position: {
+            top: rect.bottom + window.scrollY + 4,
+            left: rect.left + window.scrollX - (query.length * 8), // Offset left to align with /
+          },
+        })
+        return
+      }
+    }
+
+    // No active slash command - close popup
+    if (slashCommand.active) {
+      setSlashCommand((prev) => ({ ...prev, active: false }))
+    }
+  }, [slashCommand.active])
+
+  // Handle slash command selection
+  const handleSlashCommandSelect = useCallback((command: SlashCommand) => {
+    const el = editorRef.current
+    if (!el) return
+
+    const content = el.textContent || ''
+    const cursorOffset = getCursorOffset(el, window.getSelection()!)
+
+    // Remove the /query from content
+    const before = content.substring(0, slashCommand.startOffset)
+    const after = content.substring(cursorOffset)
+
+    // Close popup first
+    setSlashCommand((prev) => ({ ...prev, active: false }))
+
+    // Execute the command action with context
+    const context = {
+      contentBefore: before,
+      contentAfter: after,
+      replaceContent: (newContent: string) => {
+        lastContentRef.current = newContent
+        onChange(block.uuid, newContent)
+        requestAnimationFrame(() => {
+          if (editorRef.current) {
+            editorRef.current.innerHTML = renderContent(newContent, null)
+            restoreCursor(editorRef.current, newContent.length)
+            editorRef.current.focus()
+          }
+        })
+      },
+      insertContent: (insert: string) => {
+        const newContent = before + insert + after
+        lastContentRef.current = newContent
+        onChange(block.uuid, newContent)
+        requestAnimationFrame(() => {
+          if (editorRef.current) {
+            const cursorPos = before.length + insert.length
+            editorRef.current.innerHTML = renderContent(newContent, { start: cursorPos, end: cursorPos })
+            restoreCursor(editorRef.current, cursorPos)
+            editorRef.current.focus()
+          }
+        })
+      },
+    }
+
+    command.action(context)
+  }, [slashCommand.startOffset, block.uuid, onChange, renderContent])
+
+  const handleSlashCommandClose = useCallback(() => {
+    setSlashCommand((prev) => ({ ...prev, active: false }))
+  }, [])
+
   // Check if a wiki-link or formatting has become malformed and unlink it
   const checkAndUnlinkBrokenMarkup = useCallback((content: string): string => {
     let fixed = content
@@ -614,13 +819,19 @@ export function BlockComponent({
         editorRef.current.innerHTML = renderContent(content, { start: cursorOffset, end: cursorOffset })
         restoreCursor(editorRef.current, Math.min(cursorOffset, content.length))
       } else {
-        // Check if we need to re-render for task status (when typing "TODO ", "DONE ", etc.)
+        // Check if we need to re-render for task status
         const taskStatusRegex = buildTaskStatusRegex()
         const hasTaskStatus = taskStatusRegex.test(content)
         const displayedHasTaskStatus = editorRef.current.querySelector('.task-status') !== null
 
-        if (hasTaskStatus !== displayedHasTaskStatus) {
-          // Task status changed - re-render
+        // Check if we need to re-render for tags (only complete tags followed by space/punctuation/end)
+        const tagRegex = /(^|\s)#([a-zA-Z][a-zA-Z0-9_-]*)(?=\s|[^\w-]|$)/g
+        const hasTag = tagRegex.test(content)
+        const displayedHasTag = editorRef.current.querySelector('.tag-pill') !== null
+
+        // Re-render if task status or tag appeared/disappeared, OR if there's a task status
+        // (to maintain proper DOM structure for content after the badge)
+        if (hasTaskStatus !== displayedHasTaskStatus || hasTaskStatus || hasTag !== displayedHasTag || hasTag) {
           const selection = window.getSelection()
           const cursorOffset = selection ? getCursorOffset(editorRef.current, selection) : content.length
 
@@ -635,6 +846,8 @@ export function BlockComponent({
       }
       // Check for wiki-link trigger
       checkWikiLinkTrigger()
+      // Check for slash command trigger
+      checkSlashCommandTrigger()
     }
   }
 
@@ -1086,12 +1299,60 @@ export function BlockComponent({
     }
 
     // Backspace at start - merge with previous
+    // Also handle deleting entire tags as atomic units
     if (e.key === 'Backspace') {
       const selection = window.getSelection()
-      if (selection && selection.isCollapsed && isAtStart(el, selection)) {
-        e.preventDefault()
-        onMergeWithPrevious(block.uuid)
-        return
+      if (selection && selection.isCollapsed) {
+        if (isAtStart(el, selection)) {
+          e.preventDefault()
+          onMergeWithPrevious(block.uuid)
+          return
+        }
+
+        // Check if cursor is at end of a tag - delete entire tag
+        const domOffset = getCursorOffset(el, selection)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+        const tagInfo = getTagAtContentOffset(block.content, contentOffset)
+
+        if (tagInfo && contentOffset > tagInfo.start && contentOffset <= tagInfo.end) {
+          // Inside or at end of a tag - delete entire tag
+          e.preventDefault()
+          const before = block.content.slice(0, tagInfo.start)
+          const after = block.content.slice(tagInfo.end)
+          const newContent = before + after
+          lastContentRef.current = newContent
+          onChange(block.uuid, newContent)
+
+          // Update display and position cursor
+          el.innerHTML = renderContent(newContent, null)
+          restoreCursor(el, tagInfo.start)
+          return
+        }
+      }
+    }
+
+    // Delete key - delete entire tag as atomic unit (forward delete)
+    if (e.key === 'Delete') {
+      const selection = window.getSelection()
+      if (selection && selection.isCollapsed) {
+        const domOffset = getCursorOffset(el, selection)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+        const tagInfo = getTagAtContentOffset(block.content, contentOffset)
+
+        if (tagInfo && contentOffset >= tagInfo.start && contentOffset < tagInfo.end) {
+          // At start of or inside a tag - delete entire tag
+          e.preventDefault()
+          const before = block.content.slice(0, tagInfo.start)
+          const after = block.content.slice(tagInfo.end)
+          const newContent = before + after
+          lastContentRef.current = newContent
+          onChange(block.uuid, newContent)
+
+          // Update display and position cursor
+          el.innerHTML = renderContent(newContent, null)
+          restoreCursor(el, tagInfo.start)
+          return
+        }
       }
     }
 
@@ -1218,6 +1479,16 @@ export function BlockComponent({
         const domOffset = getCursorOffset(el, selection)
         const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
 
+        // Check for tags - tags are atomic, skip over entire tag
+        const tagInfo = getTagAtContentOffset(block.content, contentOffset)
+        if (tagInfo && contentOffset > tagInfo.start && contentOffset <= tagInfo.end) {
+          // Inside or at end of a tag - jump to start
+          e.preventDefault()
+          const newDomOffset = contentOffsetToDomOffset(block.content, tagInfo.start, null)
+          restoreCursor(el, newDomOffset)
+          return
+        }
+
         // If we're at the end of a formatted span, jump to inside it (before closing delimiter)
         const spanInfo = getSpanAtContentOffset(block.content, contentOffset)
         if (spanInfo && contentOffset === spanInfo.end) {
@@ -1246,6 +1517,16 @@ export function BlockComponent({
         // which doesn't account for hidden closing delimiters
         const domOffset = getCursorOffset(el, selection)
         const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+
+        // Check for tags - tags are atomic, skip over entire tag
+        const tagInfo = getTagAtContentOffset(block.content, contentOffset)
+        if (tagInfo && contentOffset >= tagInfo.start && contentOffset < tagInfo.end) {
+          // Inside or at start of a tag - jump to end
+          e.preventDefault()
+          const newDomOffset = contentOffsetToDomOffset(block.content, tagInfo.end, null)
+          restoreCursor(el, newDomOffset)
+          return
+        }
 
         // If we're inside a formatted span (delimiters visible), check if we're at the true end
         if (cursorInWikiLink) {
@@ -1319,6 +1600,25 @@ export function BlockComponent({
       }
     }
 
+    return null
+  }
+
+  // Helper: get tag info at a content offset (tags are fully atomic, no inner content)
+  function getTagAtContentOffset(content: string, offset: number): { start: number; end: number } | null {
+    // Using a simpler regex without lookbehind for better compatibility
+    // Tags must be followed by whitespace or punctuation or end of string
+    const tagRegex = /(^|\s)#([a-zA-Z][a-zA-Z0-9_-]*)(?=\s|[^\w-]|$)/g
+    let match
+    while ((match = tagRegex.exec(content)) !== null) {
+      // Adjust start position to exclude the leading whitespace if present
+      const leadingSpace = match[1]
+      const start = match.index + leadingSpace.length
+      const end = match.index + match[0].length
+      // offset <= end because we want to detect when cursor is AT the end too (to skip on arrow right)
+      if (offset >= start && offset <= end) {
+        return { start, end }
+      }
+    }
     return null
   }
 
@@ -1441,7 +1741,7 @@ export function BlockComponent({
       onMouseDown={handleBlockMouseDown}
       onMouseEnter={handleBlockMouseEnter}
     >
-      <div className="block flex items-start gap-2 py-0.5">
+      <div className="block flex items-start py-0.5">
         {/* Bullet point */}
         <button
           onClick={() => hasChildren && onToggleCollapse(block.uuid)}
@@ -1502,6 +1802,16 @@ export function BlockComponent({
           position={wikiLink.position}
           onSelect={handleWikiLinkSelect}
           onClose={handleWikiLinkClose}
+        />
+      )}
+
+      {/* Slash command popup */}
+      {slashCommand.active && (
+        <SlashCommandPopup
+          query={slashCommand.query}
+          position={slashCommand.position}
+          onSelect={handleSlashCommandSelect}
+          onClose={handleSlashCommandClose}
         />
       )}
 

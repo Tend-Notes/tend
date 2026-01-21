@@ -199,6 +199,29 @@ pub struct BacklinkRef {
     pub journal_date: Option<String>,
 }
 
+/// Check if a block contains a reference to the given page name
+fn block_contains_reference(content: &str, page_name: &str, tag_name: Option<&str>) -> bool {
+    // Check for wiki-link reference [[page_name]]
+    let wiki_link = format!("[[{}]]", page_name);
+    if content.contains(&wiki_link) {
+        return true;
+    }
+
+    // If this is a tag page (tags/tagname), also check for #tagname references
+    if let Some(tag) = tag_name {
+        // Use regex to match #tagname with word boundaries
+        // Match at start of string or after whitespace, followed by # and the tag name
+        let tag_pattern = format!(r"(?:^|\s)#{}(?:\s|$|[^\w-])", regex::escape(tag));
+        if let Ok(re) = regex::Regex::new(&tag_pattern) {
+            if re.is_match(content) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 /// Get backlinks to a page
 pub async fn get_backlinks(
     State(state): State<Arc<AppState>>,
@@ -207,8 +230,12 @@ pub async fn get_backlinks(
     let garden = state.garden.read().await;
     let mut backlinks = Vec::new();
 
-    // Search for pages that link to this page
-    let search_term = format!("[[{}]]", name);
+    // Check if this is a tag page (tags/tagname)
+    let tag_name = if name.starts_with("tags/") {
+        Some(name.strip_prefix("tags/").unwrap())
+    } else {
+        None
+    };
 
     // Scan all pages for links
     // TODO: This is inefficient - we should maintain a link index
@@ -220,7 +247,7 @@ pub async fn get_backlinks(
 
         if let Ok(page) = garden.file_manager.read_page(&page_meta.name).await {
             for block in page.blocks.values() {
-                if block.content.contains(&search_term) {
+                if block_contains_reference(&block.content, &name, tag_name) {
                     backlinks.push(BacklinkRef {
                         page_name: page.name.clone(),
                         page_title: page.title.clone(),
@@ -240,7 +267,7 @@ pub async fn get_backlinks(
         if let Some(date) = journal_meta.journal_date {
             if let Ok(page) = garden.file_manager.read_journal(date).await {
                 for block in page.blocks.values() {
-                    if block.content.contains(&search_term) {
+                    if block_contains_reference(&block.content, &name, tag_name) {
                         backlinks.push(BacklinkRef {
                             page_name: page.name.clone(),
                             page_title: page.title.clone(),

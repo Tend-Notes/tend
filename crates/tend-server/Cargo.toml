@@ -41,3 +41,6 @@ directories = { workspace = true }
 
 # Date/time
 chrono = { workspace = true }
+
+# Regex
+regex = { workspace = true }

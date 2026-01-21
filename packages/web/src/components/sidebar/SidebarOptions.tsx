@@ -21,13 +21,12 @@ interface SidebarOptionsProps {
 }
 
 // Section IDs
-type SectionId = 'appearance' | 'tasks' | 'backup' | 'tags' | 'content-types' | 'gardens'
+type SectionId = 'appearance' | 'tasks' | 'backup' | 'content-types' | 'gardens'
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'tasks', label: 'Tasks' },
   { id: 'backup', label: 'Backup' },
-  { id: 'tags', label: 'Tags' },
   { id: 'content-types', label: 'Content Types' },
   { id: 'gardens', label: 'Gardens' },
 ]
@@ -69,7 +68,6 @@ export function SidebarOptions({ onBack }: SidebarOptionsProps) {
             {id === 'appearance' && <AppearanceSection />}
             {id === 'tasks' && <TasksSection />}
             {id === 'backup' && <BackupSection />}
-            {id === 'tags' && <TagsSection />}
             {id === 'content-types' && <ContentTypesSection />}
             {id === 'gardens' && <GardensSection />}
           </CollapsibleSection>
@@ -952,97 +950,6 @@ function ContentTypeRow({
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  )
-}
-
-// Tags section
-function TagsSection() {
-  const [searchQuery, setSearchQuery] = useState('')
-  const [sortMode, setSortMode] = useState<'count' | 'alpha'>('count')
-
-  // Placeholder tags - in the future this would come from the server
-  const tags = [
-    { name: 'project', count: 12 },
-    { name: 'idea', count: 8 },
-    { name: 'todo', count: 15 },
-    { name: 'meeting', count: 5 },
-    { name: 'reference', count: 3 },
-  ]
-
-  const filteredTags = tags
-    .filter(tag => tag.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    .sort((a, b) => {
-      if (sortMode === 'count') return b.count - a.count
-      return a.name.localeCompare(b.name)
-    })
-
-  return (
-    <div className="space-y-3">
-      {/* Search input */}
-      <div className="relative">
-        <svg
-          className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-base-03"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z" />
-        </svg>
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search tags..."
-          className="w-full bg-base-01 border border-base-02 rounded pl-7 pr-2 py-1.5 text-xs text-base-05 placeholder-base-03 focus:outline-none focus:border-base-04"
-        />
-      </div>
-
-      {/* Sort toggle */}
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-base-03">{filteredTags.length} tags</span>
-        <div className="flex gap-1">
-          <button
-            onClick={() => setSortMode('count')}
-            className={`px-2 py-0.5 text-xs rounded transition-colors ${
-              sortMode === 'count'
-                ? 'bg-base-02 text-base-06'
-                : 'text-base-04 hover:text-base-05'
-            }`}
-            title="Sort by usage count"
-          >
-            Most used
-          </button>
-          <button
-            onClick={() => setSortMode('alpha')}
-            className={`px-2 py-0.5 text-xs rounded transition-colors ${
-              sortMode === 'alpha'
-                ? 'bg-base-02 text-base-06'
-                : 'text-base-04 hover:text-base-05'
-            }`}
-            title="Sort alphabetically"
-          >
-            A-Z
-          </button>
-        </div>
-      </div>
-
-      {/* Tag list */}
-      <div className="space-y-1 max-h-48 overflow-y-auto">
-        {filteredTags.map((tag) => (
-          <button
-            key={tag.name}
-            className="w-full flex items-center justify-between px-2 py-1.5 text-left rounded hover:bg-base-01 transition-colors group"
-          >
-            <span className="text-xs text-base-05">#{tag.name}</span>
-            <span className="text-xs text-base-03 group-hover:text-base-04">{tag.count}</span>
-          </button>
-        ))}
-        {filteredTags.length === 0 && (
-          <p className="text-xs text-base-03 text-center py-2">No tags found</p>
-        )}
-      </div>
     </div>
   )
 }

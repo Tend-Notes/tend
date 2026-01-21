@@ -108,6 +108,38 @@ export const graph = {
   get: () => fetchJson<Graph>(`${API_BASE}/graph`),
 }
 
+// Tag info from API
+export interface TagInfo {
+  name: string
+  count: number
+}
+
+// Tags API
+export const tags = {
+  list: () => fetchJson<TagInfo[]>(`${API_BASE}/tags`),
+}
+
+// Task item from API
+export interface TaskItem {
+  uuid: string
+  status: string
+  content: string
+  pageName: string
+  pageTitle: string
+  isJournal: boolean
+  journalDate: string | null
+}
+
+// Task list from API
+export interface TaskList {
+  tasks: TaskItem[]
+}
+
+// Todos API
+export const todos = {
+  list: () => fetchJson<TaskList>(`${API_BASE}/todos`),
+}
+
 // Git API
 export const git = {
   status: () => fetchJson<GitStatus>(`${API_BASE}/git/status`),

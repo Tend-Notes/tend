@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePageStore } from '../../stores/pageStore'
-import { useUIStore } from '../../stores/uiStore'
+import { useUIStore, type SidebarMode } from '../../stores/uiStore'
+import { SidebarGraph } from './SidebarGraph'
 import { SidebarHistory } from './SidebarHistory'
 import { SidebarOptions } from './SidebarOptions'
+import { SidebarTags } from './SidebarTags'
+import { SidebarTodos } from './SidebarTodos'
 
-export type SidebarMode = 'navigation' | 'history' | 'graph' | 'options'
+// Re-export the type for backwards compatibility
+export type { SidebarMode }
 
 // Resize constraints
 const MIN_WIDTH = 279
@@ -81,31 +85,22 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
 
       case 'graph':
         return (
-          <div className="flex-1 flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between p-3 border-b border-base-02">
-              <button
-                onClick={() => onModeChange('navigation')}
-                className="p-1 text-base-04 hover:text-base-05 transition-colors"
-                title="Back to navigation"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <span className="text-sm font-medium text-base-05">Graph</span>
-              <div className="w-4" /> {/* Spacer for alignment */}
-            </div>
-            {/* Graph placeholder */}
-            <div className="flex-1 flex items-center justify-center p-4 text-base-04 text-sm">
-              Graph visualization coming soon...
-            </div>
-          </div>
+          <SidebarGraph onBack={() => onModeChange('navigation')} />
         )
 
       case 'options':
         return (
           <SidebarOptions onBack={() => onModeChange('navigation')} />
+        )
+
+      case 'tags':
+        return (
+          <SidebarTags onBack={() => onModeChange('navigation')} />
+        )
+
+      case 'todos':
+        return (
+          <SidebarTodos onBack={() => onModeChange('navigation')} />
         )
 
       default:
@@ -223,7 +218,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
             </div>
           </div>
 
-          {/* Bottom toolbar: Graph, History, Options - always visible when open */}
+          {/* Bottom toolbar: Graph, Tags, History, Options - always visible when open */}
           <div className="flex justify-end gap-1 p-[10px] border-t border-base-02">
             <button
               onClick={() => onModeChange(mode === 'graph' ? 'navigation' : 'graph')}
@@ -247,6 +242,31 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 <circle cx="5" cy="18" r="2" />
                 <line x1="12" y1="12" x2="4" y2="9" stroke="currentColor" strokeWidth="1.5" />
                 <circle cx="4" cy="9" r="2" />
+              </svg>
+            </button>
+            <button
+              onClick={() => onModeChange(mode === 'tags' ? 'navigation' : 'tags')}
+              className={`p-2 rounded-lg transition-colors ${
+                mode === 'tags' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+              }`}
+              style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+              title="Tags"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.568 3H5.25A2.25 2.25 0 0 0 3 5.25v4.318c0 .597.237 1.17.659 1.591l9.581 9.581c.699.699 1.78.872 2.607.33a18.095 18.095 0 0 0 5.223-5.223c.542-.827.369-1.908-.33-2.607L11.16 3.66A2.25 2.25 0 0 0 9.568 3Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6h.008v.008H6V6Z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => onModeChange(mode === 'todos' ? 'navigation' : 'todos')}
+              className={`p-2 rounded-lg transition-colors ${
+                mode === 'todos' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+              }`}
+              style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+              title="Tasks"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
               </svg>
             </button>
             <button

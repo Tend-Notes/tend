@@ -14,6 +14,8 @@ mod search;
 mod git;
 mod graph;
 mod gardens;
+mod tags;
+mod todos;
 
 /// Build the API router
 pub fn api_router() -> Router<Arc<AppState>> {
@@ -32,6 +34,10 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/journals/{date}", put(journals::update_journal))
         // Search
         .route("/search", get(search::search))
+        // Tags
+        .route("/tags", get(tags::list_tags))
+        // Todos
+        .route("/todos", get(todos::list_todos))
         // Graph
         .route("/graph", get(graph::get_graph))
         // Git

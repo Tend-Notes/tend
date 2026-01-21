@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { useEffect, useState } from 'react'
-import { Sidebar, type SidebarMode } from './components/sidebar/Sidebar'
+import { Sidebar } from './components/sidebar/Sidebar'
 import { MainContent } from './components/layout/MainContent'
 import { CommandPalette } from './components/command-palette/CommandPalette'
 import { SearchPanel } from './components/search/SearchPanel'
@@ -16,7 +16,8 @@ import { useTheme } from './hooks/useTheme'
 function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [keyboardHelpOpen, setKeyboardHelpOpen] = useState(false)
-  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('navigation')
+  const sidebarMode = useUIStore((state) => state.sidebarMode)
+  const setSidebarMode = useUIStore((state) => state.setSidebarMode)
   const loadPages = usePageStore((state) => state.loadPages)
   const loadJournals = usePageStore((state) => state.loadJournals)
   const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
