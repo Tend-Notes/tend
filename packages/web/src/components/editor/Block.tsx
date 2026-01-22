@@ -1426,8 +1426,9 @@ export function BlockComponent({
         if (contentOffset > domOffset) {
           // There are hidden delimiters before the cursor
           // Re-render with the span focused (delimiters visible) and position cursor at end
+          // Use contentOffset - 1 so cursorInside check in renderContent passes (needs to be strictly inside)
           e.preventDefault()
-          const cursorRange = { start: contentOffset, end: contentOffset }
+          const cursorRange = { start: contentOffset - 1, end: contentOffset - 1 }
           el.innerHTML = renderContent(block.content, cursorRange)
           restoreCursor(el, contentOffset)
           return
