@@ -179,8 +179,9 @@ export function BlockComponent({
     position: { top: 0, left: 0 },
   })
 
-  // Track cursor position for showing brackets when inside a wiki-link
-  const [cursorInWikiLink, setCursorInWikiLink] = useState<{
+  // Track which span (wiki-link or format) is currently "focused" (showing delimiters)
+  // This keeps delimiters visible while editing inside the span
+  const [focusedSpan, setFocusedSpan] = useState<{
     start: number
     end: number
   } | null>(null)
@@ -557,8 +558,8 @@ export function BlockComponent({
       const selection = window.getSelection()
       if (!selection || !el.contains(selection.anchorNode)) {
         // Cursor not in this block
-        if (cursorInWikiLink !== null) {
-          setCursorInWikiLink(null)
+        if (focusedSpan !== null) {
+          setFocusedSpan(null)
           // Re-render without cursor focus - but only if content actually needs to change
           // Use lastContentRef to avoid race condition with handleInput
           const newHtml = renderContent(lastContentRef.current, null)
@@ -578,7 +579,7 @@ export function BlockComponent({
 
       // Convert DOM offset to content offset by accounting for hidden delimiters
       // When delimiters are hidden, DOM text is shorter than content
-      const contentCursorOffset = domOffsetToContentOffset(content, domCursorOffset, cursorInWikiLink)
+      const contentCursorOffset = domOffsetToContentOffset(content, domCursorOffset, focusedSpan)
 
       // Find if cursor is strictly inside any wiki-link or formatted span
       // Use exclusive end boundary (< end, not <= end) to avoid "capturing" cursor after the span
@@ -591,7 +592,9 @@ export function BlockComponent({
         const start = match.index
         const end = match.index + match[0].length
         // Cursor must be strictly inside: after start, before end
-        if (contentCursorOffset > start && contentCursorOffset < end) {
+        // OR if we're already focused on this span, allow cursor at end too (for backspace unrender)
+        const isCurrentlyFocused = focusedSpan && focusedSpan.start === start && focusedSpan.end === end
+        if (contentCursorOffset > start && (contentCursorOffset < end || (isCurrentlyFocused && contentCursorOffset === end))) {
           foundSpan = { start, end }
           break
         }
@@ -605,7 +608,9 @@ export function BlockComponent({
             const start = match.index
             const end = match.index + match[0].length
             // Cursor must be strictly inside: after start, before end
-            if (contentCursorOffset > start && contentCursorOffset < end) {
+            // OR if we're already focused on this span, allow cursor at end too (for backspace unrender)
+            const isCurrentlyFocused = focusedSpan && focusedSpan.start === start && focusedSpan.end === end
+            if (contentCursorOffset > start && (contentCursorOffset < end || (isCurrentlyFocused && contentCursorOffset === end))) {
               foundSpan = { start, end }
               break
             }
@@ -615,13 +620,13 @@ export function BlockComponent({
       }
 
       // Only update if the focus changed
-      const currentStart = cursorInWikiLink?.start ?? -1
-      const currentEnd = cursorInWikiLink?.end ?? -1
+      const currentStart = focusedSpan?.start ?? -1
+      const currentEnd = focusedSpan?.end ?? -1
       const newStart = foundSpan?.start ?? -1
       const newEnd = foundSpan?.end ?? -1
 
       if (currentStart !== newStart || currentEnd !== newEnd) {
-        setCursorInWikiLink(foundSpan)
+        setFocusedSpan(foundSpan)
         // Re-render with new cursor focus - compare first to avoid flicker
         const newHtml = renderContent(content, foundSpan ? { start: contentCursorOffset, end: contentCursorOffset } : null)
         if (el.innerHTML !== newHtml) {
@@ -636,7 +641,7 @@ export function BlockComponent({
 
     document.addEventListener('selectionchange', handleSelectionChange)
     return () => document.removeEventListener('selectionchange', handleSelectionChange)
-  }, [block.content, cursorInWikiLink, renderContent])
+  }, [block.content, focusedSpan, renderContent])
 
   // Check for wiki-link trigger pattern
   const checkWikiLinkTrigger = useCallback(() => {
@@ -971,7 +976,7 @@ export function BlockComponent({
 
     // Get cursor/selection position in DOM, then convert to content offset
     const domCursorOffset = getCursorOffset(el, selection)
-    const contentCursorOffset = domOffsetToContentOffset(content, domCursorOffset, cursorInWikiLink)
+    const contentCursorOffset = domOffsetToContentOffset(content, domCursorOffset, focusedSpan)
 
     // Find the format pattern for this delimiter
     const pattern = FORMAT_PATTERNS.find(p => p.delimiter === delimiter)
@@ -1023,7 +1028,7 @@ export function BlockComponent({
       preSelectionRange.selectNodeContents(el)
       preSelectionRange.setEnd(range.startContainer, range.startOffset)
       const domSelectionStart = preSelectionRange.toString().length
-      const contentSelectionStart = domOffsetToContentOffset(content, domSelectionStart, cursorInWikiLink)
+      const contentSelectionStart = domOffsetToContentOffset(content, domSelectionStart, focusedSpan)
       const contentSelectionEnd = contentSelectionStart + selectedText.length
 
       const before = content.substring(0, contentSelectionStart)
@@ -1065,7 +1070,7 @@ export function BlockComponent({
         }
       })
     }
-  }, [block.uuid, block.content, cursorInWikiLink, onChange, renderContent])
+  }, [block.uuid, block.content, focusedSpan, onChange, renderContent])
 
   const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const el = editorRef.current
@@ -1336,7 +1341,7 @@ export function BlockComponent({
       const rawContent = block.content
 
       // Convert DOM offset to content offset, accounting for hidden delimiters
-      const contentCursorOffset = domOffsetToContentOffset(rawContent, domCursorOffset, cursorInWikiLink)
+      const contentCursorOffset = domOffsetToContentOffset(rawContent, domCursorOffset, focusedSpan)
 
       let contentBefore = rawContent.substring(0, contentCursorOffset)
       const contentAfter = rawContent.substring(contentCursorOffset)
@@ -1402,7 +1407,7 @@ export function BlockComponent({
 
         // Check if cursor is at end of a tag - delete entire tag
         const domOffset = getCursorOffset(el, selection)
-        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, focusedSpan)
         const tagInfo = getTagAtContentOffset(block.content, contentOffset)
 
         if (tagInfo && contentOffset > tagInfo.start && contentOffset <= tagInfo.end) {
@@ -1425,13 +1430,17 @@ export function BlockComponent({
         // Check if content offset is significantly larger than DOM offset (hidden delimiters exist)
         if (contentOffset > domOffset) {
           // There are hidden delimiters before the cursor
-          // Re-render with the span focused (delimiters visible) and position cursor at end
-          // Use contentOffset - 1 so cursorInside check in renderContent passes (needs to be strictly inside)
-          e.preventDefault()
-          const cursorRange = { start: contentOffset - 1, end: contentOffset - 1 }
-          el.innerHTML = renderContent(block.content, cursorRange)
-          restoreCursor(el, contentOffset)
-          return
+          // Find the span that contains this position and set it as focused
+          // This keeps delimiters visible until cursor leaves the span
+          const spanInfo = findSpanAtOffset(block.content, contentOffset)
+          if (spanInfo) {
+            e.preventDefault()
+            setFocusedSpan({ start: spanInfo.start, end: spanInfo.end })
+            const cursorRange = { start: contentOffset - 1, end: contentOffset - 1 }
+            el.innerHTML = renderContent(block.content, cursorRange)
+            restoreCursor(el, contentOffset)
+            return
+          }
         }
       }
     }
@@ -1446,7 +1455,7 @@ export function BlockComponent({
       const selection = window.getSelection()
       if (selection && selection.isCollapsed) {
         const domOffset = getCursorOffset(el, selection)
-        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, focusedSpan)
         const tagInfo = getTagAtContentOffset(block.content, contentOffset)
 
         if (tagInfo && contentOffset >= tagInfo.start && contentOffset < tagInfo.end) {
@@ -1589,7 +1598,7 @@ export function BlockComponent({
 
         // Check if we need to jump over hidden delimiters (entering a span from the right)
         const domOffset = getCursorOffset(el, selection)
-        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, focusedSpan)
 
         // Check for tags - tags are atomic, skip over entire tag
         const tagInfo = getTagAtContentOffset(block.content, contentOffset)
@@ -1610,7 +1619,7 @@ export function BlockComponent({
           const newDomOffset = contentOffsetToDomOffset(block.content, newContentOffset, { start: spanInfo.start, end: spanInfo.end })
           el.innerHTML = renderContent(block.content, { start: newContentOffset, end: newContentOffset })
           restoreCursor(el, newDomOffset)
-          setCursorInWikiLink({ start: spanInfo.start, end: spanInfo.end })
+          setFocusedSpan({ start: spanInfo.start, end: spanInfo.end })
           return
         }
       }
@@ -1628,7 +1637,7 @@ export function BlockComponent({
         // This must be checked BEFORE isAtEnd, because isAtEnd uses DOM length
         // which doesn't account for hidden closing delimiters
         const domOffset = getCursorOffset(el, selection)
-        const contentOffset = domOffsetToContentOffset(block.content, domOffset, cursorInWikiLink)
+        const contentOffset = domOffsetToContentOffset(block.content, domOffset, focusedSpan)
 
         // Check for tags - tags are atomic, skip over entire tag
         const tagInfo = getTagAtContentOffset(block.content, contentOffset)
@@ -1641,18 +1650,18 @@ export function BlockComponent({
         }
 
         // If we're inside a formatted span (delimiters visible), check if we're at the true end
-        if (cursorInWikiLink) {
-          if (contentOffset >= cursorInWikiLink.end - 1) {
+        if (focusedSpan) {
+          if (contentOffset >= focusedSpan.end - 1) {
             // At or past the last character of the span - exit and strip delimiters
             // Move one past the span end for visual continuity
             e.preventDefault()
-            const newContentOffset = Math.min(cursorInWikiLink.end + 1, block.content.length)
+            const newContentOffset = Math.min(focusedSpan.end + 1, block.content.length)
             const newDomOffset = contentOffsetToDomOffset(block.content, newContentOffset, null)
             el.innerHTML = renderContent(block.content, null)
             // Skip the next selectionchange to prevent re-decoration
             skipNextSelectionChangeRef.current = true
             restoreCursor(el, newDomOffset)
-            setCursorInWikiLink(null)
+            setFocusedSpan(null)
             return
           }
           // Otherwise, let browser handle normal navigation through the visible delimiters
@@ -1671,7 +1680,7 @@ export function BlockComponent({
               const newDomOffset = contentOffsetToDomOffset(block.content, newContentOffset, { start: spanInfo.start, end: spanInfo.end })
               el.innerHTML = renderContent(block.content, { start: newContentOffset, end: newContentOffset })
               restoreCursor(el, newDomOffset)
-              setCursorInWikiLink({ start: spanInfo.start, end: spanInfo.end })
+              setFocusedSpan({ start: spanInfo.start, end: spanInfo.end })
               return
             }
           }
@@ -1982,6 +1991,35 @@ function isAtEnd(el: HTMLElement, selection: Selection): boolean {
   const position = preCaretRange.toString().length
 
   return position >= text.length
+}
+
+// Helper: find a wiki-link or format span that contains the given content offset
+// Returns the span boundaries or null if not inside a span
+function findSpanAtOffset(content: string, offset: number): { start: number; end: number } | null {
+  // Check wiki-links
+  const wikiRegex = /\[\[([^\]]+)\]\](?=\s|[.,;:!?)\]}>]|$)/g
+  let match
+  while ((match = wikiRegex.exec(content)) !== null) {
+    const start = match.index
+    const end = match.index + match[0].length
+    if (offset > start && offset <= end) {
+      return { start, end }
+    }
+  }
+
+  // Check format patterns
+  for (const pattern of FORMAT_PATTERNS) {
+    const regex = new RegExp(pattern.regex.source, 'g')
+    while ((match = regex.exec(content)) !== null) {
+      const start = match.index
+      const end = match.index + match[0].length
+      if (offset > start && offset <= end) {
+        return { start, end }
+      }
+    }
+  }
+
+  return null
 }
 
 // Helper: get the cursor offset from the start of the element
