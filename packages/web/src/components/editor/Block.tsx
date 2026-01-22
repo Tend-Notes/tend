@@ -1426,21 +1426,28 @@ export function BlockComponent({
         }
 
         // When cursor is at end of a formatted span (delimiters hidden), backspace should
-        // "unrender" the span first - show the raw delimiters so user can see what they're deleting.
-        // Check if content offset is significantly larger than DOM offset (hidden delimiters exist)
+        // delete from the actual content position AND unrender the span.
+        // Check if content offset is larger than DOM offset (hidden delimiters exist)
         if (contentOffset > domOffset) {
           // There are hidden delimiters before the cursor
-          // Find the span that contains this position and set it as focused
-          // This keeps delimiters visible until cursor leaves the span
-          const spanInfo = findSpanAtOffset(block.content, contentOffset)
+          // Delete the character before contentOffset and show delimiters
+          e.preventDefault()
+          const newContent = block.content.slice(0, contentOffset - 1) + block.content.slice(contentOffset)
+          const newCursorPos = contentOffset - 1
+
+          // Find span in the NEW content to keep it focused
+          const spanInfo = findSpanAtOffset(newContent, newCursorPos)
           if (spanInfo) {
-            e.preventDefault()
             setFocusedSpan({ start: spanInfo.start, end: spanInfo.end })
-            const cursorRange = { start: contentOffset - 1, end: contentOffset - 1 }
-            el.innerHTML = renderContent(block.content, cursorRange)
-            restoreCursor(el, contentOffset)
-            return
           }
+
+          lastContentRef.current = newContent
+          onChange(block.uuid, newContent)
+
+          const cursorRange = { start: newCursorPos, end: newCursorPos }
+          el.innerHTML = renderContent(newContent, cursorRange)
+          restoreCursor(el, newCursorPos)
+          return
         }
       }
     }
