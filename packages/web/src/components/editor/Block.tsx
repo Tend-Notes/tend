@@ -838,6 +838,13 @@ export function BlockComponent({
       // This handles the case where delimiters are hidden (e.g., ***test*** shows as "test")
       const content = reconstructContentFromDom(lastContentRef.current, domText)
 
+      // Calculate content cursor offset early - needed for accurate rerender decisions
+      // When no hidden spans exist, domCursorOffset == contentCursorOffset
+      // When hidden spans exist, we need to account for them
+      const previousContent = lastContentRef.current
+      const contentCursorOffset = domOffsetToContentOffset(previousContent, domCursorOffset, null)
+      const cursorRange = { start: contentCursorOffset, end: contentCursorOffset }
+
       // Markup only renders when followed by whitespace/punctuation (via regex lookahead)
       // so partial patterns like [[test] or **test* stay as plain text until completed
       {
@@ -847,16 +854,29 @@ export function BlockComponent({
         const displayedHasTaskStatus = editorRef.current.querySelector('.task-status') !== null
 
         // Check if we need to re-render for tags (only complete tags followed by space/punctuation/end)
+        // BUT exclude tags at end of content when cursor is at end (user is still typing)
         const tagRegex = /(^|\s)#([a-zA-Z][a-zA-Z0-9_-]*)(?=\s|[^\w-]|$)/g
-        const hasTag = tagRegex.test(content)
+        let hasRenderableTag = false
+        let tagMatch
+        while ((tagMatch = tagRegex.exec(content)) !== null) {
+          const tagEnd = tagMatch.index + tagMatch[0].length
+          const isAtEndOfContent = tagEnd === content.length
+          const cursorAtTagEnd = contentCursorOffset === tagEnd
+          // Skip tags being actively typed (at end with cursor at end)
+          if (!(isAtEndOfContent && cursorAtTagEnd)) {
+            hasRenderableTag = true
+            break
+          }
+        }
         const displayedHasTag = editorRef.current.querySelector('.tag-pill') !== null
 
         // Check if we need to re-render for wiki-links (with boundary check including end-of-string)
+        // Wiki-links render immediately when pattern is complete (closing ]] means done)
         const hasWikiLink = /\[\[[^\]]+\]\](?=\s|[.,;:!?)\]}>]|$)/.test(content)
         const displayedHasWikiLink = editorRef.current.querySelector('.wiki-link') !== null
 
         // Check if we need to re-render for formatting (bold, italic, etc.)
-        // FORMAT_PATTERNS already have boundary lookaheads, but we need fresh regex instances
+        // Formatting renders immediately when pattern is complete (closing delimiter means done)
         const hasFormatting = FORMAT_PATTERNS.some(p => {
           const freshRegex = new RegExp(p.regex.source, p.regex.flags)
           return freshRegex.test(content)
@@ -868,18 +888,12 @@ export function BlockComponent({
         // The DOM is contenteditable and handles text changes natively
         const needsRerender =
           hasTaskStatus !== displayedHasTaskStatus ||
-          hasTag !== displayedHasTag ||
+          hasRenderableTag !== displayedHasTag ||
           hasWikiLink !== displayedHasWikiLink ||
           hasFormatting !== displayedHasFormatting
 
         if (needsRerender) {
-          // When formatting disappears (delimiters become visible), the DOM cursor offset
-          // was relative to the OLD DOM (with hidden delimiters). We need to convert it
-          // using the PREVIOUS content state, not the new one.
-          const previousContent = lastContentRef.current
-          const contentCursorOffset = domOffsetToContentOffset(previousContent, domCursorOffset, null)
-
-          editorRef.current.innerHTML = renderContent(content, null) // null = not focused inside any span
+          editorRef.current.innerHTML = renderContent(content, cursorRange)
 
           // Convert content offset to new DOM offset (now with hidden delimiters)
           const newDomOffset = contentOffsetToDomOffset(content, contentCursorOffset, null)
@@ -1310,6 +1324,8 @@ export function BlockComponent({
     // Enter - create new block (split content at cursor)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      // Clear any multi-block selection when creating a new block
+      clearSelection()
 
       // Get cursor position in DOM, then convert to raw content position
       // This is critical because the DOM may have hidden delimiters (e.g., [[ ]] for wiki-links)
@@ -2264,13 +2280,15 @@ function reconstructContentFromDom(
     return previousContent
   }
 
-  // Special case: Check if DOM text is the raw content with a simple edit
-  // This handles the case where hidden delimiters became visible due to boundary removal
-  // In this case, we should work with raw content directly, not expected DOM text
-  const domLongerThanExpected = domText.length > expectedDomText.length
+  // Check if DOM text contains visible delimiters by comparing expected vs actual length difference
+  // When delimiters become visible, DOM text becomes significantly longer (by total delimiter chars)
+  // But if user just typed a few characters, the difference will be small
+  const totalHiddenDelimiterChars = hiddenSpans.reduce((sum, s) => sum + s.delimiterLength * 2, 0)
+  const lengthDiff = domText.length - expectedDomText.length
 
-  // If the DOM is showing raw delimiters (longer than expected), just use domText as content
-  if (domLongerThanExpected && hiddenSpans.length > 0) {
+  // If DOM is longer by roughly the amount of hidden delimiters, delimiters became visible
+  // Use a threshold: if difference is >= 80% of hidden delimiter chars, assume delimiters visible
+  if (lengthDiff >= totalHiddenDelimiterChars * 0.8 && lengthDiff > 0) {
     // The delimiters are now visible in DOM - just return the DOM text as the new content
     return domText
   }
