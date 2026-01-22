@@ -19,9 +19,10 @@ import {
   forwardRef,
   useCallback,
 } from 'react'
-import { EditorState, Prec } from '@codemirror/state'
+import { EditorState, Prec, Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
+import { markdownExtension } from './extensions/markdown'
 
 // Boundary events that escape from this editor to the parent Block
 export type BoundaryEvent =
@@ -55,6 +56,8 @@ interface BlockEditorProps {
   readonly?: boolean
   placeholder?: string
   className?: string
+  /** Additional CodeMirror extensions */
+  extensions?: Extension[]
 }
 
 export const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
@@ -69,6 +72,7 @@ export const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
       readonly = false,
       placeholder: _placeholder,
       className = '',
+      extensions: additionalExtensions = [],
     },
     ref
   ) => {
@@ -283,6 +287,8 @@ export const BlockEditor = forwardRef<BlockEditorHandle, BlockEditorProps>(
           createBoundaryKeymap(),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
+          markdownExtension(),
+          ...additionalExtensions,
           createUpdateListener(),
           createEventHandlers(),
           EditorView.lineWrapping,
