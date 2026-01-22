@@ -128,6 +128,7 @@ export function BlockComponent({
   const editorRef = useRef<HTMLDivElement>(null)
   const lastContentRef = useRef(block.content)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
+  const navigateToJournal = usePageStore((state) => state.navigateToJournal)
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
   const getTagColor = useTagStore((state) => state.getTagColor)
   const openCommandPaletteForContentType = useUIStore((state) => state.openCommandPaletteForContentType)
@@ -469,14 +470,20 @@ export function BlockComponent({
         e.stopPropagation()
         const pageName = target.dataset.pageName
         if (pageName) {
-          navigateToPage(pageName)
+          // Check if it's a journal date (YYYY-MM-DD format)
+          const isJournalDate = /^\d{4}-\d{2}-\d{2}$/.test(pageName)
+          if (isJournalDate) {
+            navigateToJournal(pageName)
+          } else {
+            navigateToPage(pageName)
+          }
         }
       }
     }
 
     el.addEventListener('mousedown', handleMouseDown)
     return () => el.removeEventListener('mousedown', handleMouseDown)
-  }, [navigateToPage])
+  }, [navigateToPage, navigateToJournal])
 
   // Handle task status clicks - cycle through statuses
   useEffect(() => {

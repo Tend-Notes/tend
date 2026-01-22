@@ -126,7 +126,7 @@ export function WikiLinkPopup({ query, position, onSelect, onClose }: WikiLinkPo
     >
       {filteredPages.map((page, index) => (
         <button
-          key={page.name}
+          key={page.isJournal ? `journal:${page.name}` : `page:${page.name}`}
           onClick={() => onSelect(page.name)}
           className={`w-full px-3 py-2 text-left text-sm transition-colors ${
             index === selectedIndex
