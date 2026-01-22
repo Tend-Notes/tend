@@ -2317,9 +2317,40 @@ function reconstructContentFromDom(
   // - In domText: characters from prefixLen to (domText.length - suffixLen) were inserted
   const insertedText = domText.slice(prefixLen, domText.length - suffixLen)
 
-  // Convert DOM prefix position to content position
-  const contentPrefixPos = domOffsetToContentOffset(previousContent, prefixLen, null)
-  const contentSuffixPos = domOffsetToContentOffset(previousContent, expectedDomText.length - suffixLen, null)
+  // Convert DOM positions to content positions
+  // For reconstruction, we need to map DOM positions to inner text positions, NOT to "after span" positions
+  // This is different from cursor navigation where end-of-span should escape rightward
+  const domSuffixPos = expectedDomText.length - suffixLen
+
+  // Helper: convert DOM offset to content offset for reconstruction purposes
+  // Unlike the main domOffsetToContentOffset, this maps "end of inner text" to just before closing delimiter
+  const domToContentForReconstruct = (domOffset: number): number => {
+    let contentPos = 0
+    let domPos = 0
+
+    for (const span of hiddenSpans) {
+      const textBeforeSpan = span.contentStart - contentPos
+      if (domPos + textBeforeSpan >= domOffset) {
+        return contentPos + (domOffset - domPos)
+      }
+      domPos += textBeforeSpan
+      contentPos = span.contentStart
+
+      const innerTextLength = span.contentEnd - span.contentStart - (span.delimiterLength * 2)
+      if (domPos + innerTextLength >= domOffset) {
+        // Cursor is inside or at end of this span's visible text
+        // Map to content position within the inner text (after opening delimiter)
+        return span.contentStart + span.delimiterLength + (domOffset - domPos)
+      }
+      domPos += innerTextLength
+      contentPos = span.contentEnd
+    }
+
+    return contentPos + (domOffset - domPos)
+  }
+
+  const contentPrefixPos = domToContentForReconstruct(prefixLen)
+  const contentSuffixPos = domToContentForReconstruct(domSuffixPos)
 
   // Reconstruct: content before change + inserted text + content after change
   const newContent = previousContent.slice(0, contentPrefixPos) + insertedText + previousContent.slice(contentSuffixPos)
