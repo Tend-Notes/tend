@@ -1419,6 +1419,19 @@ export function BlockComponent({
           restoreCursor(el, tagInfo.start)
           return
         }
+
+        // When cursor is at end of a formatted span (delimiters hidden), backspace should
+        // "unrender" the span first - show the raw delimiters so user can see what they're deleting.
+        // Check if content offset is significantly larger than DOM offset (hidden delimiters exist)
+        if (contentOffset > domOffset) {
+          // There are hidden delimiters before the cursor
+          // Re-render with the span focused (delimiters visible) and position cursor at end
+          e.preventDefault()
+          const cursorRange = { start: contentOffset, end: contentOffset }
+          el.innerHTML = renderContent(block.content, cursorRange)
+          restoreCursor(el, contentOffset)
+          return
+        }
       }
     }
 
@@ -2316,44 +2329,12 @@ function reconstructContentFromDom(
   // - In expectedDomText: characters from prefixLen to (expectedDomText.length - suffixLen) were removed
   // - In domText: characters from prefixLen to (domText.length - suffixLen) were inserted
   const insertedText = domText.slice(prefixLen, domText.length - suffixLen)
+  const domDeleteEnd = expectedDomText.length - suffixLen
 
   // Convert DOM positions to content positions
-  // For reconstruction, we need to map DOM positions to inner text positions, NOT to "after span" positions
-  // This is different from cursor navigation where end-of-span should escape rightward
-  const domSuffixPos = expectedDomText.length - suffixLen
-
-  // Helper: convert DOM offset to content offset for reconstruction purposes
-  // Unlike the main domOffsetToContentOffset, this maps "end of inner text" to just before closing delimiter
-  const domToContentForReconstruct = (domOffset: number): number => {
-    let contentPos = 0
-    let domPos = 0
-
-    for (const span of hiddenSpans) {
-      const textBeforeSpan = span.contentStart - contentPos
-      if (domPos + textBeforeSpan >= domOffset) {
-        return contentPos + (domOffset - domPos)
-      }
-      domPos += textBeforeSpan
-      contentPos = span.contentStart
-
-      const innerTextLength = span.contentEnd - span.contentStart - (span.delimiterLength * 2)
-      if (domPos + innerTextLength >= domOffset) {
-        // Cursor is inside or at end of this span's visible text
-        // Map to content position within the inner text (after opening delimiter)
-        return span.contentStart + span.delimiterLength + (domOffset - domPos)
-      }
-      domPos += innerTextLength
-      contentPos = span.contentEnd
-    }
-
-    return contentPos + (domOffset - domPos)
-  }
-
-  const contentPrefixPos = domToContentForReconstruct(prefixLen)
-  const contentSuffixPos = domToContentForReconstruct(domSuffixPos)
+  const contentPrefixPos = domOffsetToContentOffset(previousContent, prefixLen, null)
+  const contentDeleteEnd = domOffsetToContentOffset(previousContent, domDeleteEnd, null)
 
   // Reconstruct: content before change + inserted text + content after change
-  const newContent = previousContent.slice(0, contentPrefixPos) + insertedText + previousContent.slice(contentSuffixPos)
-
-  return newContent
+  return previousContent.slice(0, contentPrefixPos) + insertedText + previousContent.slice(contentDeleteEnd)
 }
