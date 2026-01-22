@@ -23,6 +23,7 @@ import { EditorState, Prec, Extension } from '@codemirror/state'
 import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import { markdownExtension } from './extensions/markdown'
+import { hideDelimiters } from './extensions/hideDelimiters'
 
 // Boundary events that escape from this editor to the parent Block
 export type BoundaryEvent =
