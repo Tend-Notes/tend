@@ -11,6 +11,7 @@ import { usePageStore } from '../../stores/pageStore'
 import { useSelectionStore } from '../../stores/selectionStore'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { useTagStore } from '../../stores/tagStore'
+import { useUIStore } from '../../stores/uiStore'
 
 interface BlockProps {
   block: Block
@@ -129,6 +130,7 @@ export function BlockComponent({
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
   const getTagColor = useTagStore((state) => state.getTagColor)
+  const openCommandPaletteForContentType = useUIStore((state) => state.openCommandPaletteForContentType)
 
   // Helper to get fresh flat block order from page store
   // This is needed because the flatBlockOrder prop may be stale after state updates (e.g., after Enter creates a new block)
@@ -757,6 +759,37 @@ export function BlockComponent({
     // Close popup first
     setSlashCommand((prev) => ({ ...prev, active: false }))
 
+    // If this is a content type command, open the command palette instead
+    if (command.contentType) {
+      // Remove the slash command from the block content
+      const newContent = before + after
+      lastContentRef.current = newContent
+      onChange(block.uuid, newContent)
+      requestAnimationFrame(() => {
+        if (editorRef.current) {
+          editorRef.current.innerHTML = renderContent(newContent, null)
+          restoreCursor(editorRef.current, before.length)
+        }
+      })
+      // Open command palette with this content type pre-selected
+      // Pass callback to insert link at cursor position when sheet is created
+      openCommandPaletteForContentType(command.contentType, (link: string) => {
+        // Insert the wiki link at the cursor position (where slash command was)
+        const contentWithLink = before + link + after
+        lastContentRef.current = contentWithLink
+        onChange(block.uuid, contentWithLink)
+        requestAnimationFrame(() => {
+          if (editorRef.current) {
+            const cursorPos = before.length + link.length
+            editorRef.current.innerHTML = renderContent(contentWithLink, { start: cursorPos, end: cursorPos })
+            restoreCursor(editorRef.current, cursorPos)
+            editorRef.current.focus()
+          }
+        })
+      })
+      return
+    }
+
     // Execute the command action with context
     const context = {
       contentBefore: before,
@@ -788,7 +821,7 @@ export function BlockComponent({
     }
 
     command.action(context)
-  }, [slashCommand.startOffset, block.uuid, onChange, renderContent])
+  }, [slashCommand.startOffset, block.uuid, onChange, renderContent, openCommandPaletteForContentType])
 
   const handleSlashCommandClose = useCallback(() => {
     setSlashCommand((prev) => ({ ...prev, active: false }))

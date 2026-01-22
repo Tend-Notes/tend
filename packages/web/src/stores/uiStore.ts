@@ -3,6 +3,7 @@
 
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import type { ContentType } from './settingsStore'
 
 // Sidebar modes
 export type SidebarMode = 'navigation' | 'history' | 'graph' | 'options' | 'tags' | 'todos'
@@ -18,6 +19,13 @@ interface UIState {
   graphOpen: boolean
   searchOpen: boolean
 
+  // Command palette
+  commandPaletteOpen: boolean
+  /** Content type to create when command palette opens (for slash command integration) */
+  pendingContentType: ContentType | null
+  /** Callback to invoke when a sheet is created (e.g., to insert a link) */
+  onSheetCreated: ((link: string) => void) | null
+
   // Theme
   theme: string
 
@@ -31,6 +39,10 @@ interface UIState {
   openSearch: () => void
   closeSearch: () => void
   setTheme: (theme: string) => void
+  openCommandPalette: () => void
+  openCommandPaletteForContentType: (contentType: ContentType, onCreated?: (link: string) => void) => void
+  closeCommandPalette: () => void
+  clearPendingContentType: () => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -72,9 +84,29 @@ export const useUIStore = create<UIState>()(
         set({ searchOpen: false }),
 
       setTheme: (theme) => set({ theme }),
+
+      // Command palette
+      commandPaletteOpen: false,
+      pendingContentType: null,
+      onSheetCreated: null as ((link: string) => void) | null,
+      openCommandPalette: () => set({ commandPaletteOpen: true }),
+      openCommandPaletteForContentType: (contentType, onCreated) =>
+        set({ commandPaletteOpen: true, pendingContentType: contentType, onSheetCreated: onCreated || null }),
+      closeCommandPalette: () => set({ commandPaletteOpen: false, pendingContentType: null, onSheetCreated: null }),
+      clearPendingContentType: () => set({ pendingContentType: null }),
     }),
     {
       name: 'tend-ui',
+      // Don't persist command palette state
+      partialize: (state) => ({
+        sidebarOpen: state.sidebarOpen,
+        sidebarWidth: state.sidebarWidth,
+        sidebarMode: state.sidebarMode,
+        backlinksOpen: state.backlinksOpen,
+        graphOpen: state.graphOpen,
+        searchOpen: state.searchOpen,
+        theme: state.theme,
+      }),
     }
   )
 )

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 use tend_core::parser::{is_journal_filename, parse_journal_filename, parse_markdown};
 use tend_core::serializer::serialize_page;
-use tend_core::{Page, PageMeta};
+use tend_core::{ContentType, Page, PageMeta};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
@@ -323,6 +323,154 @@ impl EncryptedFileManager {
     pub async fn acquire_exclusive_lock(&self) -> tokio::sync::RwLockWriteGuard<'_, ()> {
         info!("Acquiring exclusive lock for backup");
         self.write_lock.write().await
+    }
+
+    // ========== Sheet (Content Type) Operations ==========
+
+    /// Get path to an encrypted sheet file for a content type
+    fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
+        let dir = self.root.join(&content_type.directory);
+        if content_type.save_by_date {
+            let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
+            dir.join(d.format("%Y-%m-%d").to_string())
+                .join(format!("{}.{}", name, ENCRYPTED_EXT))
+        } else {
+            dir.join(format!("{}.{}", name, ENCRYPTED_EXT))
+        }
+    }
+
+    /// Ensure content type directory exists
+    pub async fn ensure_content_type_dir(&self, content_type: &ContentType, date: Option<NaiveDate>) -> Result<(), StorageError> {
+        let dir = if content_type.save_by_date {
+            let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
+            self.root.join(&content_type.directory).join(d.format("%Y-%m-%d").to_string())
+        } else {
+            self.root.join(&content_type.directory)
+        };
+        tokio::fs::create_dir_all(&dir).await?;
+        Ok(())
+    }
+
+    /// List all encrypted sheets of a content type
+    pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
+        let base_dir = self.root.join(&content_type.directory);
+
+        if !base_dir.exists() {
+            return Ok(Vec::new());
+        }
+
+        let mut sheets = Vec::new();
+        let ext_suffix = format!(".{}", ENCRYPTED_EXT);
+
+        if content_type.save_by_date {
+            let mut date_dirs = tokio::fs::read_dir(&base_dir).await?;
+            while let Some(date_entry) = date_dirs.next_entry().await? {
+                let date_path = date_entry.path();
+                if date_path.is_dir() {
+                    let date = date_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+
+                    let mut entries = tokio::fs::read_dir(&date_path).await?;
+                    while let Some(entry) = entries.next_entry().await? {
+                        let path = entry.path();
+                        if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                            if filename.ends_with(&ext_suffix) {
+                                let name = filename.strip_suffix(&ext_suffix).unwrap();
+                                match self.read_sheet(content_type, name, date).await {
+                                    Ok(page) => sheets.push(PageMeta::from(&page)),
+                                    Err(e) => {
+                                        debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let mut entries = tokio::fs::read_dir(&base_dir).await?;
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                    if filename.ends_with(&ext_suffix) {
+                        let name = filename.strip_suffix(&ext_suffix).unwrap();
+                        match self.read_sheet(content_type, name, None).await {
+                            Ok(page) => sheets.push(PageMeta::from(&page)),
+                            Err(e) => {
+                                debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        sheets.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        Ok(sheets)
+    }
+
+    /// Read and decrypt a sheet
+    pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
+        let path = self.sheet_path(content_type, name, date);
+
+        if !path.exists() {
+            return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
+        }
+
+        let encrypted = tokio::fs::read(&path).await?;
+        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
+            EncryptionError::WrongPassphrase => StorageError::Other("Wrong passphrase".to_string()),
+            _ => StorageError::Other(format!("Decryption failed: {}", e)),
+        })?;
+
+        let mut page = parse_markdown(&content, name)
+            .map_err(|e| StorageError::ParseError(e.to_string()))?;
+
+        let metadata = tokio::fs::metadata(&path).await?;
+        if let Ok(modified) = metadata.modified() {
+            page.modified_at = modified.into();
+        }
+        if let Ok(created) = metadata.created() {
+            page.created_at = created.into();
+        }
+
+        Ok(page)
+    }
+
+    /// Encrypt and write a sheet
+    pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
+        self.ensure_content_type_dir(content_type, date).await?;
+        let path = self.sheet_path(content_type, &page.name, date);
+        self.write_file(&path, page).await
+    }
+
+    /// Delete an encrypted sheet
+    pub async fn delete_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<(), StorageError> {
+        let path = self.sheet_path(content_type, name, date);
+
+        if !path.exists() {
+            return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
+        }
+
+        let _guard = self.write_lock.read().await;
+
+        {
+            let mut pending = self.pending_writes.write().await;
+            pending.insert(path.clone());
+        }
+
+        tokio::fs::remove_file(&path).await?;
+
+        info!("Deleted encrypted sheet: {}/{}", content_type.id, name);
+
+        Ok(())
+    }
+
+    /// Check if an encrypted sheet exists
+    pub async fn sheet_exists(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> bool {
+        self.sheet_path(content_type, name, date).exists()
     }
 }
 

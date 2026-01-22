@@ -4,6 +4,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
+import { contentTypes as contentTypesApi } from '../../lib/api'
 import {
   getDarkThemes,
   getLightThemes,
@@ -829,12 +830,52 @@ function BackupSection() {
   )
 }
 
-// Content Types section
+// Content Types section - synced with backend
 function ContentTypesSection() {
-  const { contentTypes, updateContentType, addContentType, removeContentType } = useSettingsStore()
+  const { contentTypes, setContentTypes, updateContentType, addContentType, removeContentType } = useSettingsStore()
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)
 
-  const handleAddType = () => {
+  // Load content types from API on mount
+  useEffect(() => {
+    const loadContentTypes = async () => {
+      try {
+        const types = await contentTypesApi.list()
+        setContentTypes(types)
+        setError(null)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load content types')
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadContentTypes()
+  }, [setContentTypes])
+
+  // Save to API (manual)
+  const handleSave = useCallback(async () => {
+    setSaving(true)
+    try {
+      await contentTypesApi.update(contentTypes)
+      setDirty(false)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save content types')
+    } finally {
+      setSaving(false)
+    }
+  }, [contentTypes])
+
+  // Update handlers that mark dirty
+  const handleUpdate = useCallback((id: string, updates: Partial<ContentType>) => {
+    updateContentType(id, updates)
+    setDirty(true)
+  }, [updateContentType])
+
+  const handleAddType = useCallback(() => {
     const newType: ContentType = {
       id: `custom-${Date.now()}`,
       name: 'New Type',
@@ -844,18 +885,31 @@ function ContentTypesSection() {
     }
     addContentType(newType)
     setEditingId(newType.id)
+    setDirty(true)
+  }, [addContentType])
+
+  const handleRemove = useCallback((id: string) => {
+    removeContentType(id)
+    setDirty(true)
+  }, [removeContentType])
+
+  if (loading) {
+    return <div className="text-xs text-base-04">Loading...</div>
   }
 
   return (
     <div className="space-y-3">
+      {error && (
+        <div className="text-xs text-base-08 bg-base-01 rounded px-2 py-1">{error}</div>
+      )}
       {contentTypes.map((type) => (
         <ContentTypeRow
           key={type.id}
           type={type}
           isEditing={editingId === type.id}
           onEdit={() => setEditingId(editingId === type.id ? null : type.id)}
-          onUpdate={(updates) => updateContentType(type.id, updates)}
-          onRemove={() => removeContentType(type.id)}
+          onUpdate={(updates) => handleUpdate(type.id, updates)}
+          onRemove={() => handleRemove(type.id)}
           isBuiltIn={type.id === 'page' || type.id === 'journal'}
         />
       ))}
@@ -865,6 +919,15 @@ function ContentTypesSection() {
       >
         + Add content type
       </button>
+      {dirty && (
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full py-1.5 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+      )}
     </div>
   )
 }

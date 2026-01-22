@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::NaiveDate;
-use tend_core::{Page, PageMeta};
+use tend_core::{ContentType, Page, PageMeta};
 use tend_git::BackupManager;
 use tend_search::SearchIndex;
 use tend_storage::{EncryptedFileManager, FileManager, StorageError};
@@ -142,6 +142,48 @@ impl UnifiedFileManager {
         match self {
             Self::Plain(fm) => fm.acquire_exclusive_lock().await,
             Self::Encrypted(efm) => efm.acquire_exclusive_lock().await,
+        }
+    }
+
+    // ========== Sheet (Content Type) Operations ==========
+
+    /// List all sheets of a content type
+    pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
+        match self {
+            Self::Plain(fm) => fm.list_sheets(content_type).await,
+            Self::Encrypted(efm) => efm.list_sheets(content_type).await,
+        }
+    }
+
+    /// Read a sheet by content type, name, and optional date
+    pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
+        match self {
+            Self::Plain(fm) => fm.read_sheet(content_type, name, date).await,
+            Self::Encrypted(efm) => efm.read_sheet(content_type, name, date).await,
+        }
+    }
+
+    /// Write a sheet for a content type
+    pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
+        match self {
+            Self::Plain(fm) => fm.write_sheet(content_type, page, date).await,
+            Self::Encrypted(efm) => efm.write_sheet(content_type, page, date).await,
+        }
+    }
+
+    /// Delete a sheet
+    pub async fn delete_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<(), StorageError> {
+        match self {
+            Self::Plain(fm) => fm.delete_sheet(content_type, name, date).await,
+            Self::Encrypted(efm) => efm.delete_sheet(content_type, name, date).await,
+        }
+    }
+
+    /// Check if a sheet exists
+    pub async fn sheet_exists(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> bool {
+        match self {
+            Self::Plain(fm) => fm.sheet_exists(content_type, name, date).await,
+            Self::Encrypted(efm) => efm.sheet_exists(content_type, name, date).await,
         }
     }
 }

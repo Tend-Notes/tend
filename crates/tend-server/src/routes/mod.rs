@@ -14,6 +14,7 @@ mod search;
 mod git;
 mod graph;
 mod gardens;
+mod sheets;
 mod tags;
 mod todos;
 mod import;
@@ -58,6 +59,15 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/gardens/{id}/permanent", delete(gardens::delete_archived_garden))
         .route("/gardens/switch", post(gardens::switch_garden))
         .route("/gardens/unlock", post(gardens::unlock_garden))
+        // Content Types
+        .route("/content-types", get(gardens::get_content_types))
+        .route("/content-types", put(gardens::update_content_types))
+        // Sheets (generic content type API)
+        .route("/sheets/{content_type}", get(sheets::list_sheets))
+        .route("/sheets/{content_type}", post(sheets::create_sheet))
+        .route("/sheets/{content_type}/{name}", get(sheets::get_sheet))
+        .route("/sheets/{content_type}/{name}", put(sheets::update_sheet))
+        .route("/sheets/{content_type}/{name}", delete(sheets::delete_sheet))
         // Import
         .route("/import/logseq", post(import::import_logseq))
         // Health check

@@ -7,11 +7,13 @@
 //! - Markdown serializer
 
 pub mod block;
+pub mod content_type;
 pub mod page;
 pub mod parser;
 pub mod serializer;
 pub mod error;
 
 pub use block::Block;
+pub use content_type::ContentType;
 pub use page::{Page, PageMeta};
 pub use error::CoreError;

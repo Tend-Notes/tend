@@ -344,3 +344,55 @@ export function blockToApiFormat(block: Block): BlockData {
 export function pageBlocksToApiFormat(page: Page): BlockData[] {
   return Object.values(page.blocks).map(blockToApiFormat)
 }
+
+// Content Type definition (matches backend)
+export interface ContentType {
+  id: string
+  name: string
+  directory: string
+  saveByDate: boolean
+  template: string
+}
+
+// Content Types API
+export const contentTypes = {
+  list: () => fetchJson<ContentType[]>(`${API_BASE}/content-types`),
+
+  update: (types: ContentType[]) =>
+    fetchJson<ContentType[]>(`${API_BASE}/content-types`, {
+      method: 'PUT',
+      body: JSON.stringify({ content_types: types }),
+    }),
+}
+
+// Sheets API (generic content type operations)
+export const sheets = {
+  list: (contentTypeId: string) =>
+    fetchJson<PageMeta[]>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}`),
+
+  get: (contentTypeId: string, name: string, date?: string) => {
+    const params = date ? `?date=${encodeURIComponent(date)}` : ''
+    return fetchJson<Page>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}/${encodeURIComponent(name)}${params}`)
+  },
+
+  create: (contentTypeId: string, name: string, options?: { date?: string; content?: string }) =>
+    fetchJson<Page>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}`, {
+      method: 'POST',
+      body: JSON.stringify({ name, date: options?.date, content: options?.content }),
+    }),
+
+  update: (contentTypeId: string, name: string, blocks: BlockData[], version?: number, date?: string) => {
+    const params = date ? `?date=${encodeURIComponent(date)}` : ''
+    return fetchJson<Page>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}/${encodeURIComponent(name)}${params}`, {
+      method: 'PUT',
+      body: JSON.stringify({ blocks, version }),
+    })
+  },
+
+  delete: (contentTypeId: string, name: string, date?: string) => {
+    const params = date ? `?date=${encodeURIComponent(date)}` : ''
+    return fetchJson<{ deleted: string; contentType: string }>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}/${encodeURIComponent(name)}${params}`, {
+      method: 'DELETE',
+    })
+  },
+}

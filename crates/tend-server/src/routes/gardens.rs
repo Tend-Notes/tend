@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use chrono::{DateTime, Utc};
 
+use tend_core::ContentType;
+
 use crate::config::base_data_dir;
 use crate::error::AppError;
 use crate::state::AppState;
@@ -32,6 +34,13 @@ pub struct Garden {
     /// Set to 0 to disable auto-deletion. Default is 6 hours.
     #[serde(default = "default_index_ttl_hours")]
     pub index_ttl_hours: u32,
+    /// Content types configured for this garden
+    #[serde(default = "default_content_types")]
+    pub content_types: Vec<ContentType>,
+}
+
+fn default_content_types() -> Vec<ContentType> {
+    ContentType::defaults()
 }
 
 fn default_search_enabled() -> bool {
@@ -106,6 +115,17 @@ fn gardens_config_path() -> PathBuf {
     base_data_dir().join("gardens.json")
 }
 
+/// Load content types for the active garden (used by sheets routes)
+pub fn load_content_types() -> Result<Vec<ContentType>, crate::error::AppError> {
+    let config = load_gardens_config();
+    let garden = config
+        .gardens
+        .iter()
+        .find(|g| g.id == config.active)
+        .ok_or_else(|| crate::error::AppError::NotFound("Active garden not found".to_string()))?;
+    Ok(garden.content_types.clone())
+}
+
 /// Load gardens configuration, purging archives older than 15 days
 fn load_gardens_config() -> GardensConfig {
     let path = gardens_config_path();
@@ -150,6 +170,7 @@ fn default_gardens_config() -> GardensConfig {
             encrypted: false,
             search_enabled: true,
             index_ttl_hours: 0, // No TTL for unencrypted gardens
+            content_types: ContentType::defaults(),
         }],
         active: "default".to_string(),
         archived: vec![],
@@ -249,6 +270,7 @@ pub async fn create_garden(
         encrypted,
         search_enabled,
         index_ttl_hours,
+        content_types: ContentType::defaults(),
     };
 
     config.gardens.push(garden.clone());
@@ -616,4 +638,81 @@ pub async fn unlock_garden(
             }
         }
     }
+}
+
+/// Get content types for the active garden
+pub async fn get_content_types(
+    State(_state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ContentType>>, AppError> {
+    let config = load_gardens_config();
+
+    let garden = config
+        .gardens
+        .iter()
+        .find(|g| g.id == config.active)
+        .ok_or_else(|| AppError::NotFound("Active garden not found".to_string()))?;
+
+    Ok(Json(garden.content_types.clone()))
+}
+
+/// Request to update content types
+#[derive(Debug, Deserialize)]
+pub struct UpdateContentTypesRequest {
+    pub content_types: Vec<ContentType>,
+}
+
+/// Update content types for the active garden
+pub async fn update_content_types(
+    State(_state): State<Arc<AppState>>,
+    Json(req): Json<UpdateContentTypesRequest>,
+) -> Result<Json<Vec<ContentType>>, AppError> {
+    let mut config = load_gardens_config();
+
+    // Validate: must have page and journal types
+    let has_page = req.content_types.iter().any(|ct| ct.id == "page");
+    let has_journal = req.content_types.iter().any(|ct| ct.id == "journal");
+
+    if !has_page || !has_journal {
+        return Err(AppError::BadRequest(
+            "Content types must include 'page' and 'journal' types".to_string(),
+        ));
+    }
+
+    // Validate: no duplicate IDs
+    let mut seen_ids = std::collections::HashSet::new();
+    for ct in &req.content_types {
+        if !seen_ids.insert(&ct.id) {
+            return Err(AppError::BadRequest(format!(
+                "Duplicate content type ID: {}",
+                ct.id
+            )));
+        }
+    }
+
+    // Validate: no duplicate directories
+    let mut seen_dirs = std::collections::HashSet::new();
+    for ct in &req.content_types {
+        if !seen_dirs.insert(&ct.directory) {
+            return Err(AppError::BadRequest(format!(
+                "Duplicate content type directory: {}",
+                ct.directory
+            )));
+        }
+    }
+
+    // Find and update the active garden
+    let active_id = config.active.clone();
+    let garden = config
+        .gardens
+        .iter_mut()
+        .find(|g| g.id == active_id)
+        .ok_or_else(|| AppError::NotFound("Active garden not found".to_string()))?;
+
+    garden.content_types = req.content_types;
+    let result = garden.content_types.clone();
+
+    save_gardens_config(&config)
+        .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
+
+    Ok(Json(result))
 }

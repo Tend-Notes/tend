@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Slash command popup - triggered by '/' at start of block or after whitespace
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useSettingsStore, TASK_STATUS_SETS, type ContentType } from '../../stores/settingsStore'
 
 export interface SlashCommand {
   id: string
@@ -9,6 +10,8 @@ export interface SlashCommand {
   description: string
   icon?: string
   action: (context: SlashCommandContext) => void
+  /** For content type commands, the content type to create */
+  contentType?: ContentType
 }
 
 export interface SlashCommandContext {
@@ -29,38 +32,8 @@ interface SlashCommandPopupProps {
   onClose: () => void
 }
 
-// Built-in slash commands
-const SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: 'todo',
-    label: 'TODO',
-    description: 'Create a TODO task',
-    action: (ctx) => ctx.insertContent('TODO '),
-  },
-  {
-    id: 'doing',
-    label: 'DOING',
-    description: 'Create an in-progress task',
-    action: (ctx) => ctx.insertContent('DOING '),
-  },
-  {
-    id: 'done',
-    label: 'DONE',
-    description: 'Create a completed task',
-    action: (ctx) => ctx.insertContent('DONE '),
-  },
-  {
-    id: 'now',
-    label: 'NOW',
-    description: 'Mark as current focus',
-    action: (ctx) => ctx.insertContent('NOW '),
-  },
-  {
-    id: 'later',
-    label: 'LATER',
-    description: 'Mark for later',
-    action: (ctx) => ctx.insertContent('LATER '),
-  },
+// Non-task slash commands
+const BASE_SLASH_COMMANDS: SlashCommand[] = [
   {
     id: 'h1',
     label: 'Heading 1',
@@ -119,12 +92,44 @@ const SLASH_COMMANDS: SlashCommand[] = [
   },
 ]
 
+// Generate task commands based on the selected status set
+function getTaskCommands(taskStatusSet: keyof typeof TASK_STATUS_SETS): SlashCommand[] {
+  const statuses = TASK_STATUS_SETS[taskStatusSet]
+  return statuses.map((status) => ({
+    id: status.keyword.toLowerCase(),
+    label: status.keyword,
+    description: `Create a ${status.keyword} task`,
+    action: (ctx: SlashCommandContext) => ctx.insertContent(`${status.keyword} `),
+  }))
+}
+
 export function SlashCommandPopup({ query, position, onSelect, onClose }: SlashCommandPopupProps) {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
+  const taskStatusSet = useSettingsStore((state) => state.taskStatusSet)
+  const contentTypes = useSettingsStore((state) => state.contentTypes)
+
+  // Custom content types (excluding built-in page and journal)
+  const customContentTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')
+
+  // Build commands list: task statuses, then content types, then other commands
+  const allCommands = useMemo(() => {
+    const taskCommands = getTaskCommands(taskStatusSet)
+
+    // Generate content type commands
+    const contentTypeCommands: SlashCommand[] = customContentTypes.map((ct) => ({
+      id: `new-${ct.id}`,
+      label: `New ${ct.name}`,
+      description: `Create a new ${ct.name.toLowerCase()}`,
+      contentType: ct,
+      action: () => {}, // Handled specially in Block.tsx
+    }))
+
+    return [...taskCommands, ...contentTypeCommands, ...BASE_SLASH_COMMANDS]
+  }, [taskStatusSet, customContentTypes])
 
   // Filter commands based on query
-  const filteredCommands = SLASH_COMMANDS.filter((cmd) =>
+  const filteredCommands = allCommands.filter((cmd) =>
     cmd.label.toLowerCase().includes(query.toLowerCase()) ||
     cmd.id.toLowerCase().includes(query.toLowerCase())
   )
@@ -223,4 +228,4 @@ export function SlashCommandPopup({ query, position, onSelect, onClose }: SlashC
   )
 }
 
-export { SLASH_COMMANDS }
+export { BASE_SLASH_COMMANDS, getTaskCommands }

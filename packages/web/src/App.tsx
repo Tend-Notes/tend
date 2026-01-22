@@ -9,15 +9,19 @@ import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
 import { usePageStore } from './stores/pageStore'
 import { useUIStore } from './stores/uiStore'
+import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
+import { contentTypes as contentTypesApi } from './lib/api'
 
 function App() {
-  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   const [keyboardHelpOpen, setKeyboardHelpOpen] = useState(false)
   const sidebarMode = useUIStore((state) => state.sidebarMode)
   const setSidebarMode = useUIStore((state) => state.setSidebarMode)
+  const commandPaletteOpen = useUIStore((state) => state.commandPaletteOpen)
+  const openCommandPalette = useUIStore((state) => state.openCommandPalette)
+  const closeCommandPalette = useUIStore((state) => state.closeCommandPalette)
   const loadPages = usePageStore((state) => state.loadPages)
   const loadJournals = usePageStore((state) => state.loadJournals)
   const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
@@ -25,6 +29,7 @@ function App() {
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const openSearch = useUIStore((state) => state.openSearch)
+  const setContentTypes = useSettingsStore((state) => state.setContentTypes)
 
   // Initialize auto-commit system
   useAutoCommit()
@@ -40,7 +45,12 @@ function App() {
     loadPages()
     loadJournals()
     initializeFromUrl()
-  }, [loadPages, loadJournals, initializeFromUrl])
+
+    // Load content types from API
+    contentTypesApi.list()
+      .then((types) => setContentTypes(types))
+      .catch((err) => console.error('Failed to load content types:', err))
+  }, [loadPages, loadJournals, initializeFromUrl, setContentTypes])
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -90,16 +100,16 @@ function App() {
         return
       }
 
-      // Skip other shortcuts if we're editing
-      if (isEditing) return
-
-      // Alt + Shift + P - Command palette
+      // Alt + Shift + P - Command palette (works even when editing)
       // Use e.code for physical key (macOS Alt produces special characters with e.key)
       if (e.altKey && e.shiftKey && e.code === 'KeyP') {
         e.preventDefault()
-        setCommandPaletteOpen(true)
+        openCommandPalette()
         return
       }
+
+      // Skip other shortcuts if we're editing
+      if (isEditing) return
 
       // Alt + Shift + S - Toggle sidebar
       if (e.altKey && e.shiftKey && e.code === 'KeyS') {
@@ -125,7 +135,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch])
+  }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode])
 
   return (
     <div className="flex h-screen bg-base-00 text-base-05">
@@ -141,7 +151,7 @@ function App() {
       {/* Command palette */}
       <CommandPalette
         open={commandPaletteOpen}
-        onOpenChange={setCommandPaletteOpen}
+        onOpenChange={(open) => open ? openCommandPalette() : closeCommandPalette()}
       />
 
       {/* Search panel */}
