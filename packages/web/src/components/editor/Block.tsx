@@ -2280,17 +2280,19 @@ function reconstructContentFromDom(
     return previousContent
   }
 
-  // Check if DOM text contains visible delimiters by comparing expected vs actual length difference
-  // When delimiters become visible, DOM text becomes significantly longer (by total delimiter chars)
-  // But if user just typed a few characters, the difference will be small
-  const totalHiddenDelimiterChars = hiddenSpans.reduce((sum, s) => sum + s.delimiterLength * 2, 0)
-  const lengthDiff = domText.length - expectedDomText.length
-
-  // If DOM is longer by roughly the amount of hidden delimiters, delimiters became visible
-  // Use a threshold: if difference is >= 80% of hidden delimiter chars, assume delimiters visible
-  if (lengthDiff >= totalHiddenDelimiterChars * 0.8 && lengthDiff > 0) {
-    // The delimiters are now visible in DOM - just return the DOM text as the new content
-    return domText
+  // Check if delimiters have become visible in the DOM
+  // This happens when the formatting pattern no longer matches (e.g., boundary removed)
+  // In that case, domText will contain delimiter characters that were previously hidden
+  //
+  // Strategy: Check if domText contains delimiter characters at positions where we'd expect them
+  // If the first hidden span's delimiter appears at the start of domText, delimiters are visible
+  const firstSpan = hiddenSpans[0]
+  if (firstSpan) {
+    const delimiterChar = previousContent[firstSpan.contentStart]
+    // If domText starts with the delimiter char (that was hidden), delimiters are now visible
+    if (domText.startsWith(delimiterChar) && !expectedDomText.startsWith(delimiterChar)) {
+      return domText
+    }
   }
 
   // Find where the change occurred by comparing domText with expectedDomText
