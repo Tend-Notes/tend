@@ -888,14 +888,15 @@ export function BlockComponent({
         })
         const displayedHasFormatting = editorRef.current.querySelector('.fmt-bold, .fmt-italic, .fmt-strikethrough, .fmt-underline, .fmt-highlight') !== null
 
-        // Re-render ONLY if any styled element appeared or disappeared
-        // We should NOT re-render on every keystroke when elements exist
-        // The DOM is contenteditable and handles text changes natively
+        // Re-render if:
+        // 1. Any styled element appeared or disappeared
+        // 2. Formatting exists (to prevent text typed after spans from being captured inside)
         const needsRerender =
           hasTaskStatus !== displayedHasTaskStatus ||
           hasRenderableTag !== displayedHasTag ||
           hasWikiLink !== displayedHasWikiLink ||
-          hasFormatting !== displayedHasFormatting
+          hasFormatting !== displayedHasFormatting ||
+          hasFormatting // Always re-render when formatting exists to fix boundaries
 
         if (needsRerender) {
           editorRef.current.innerHTML = renderContent(content, cursorRange)
