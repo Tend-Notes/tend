@@ -93,12 +93,14 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   }, [page.blocks])
 
   // Focus a block's Seed at a specific position
+  const setLastFocusedBlockUuid = useUIStore((state) => state.setLastFocusedBlockUuid)
   const focusBlock = useCallback((uuid: string, position: 'start' | 'end' | number) => {
     setSelectedUuid(uuid)
     setFocusedBlock(uuid)
+    setLastFocusedBlockUuid(uuid) // Update synchronously for command palette text insertion
     clearSelection()
     pendingFocusRef.current = { uuid, position }
-  }, [setFocusedBlock, clearSelection])
+  }, [setFocusedBlock, setLastFocusedBlockUuid, clearSelection])
 
   // Apply pending focus after render
   useEffect(() => {
@@ -727,10 +729,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     }
   }, [selectedUuid, flatBlockOrder])
 
-  // Track last focused block for inserting text when editor isn't focused
-  const setLastFocusedBlockUuid = useUIStore((state) => state.setLastFocusedBlockUuid)
-
-  // Update last focused block when selection changes
+  // Update last focused block when selection changes (backup for non-focusBlock selection changes)
   useEffect(() => {
     if (selectedUuid) {
       setLastFocusedBlockUuid(selectedUuid)
