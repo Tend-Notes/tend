@@ -122,6 +122,11 @@ let pendingSaveData: {
 
 // Helper to record sheet access in the recent sheets store
 function recordSheetAccess(page: Page) {
+  // Don't record tag pages - they're synthetic and shouldn't appear in recent pages
+  if (page.name.startsWith('tags/')) {
+    return
+  }
+
   useRecentSheetsStore.getState().recordAccess(page.contentType, {
     name: page.name,
     title: page.title,

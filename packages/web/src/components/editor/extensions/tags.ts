@@ -65,13 +65,15 @@ class TagWidget extends WidgetType {
     span.className = 'tag-pill'
     span.textContent = `#${this.name}`
     span.style.setProperty('--tag-color', this.getColor(this.name))
-
-    // Make clickable
     span.style.cursor = 'pointer'
-    span.addEventListener('click', (e) => {
+
+    // Use mousedown to prevent CodeMirror from handling the event first
+    span.addEventListener('mousedown', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      this.onNavigate?.(`tags/${this.name}`)
+      if (e.button === 0) {
+        this.onNavigate?.(`tags/${this.name}`)
+      }
     })
 
     return span
