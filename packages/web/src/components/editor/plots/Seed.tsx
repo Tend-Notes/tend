@@ -9,15 +9,24 @@
 // - Cursor position tracking
 // - Detecting boundary events (cursor at start/end) and delegating to Plots
 //
-// Formatting, syntax highlighting, and decorations are handled by Actions,
-// which passes extensions to Seed via the extensions prop.
+// Formatting, syntax highlighting, and decorations are handled by Actions.
+// If Actions fails or is unavailable, Seed continues as a plain text editor.
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
-import { EditorState, Prec } from '@codemirror/state'
+import { EditorState, Prec, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Block } from '../../../types'
 import { useActions } from './Actions'
+
+// Safe wrapper for Actions - Seed works without formatting if Actions fails
+function useSafeActions(): Extension[] {
+  try {
+    return useActions()
+  } catch {
+    return []
+  }
+}
 
 // Placeholder for Actions layer - will handle formatting commands, decorations, etc.
 export interface SeedActions {
@@ -109,8 +118,8 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     const viewRef = useRef<EditorView | null>(null)
     const contentRef = useRef(block.content)
 
-    // Get formatting extensions from Actions
-    const actionExtensions = useActions()
+    // Get formatting extensions from Actions (fails gracefully to empty array)
+    const actionExtensions = useSafeActions()
 
     // Track external updates to avoid feedback loops
     const isExternalUpdate = useRef(false)
