@@ -4,6 +4,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import * as api from '../../lib/api'
 import type { PageMeta } from '../../types'
+import { useSettingsStore } from '../../stores/settingsStore'
 
 interface WikiLinkPopupProps {
   query: string
@@ -17,19 +18,23 @@ export function WikiLinkPopup({ query, position, onSelect, onClose }: WikiLinkPo
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const popupRef = useRef<HTMLDivElement>(null)
+  const contentTypes = useSettingsStore((s) => s.contentTypes)
 
-  // Load all sheets (pages + journals) on mount
+  // Load all sheets for all content types on mount
   useEffect(() => {
-    Promise.all([api.pages.list(), api.journals.list()])
-      .then(([allPages, allJournals]) => {
-        // Combine pages and journals, pages first
-        setPages([...allPages, ...allJournals])
+    Promise.all(
+      contentTypes.map(ct => api.sheets.list(ct.id).catch(() => []))
+    )
+      .then((results) => {
+        // Flatten all sheets into one list
+        const allSheets = results.flat()
+        setPages(allSheets)
         setLoading(false)
       })
       .catch(() => {
         setLoading(false)
       })
-  }, [])
+  }, [contentTypes])
 
   // Filter pages by query
   const filteredPages = pages.filter((page) =>

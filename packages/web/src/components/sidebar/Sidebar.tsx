@@ -22,13 +22,10 @@ interface SidebarProps {
 }
 
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
-  const { pages, journals, customSheets, currentPageName, navigateToPage, navigateToJournal, loadTodaysJournal } =
+  const { sheets, currentPageName, navigateToPage, navigateToJournal, loadTodaysJournal } =
     usePageStore()
   const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
   const { contentTypes } = useSettingsStore()
-
-  // Custom content types (excluding built-in page and journal)
-  const customContentTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')
 
   // Visual width during drag (can exceed bounds for bounceback effect)
   const [visualWidth, setVisualWidth] = useState(sidebarWidth)
@@ -72,8 +69,8 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   }, [visualWidth, setSidebarWidth])
 
   // Get current page info for history
-  const currentPage = pages.find(p => p.name === currentPageName)
-    || journals.find(j => j.name === currentPageName)
+  const allSheets = Object.values(sheets).flat()
+  const currentPage = allSheets.find(p => p.name === currentPageName)
   const isCurrentJournal = currentPage?.isJournal ?? false
 
   // Render content based on mode
@@ -130,76 +127,12 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
               </button>
             </div>
 
-            {/* Navigation */}
+            {/* Navigation - all content types rendered uniformly */}
             <div className="flex-1 overflow-y-auto px-3">
-              {/* Recent journals */}
-              {journals.length > 0 && (
-                <div className="mb-4">
-                  <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
-                    Journals
-                  </h2>
-                  <ul>
-                    {journals.slice(0, 10).map((journal) => (
-                      <li key={journal.name}>
-                        <button
-                          onClick={() => navigateToJournal(journal.journalDate!)}
-                          className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                            currentPageName === journal.name
-                              ? 'text-base-06'
-                              : 'text-base-04 hover:text-base-05'
-                          }`}
-                        >
-                          {journal.title}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Pages - filter out pages that belong to custom content type directories */}
-              {(() => {
-                // Build set of custom content type directories to filter out (case-insensitive)
-                const contentTypeDirs = new Set(customContentTypes.map(ct => ct.directory.toLowerCase()))
-                const filteredPages = pages.filter(page => {
-                  // Exclude pages whose names start with a content type directory
-                  const nameLower = page.name.toLowerCase()
-                  for (const dir of contentTypeDirs) {
-                    if (nameLower.startsWith(dir + '/')) {
-                      return false
-                    }
-                  }
-                  return true
-                })
-                return filteredPages.length > 0 && (
-                  <div className="mb-4">
-                    <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
-                      Pages
-                    </h2>
-                    <ul>
-                      {filteredPages.slice(0, 10).map((page) => (
-                        <li key={page.name}>
-                          <button
-                            onClick={() => navigateToPage(page.name)}
-                            className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                              currentPageName === page.name
-                                ? 'text-base-06'
-                                : 'text-base-04 hover:text-base-05'
-                            }`}
-                          >
-                            {page.title}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )
-              })()}
-
-              {/* Custom content types */}
-              {customContentTypes.map((ct) => {
-                const ctSheets = customSheets[ct.id] || []
+              {contentTypes.map((ct) => {
+                const ctSheets = sheets[ct.id] || []
                 if (ctSheets.length === 0) return null
+
                 return (
                   <div key={ct.id} className="mb-4">
                     <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
@@ -207,16 +140,32 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                     </h2>
                     <ul>
                       {ctSheets.slice(0, 10).map((sheet) => {
-                        // Build full path: directory/date/name for saveByDate, directory/name otherwise
-                        const fullPath = ct.saveByDate && sheet.journalDate
-                          ? `${ct.directory}/${sheet.journalDate}/${sheet.name}`
-                          : `${ct.directory}/${sheet.name}`
+                        // Build navigation path based on content type
+                        let navPath: string
+                        let navAction: () => void
+
+                        if (ct.id === 'journal') {
+                          // Journals use navigateToJournal with date
+                          navPath = sheet.name
+                          navAction = () => navigateToJournal(sheet.journalDate!)
+                        } else if (ct.id === 'page') {
+                          // Pages use navigateToPage with just the name
+                          navPath = sheet.name
+                          navAction = () => navigateToPage(sheet.name)
+                        } else {
+                          // Custom content types: directory/date/name for saveByDate, directory/name otherwise
+                          navPath = ct.saveByDate && sheet.journalDate
+                            ? `${ct.directory}/${sheet.journalDate}/${sheet.name}`
+                            : `${ct.directory}/${sheet.name}`
+                          navAction = () => navigateToPage(navPath)
+                        }
+
                         return (
-                          <li key={fullPath}>
+                          <li key={navPath}>
                             <button
-                              onClick={() => navigateToPage(fullPath)}
+                              onClick={navAction}
                               className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                                currentPageName === fullPath
+                                currentPageName === navPath || currentPageName === sheet.name
                                   ? 'text-base-06'
                                   : 'text-base-04 hover:text-base-05'
                               }`}

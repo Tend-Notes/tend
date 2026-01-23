@@ -357,6 +357,14 @@ impl EncryptedFileManager {
 
     /// List all encrypted sheets of a content type
     pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
+        // Handle built-in types by delegating to existing methods
+        if content_type.id == "page" {
+            return self.list_pages().await;
+        }
+        if content_type.id == "journal" {
+            return self.list_journals().await;
+        }
+
         let base_dir = self.root.join(&content_type.directory);
 
         if !base_dir.exists() {

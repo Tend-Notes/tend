@@ -35,22 +35,15 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
   const popupRef = useRef<HTMLDivElement>(null)
   const contentTypes = useSettingsStore((s) => s.contentTypes)
 
-  // Load all available pages/sheets
+  // Load all available sheets for all content types
   useEffect(() => {
     let cancelled = false
 
     const load = async () => {
       try {
-        // Load pages and journals
-        const [pages, journals] = await Promise.all([
-          api.pages.list(),
-          api.journals.list(),
-        ])
-
-        // Load sheets for custom content types
-        const customTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')
+        // Load sheets for all content types uniformly
         const sheetResults = await Promise.all(
-          customTypes.map(async (ct) => {
+          contentTypes.map(async (ct) => {
             try {
               const sheets = await api.sheets.list(ct.id)
               return { contentType: ct, sheets }
@@ -65,32 +58,30 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
         // Build suggestion items
         const suggestions: SuggestionItem[] = []
 
-        // Pages (no prefix needed - they're the default)
-        for (const page of pages) {
-          suggestions.push({
-            title: page.title,
-            value: page.name,
-            subtitle: page.name !== page.title ? page.name : undefined,
-          })
-        }
-
-        // Journals
-        for (const journal of journals) {
-          suggestions.push({
-            title: journal.title,
-            value: `journals/${journal.journalDate || journal.name}`,
-            subtitle: 'Journal',
-          })
-        }
-
-        // Custom content type sheets
         for (const { contentType, sheets } of sheetResults) {
           for (const sheet of sheets) {
-            suggestions.push({
-              title: sheet.title,
-              value: `${contentType.directory}/${sheet.name}`,
-              subtitle: contentType.name,
-            })
+            if (contentType.id === 'page') {
+              // Pages: no prefix needed - they're the default
+              suggestions.push({
+                title: sheet.title,
+                value: sheet.name,
+                subtitle: sheet.name !== sheet.title ? sheet.name : undefined,
+              })
+            } else if (contentType.id === 'journal') {
+              // Journals: use journals/ prefix
+              suggestions.push({
+                title: sheet.title,
+                value: `journals/${sheet.journalDate || sheet.name}`,
+                subtitle: 'Journal',
+              })
+            } else {
+              // Custom content types: use directory prefix
+              suggestions.push({
+                title: sheet.title,
+                value: `${contentType.directory}/${sheet.name}`,
+                subtitle: contentType.name,
+              })
+            }
           }
         }
 

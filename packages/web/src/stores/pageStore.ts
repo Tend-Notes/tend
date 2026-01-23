@@ -16,11 +16,8 @@ interface PageState {
   currentPage: Page | null
   currentPageName: string | null
 
-  // Page list for sidebar
-  pages: PageMeta[]
-  journals: PageMeta[]
-  // Sheets for custom content types (keyed by content type ID)
-  customSheets: Record<string, PageMeta[]>
+  // Sheets for all content types (keyed by content type ID: 'page', 'journal', 'meeting', etc.)
+  sheets: Record<string, PageMeta[]>
   // When true, sidebar lists have been purged and auto-reload is disabled
   recentFilesPurged: boolean
 
@@ -45,9 +42,7 @@ interface PageState {
   } | null
 
   // Actions
-  loadPages: () => Promise<void>
-  loadJournals: () => Promise<void>
-  loadCustomSheets: () => Promise<void>
+  loadSheets: () => Promise<void>
   loadTodaysJournal: () => Promise<void>
   navigateToPage: (name: string, pushHistory?: boolean) => Promise<void>
   navigateToJournal: (date: string, pushHistory?: boolean) => Promise<void>
@@ -64,7 +59,7 @@ interface PageState {
   dismissConflict: () => void
   // Flush any pending saves immediately (called before navigation)
   flushPendingSave: () => Promise<void>
-  // Clear the pages and journals lists (for "purge recent file list")
+  // Clear the sheets lists (for "purge recent file list")
   clearRecentFiles: () => void
 }
 
@@ -134,9 +129,7 @@ export const usePageStore = create<PageState>()(
   immer((set, get) => ({
     currentPage: null,
     currentPageName: null,
-    pages: [],
-    journals: [],
-    customSheets: {},
+    sheets: {},
     recentFilesPurged: false,
     isLoading: false,
     error: null,
@@ -144,47 +137,15 @@ export const usePageStore = create<PageState>()(
     pendingDraftRecovery: null,
     pendingConflict: null,
 
-    loadPages: async () => {
-      // Don't reload if user has purged the list
-      if (get().recentFilesPurged) return
-
-      try {
-        const pages = await api.pages.list()
-        set((state) => {
-          state.pages = pages
-        })
-      } catch (e) {
-        set((state) => {
-          state.error = e instanceof Error ? e.message : 'Failed to load pages'
-        })
-      }
-    },
-
-    loadJournals: async () => {
-      // Don't reload if user has purged the list
-      if (get().recentFilesPurged) return
-
-      try {
-        const journals = await api.journals.list()
-        set((state) => {
-          state.journals = journals
-        })
-      } catch (e) {
-        set((state) => {
-          state.error = e instanceof Error ? e.message : 'Failed to load journals'
-        })
-      }
-    },
-
-    loadCustomSheets: async () => {
+    loadSheets: async () => {
       // Don't reload if user has purged the list
       if (get().recentFilesPurged) return
 
       const contentTypes = useSettingsStore.getState().contentTypes
-      const customTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')
-
       const sheetsMap: Record<string, PageMeta[]> = {}
-      for (const ct of customTypes) {
+
+      // Load all content types uniformly using the sheets API
+      for (const ct of contentTypes) {
         try {
           const ctSheets = await api.sheets.list(ct.id)
           sheetsMap[ct.id] = ctSheets
@@ -195,7 +156,7 @@ export const usePageStore = create<PageState>()(
       }
 
       set((state) => {
-        state.customSheets = sheetsMap
+        state.sheets = sheetsMap
       })
     },
 
@@ -240,8 +201,8 @@ export const usePageStore = create<PageState>()(
         // Update URL without adding to history (initial load)
         const url = buildUrlPath('journal', page.journalDate || page.name)
         window.history.replaceState({ type: 'journal', name: page.journalDate || page.name }, '', url)
-        // Refresh journals list
-        get().loadJournals()
+        // Refresh sheets list
+        get().loadSheets()
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to load today\'s journal'
@@ -349,10 +310,8 @@ export const usePageStore = create<PageState>()(
               const url = buildUrlPath(urlType, name)
               window.history.pushState({ type: urlType, name }, '', url)
             }
-            // Refresh pages list (only for actual pages, not sheets)
-            if (!contentType) {
-              get().loadPages()
-            }
+            // Refresh sheets list
+            get().loadSheets()
             return
           } catch (createErr) {
             set((state) => {
@@ -446,8 +405,8 @@ export const usePageStore = create<PageState>()(
           state.currentPage = page
           state.currentPageName = name
         })
-        // Refresh pages list
-        get().loadPages()
+        // Refresh sheets list
+        get().loadSheets()
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to create page'
@@ -464,10 +423,12 @@ export const usePageStore = create<PageState>()(
             state.currentPageName = null
           }
           // Remove from pages list immediately for responsive UI
-          state.pages = state.pages.filter(p => p.name !== name)
+          if (state.sheets.page) {
+            state.sheets.page = state.sheets.page.filter(p => p.name !== name)
+          }
         })
         // Also refresh from server to ensure consistency
-        get().loadPages()
+        get().loadSheets()
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to delete page'
@@ -751,9 +712,7 @@ export const usePageStore = create<PageState>()(
 
     clearRecentFiles: () => {
       set((state) => {
-        state.pages = []
-        state.journals = []
-        state.customSheets = {}
+        state.sheets = {}
         state.recentFilesPurged = true
       })
     },
