@@ -13,11 +13,9 @@ import {
   DecorationSet,
   ViewPlugin,
   ViewUpdate,
+  WidgetType,
 } from '@codemirror/view'
-import { Range, Extension, StateField, StateEffect } from '@codemirror/state'
-
-// State effect to signal wikilink state changes
-export const setWikilinkState = StateEffect.define<WikilinkState | null>()
+import { Range, Extension } from '@codemirror/state'
 
 // Current wikilink being typed (for suggestions popup)
 export interface WikilinkState {
@@ -31,19 +29,6 @@ export interface WikilinkState {
   coords: { top: number; left: number }
 }
 
-// State field to track active wikilink input
-export const wikilinkStateField = StateField.define<WikilinkState | null>({
-  create: () => null,
-  update: (value, tr) => {
-    for (const effect of tr.effects) {
-      if (effect.is(setWikilinkState)) {
-        return effect.value
-      }
-    }
-    return value
-  },
-})
-
 // Regex to find wikilinks: [[content]]
 const WIKILINK_REGEX = /\[\[([^\]]+)\]\]/g
 
@@ -51,16 +36,13 @@ interface WikilinkSpan {
   from: number
   to: number
   target: string
-  isPartial: boolean
 }
 
 /**
- * Find all wikilinks in the document
+ * Find all complete wikilinks in the document
  */
 function findWikilinks(doc: string): WikilinkSpan[] {
   const results: WikilinkSpan[] = []
-
-  // Find complete wikilinks
   let match
   WIKILINK_REGEX.lastIndex = 0
   while ((match = WIKILINK_REGEX.exec(doc)) !== null) {
@@ -68,17 +50,15 @@ function findWikilinks(doc: string): WikilinkSpan[] {
       from: match.index,
       to: match.index + match[0].length,
       target: match[1],
-      isPartial: false,
     })
   }
-
   return results
 }
 
 /**
  * Find partial wikilink at cursor position (for suggestions)
  */
-function findPartialWikilink(doc: string, cursorPos: number): WikilinkSpan | null {
+function findPartialWikilink(doc: string, cursorPos: number): { from: number; to: number; query: string } | null {
   // Look backwards from cursor for [[
   const textBefore = doc.slice(0, cursorPos)
 
@@ -93,13 +73,12 @@ function findPartialWikilink(doc: string, cursorPos: number): WikilinkSpan | nul
     if (!textAfterOpen.includes(']]')) {
       // Found unclosed [[
       const query = textBefore.slice(openIdx + 2)
-      // Don't trigger if query contains newlines
-      if (query.includes('\n')) return null
+      // Don't trigger if query contains newlines or ]
+      if (query.includes('\n') || query.includes(']')) return null
       return {
         from: openIdx,
         to: cursorPos,
-        target: query,
-        isPartial: true,
+        query,
       }
     }
     searchPos = openIdx
@@ -116,28 +95,64 @@ const visibleDelimiter = Decoration.mark({ class: 'cm-wikilink-delimiter cm-visi
 const wikilinkContent = Decoration.mark({ class: 'cm-wikilink-content wiki-link' })
 
 /**
+ * Widget that renders an actual <a> element for the wikilink
+ */
+class WikilinkWidget extends WidgetType {
+  constructor(readonly target: string, readonly buildHref: (target: string) => string) {
+    super()
+  }
+
+  toDOM(): HTMLElement {
+    const link = document.createElement('a')
+    link.href = this.buildHref(this.target)
+    link.className = 'wiki-link'
+    link.textContent = this.target
+    // Prevent CodeMirror from handling the click
+    link.addEventListener('click', (e) => {
+      // Let the browser handle it naturally (supports ctrl+click, middle-click)
+      e.stopPropagation()
+    })
+    return link
+  }
+
+  eq(other: WikilinkWidget): boolean {
+    return other.target === this.target
+  }
+}
+
+/**
  * Build decorations for wikilinks
  */
-function buildDecorations(view: EditorView): DecorationSet {
+function buildDecorations(view: EditorView, useWidgets: boolean, buildHref?: (target: string) => string): DecorationSet {
   const decorations: Range<Decoration>[] = []
   const doc = view.state.doc.toString()
   const cursorPos = view.state.selection.main.head
+  const hasFocus = view.hasFocus
 
   const wikilinks = findWikilinks(doc)
 
   for (const wl of wikilinks) {
     // Check if cursor is inside this wikilink
-    const cursorInside = cursorPos >= wl.from && cursorPos <= wl.to
-    const delimDeco = cursorInside ? visibleDelimiter : hiddenDelimiter
+    const cursorInside = hasFocus && cursorPos >= wl.from && cursorPos <= wl.to
 
-    // Opening [[ (2 chars)
-    decorations.push(delimDeco.range(wl.from, wl.from + 2))
-
-    // Content
-    decorations.push(wikilinkContent.range(wl.from + 2, wl.to - 2))
-
-    // Closing ]] (2 chars)
-    decorations.push(delimDeco.range(wl.to - 2, wl.to))
+    if (cursorInside) {
+      // Cursor inside - show delimiters dimmed, content as text
+      decorations.push(visibleDelimiter.range(wl.from, wl.from + 2))
+      decorations.push(wikilinkContent.range(wl.from + 2, wl.to - 2))
+      decorations.push(visibleDelimiter.range(wl.to - 2, wl.to))
+    } else if (useWidgets && buildHref) {
+      // Cursor outside - replace entire wikilink with widget (actual <a> tag)
+      decorations.push(
+        Decoration.replace({
+          widget: new WikilinkWidget(wl.target, buildHref),
+        }).range(wl.from, wl.to)
+      )
+    } else {
+      // Fallback: hide delimiters, style content
+      decorations.push(hiddenDelimiter.range(wl.from, wl.from + 2))
+      decorations.push(wikilinkContent.range(wl.from + 2, wl.to - 2))
+      decorations.push(hiddenDelimiter.range(wl.to - 2, wl.to))
+    }
   }
 
   // Sort by position
@@ -145,56 +160,6 @@ function buildDecorations(view: EditorView): DecorationSet {
 
   return Decoration.set(decorations)
 }
-
-/**
- * ViewPlugin for wikilink decorations and state tracking
- */
-const wikilinkPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet
-
-    constructor(view: EditorView) {
-      this.decorations = buildDecorations(view)
-    }
-
-    update(update: ViewUpdate) {
-      if (update.docChanged || update.selectionSet) {
-        this.decorations = buildDecorations(update.view)
-
-        // Check for partial wikilink at cursor
-        const doc = update.state.doc.toString()
-        const cursorPos = update.state.selection.main.head
-        const partial = findPartialWikilink(doc, cursorPos)
-
-        if (partial) {
-          // Get screen coordinates for popup
-          const coords = update.view.coordsAtPos(partial.from)
-          if (coords) {
-            update.view.dispatch({
-              effects: setWikilinkState.of({
-                from: partial.from,
-                to: partial.to,
-                query: partial.target,
-                coords: { top: coords.bottom + 4, left: coords.left },
-              }),
-            })
-          }
-        } else {
-          // Clear wikilink state if no partial
-          const currentState = update.state.field(wikilinkStateField)
-          if (currentState) {
-            update.view.dispatch({
-              effects: setWikilinkState.of(null),
-            })
-          }
-        }
-      }
-    }
-  },
-  {
-    decorations: (v) => v.decorations,
-  }
-)
 
 /**
  * Theme for wikilink styling
@@ -215,33 +180,6 @@ const wikilinkTheme = EditorView.baseTheme({
 })
 
 /**
- * Click handler for wikilinks
- */
-function wikilinkClickHandler(onNavigate: (target: string) => void): Extension {
-  return EditorView.domEventHandlers({
-    click: (event, view) => {
-      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
-      if (pos === null) return false
-
-      const doc = view.state.doc.toString()
-      const wikilinks = findWikilinks(doc)
-
-      for (const wl of wikilinks) {
-        // Check if click is on the content (not delimiters)
-        if (pos >= wl.from + 2 && pos <= wl.to - 2) {
-          event.preventDefault()
-          event.stopPropagation()
-          onNavigate(wl.target)
-          return true
-        }
-      }
-
-      return false
-    },
-  })
-}
-
-/**
  * Complete a wikilink - replaces the partial with full syntax
  */
 export function completeWikilink(view: EditorView, state: WikilinkState, target: string): void {
@@ -249,53 +187,96 @@ export function completeWikilink(view: EditorView, state: WikilinkState, target:
   view.dispatch({
     changes: { from: state.from, to: state.to, insert: replacement },
     selection: { anchor: state.from + replacement.length },
-    effects: setWikilinkState.of(null),
   })
 }
 
 /**
- * Cancel wikilink completion (close popup without completing)
+ * Create the wikilink decorations plugin
  */
-export function cancelWikilink(view: EditorView): void {
-  view.dispatch({
-    effects: setWikilinkState.of(null),
-  })
+function createWikilinkPlugin(buildHref?: (target: string) => string) {
+  const useWidgets = !!buildHref
+
+  return ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet
+
+      constructor(view: EditorView) {
+        this.decorations = buildDecorations(view, useWidgets, buildHref)
+      }
+
+      update(update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.focusChanged) {
+          this.decorations = buildDecorations(update.view, useWidgets, buildHref)
+        }
+      }
+    },
+    {
+      decorations: (v) => v.decorations,
+    }
+  )
 }
 
 /**
- * Create an update listener that reports wikilink state changes
+ * Create an update listener that reports wikilink state changes for the popup
  */
 export function wikilinkStateListener(
   onChange: (state: WikilinkState | null) => void
 ): Extension {
-  let lastState: WikilinkState | null = null
+  let lastQuery: string | null = null
 
   return EditorView.updateListener.of((update) => {
-    try {
-      const state = update.state.field(wikilinkStateField)
-      // Only call onChange if state actually changed
-      if (state !== lastState) {
-        lastState = state
-        onChange(state)
-      }
-    } catch {
-      // Field not available
-      if (lastState !== null) {
-        lastState = null
+    if (!update.view.hasFocus) {
+      if (lastQuery !== null) {
+        lastQuery = null
         onChange(null)
       }
+      return
+    }
+
+    const doc = update.state.doc.toString()
+    const cursorPos = update.state.selection.main.head
+    const partial = findPartialWikilink(doc, cursorPos)
+
+    if (partial) {
+      // Only update if query changed (avoid unnecessary re-renders)
+      if (partial.query !== lastQuery) {
+        lastQuery = partial.query
+        const coords = update.view.coordsAtPos(partial.from)
+        if (coords) {
+          onChange({
+            from: partial.from,
+            to: partial.to,
+            query: partial.query,
+            coords: { top: coords.bottom + 4, left: coords.left },
+          })
+        }
+      }
+    } else if (lastQuery !== null) {
+      lastQuery = null
+      onChange(null)
     }
   })
 }
 
 /**
+ * Build href for a wikilink target
+ */
+function defaultBuildHref(target: string): string {
+  // Check if it's a journal link
+  if (target.startsWith('journals/')) {
+    const date = target.slice('journals/'.length)
+    return `/journal/${encodeURIComponent(date)}`
+  }
+  // Regular page
+  return `/page/${encodeURIComponent(target)}`
+}
+
+/**
  * Main extension factory
  */
-export function wikilinkExtension(onNavigate: (target: string) => void): Extension {
+export function wikilinkExtension(buildHref?: (target: string) => string): Extension {
   return [
-    wikilinkStateField,
-    wikilinkPlugin,
+    createWikilinkPlugin(buildHref ?? defaultBuildHref),
     wikilinkTheme,
-    wikilinkClickHandler(onNavigate),
   ]
 }

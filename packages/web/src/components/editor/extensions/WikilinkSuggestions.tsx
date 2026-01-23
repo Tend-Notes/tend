@@ -10,7 +10,7 @@ import { EditorView } from '@codemirror/view'
 import * as api from '../../../lib/api'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import type { WikilinkState } from './wikilink'
-import { completeWikilink, cancelWikilink } from './wikilink'
+import { completeWikilink } from './wikilink'
 
 interface WikilinkSuggestionsProps {
   view: EditorView
@@ -172,7 +172,11 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
       } else if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        cancelWikilink(view)
+        // Delete the [[ to dismiss the popup
+        view.dispatch({
+          changes: { from: state.from, to: state.to, insert: '' },
+        })
+        view.focus()
       } else if (e.key === 'Tab') {
         // Tab also selects
         e.preventDefault()
@@ -186,18 +190,8 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
     // Capture phase to intercept before CodeMirror
     window.addEventListener('keydown', handleKeyDown, true)
     return () => window.removeEventListener('keydown', handleKeyDown, true)
-  }, [allItems, selectedIndex, handleSelect, view])
+  }, [allItems, selectedIndex, handleSelect, view, state])
 
-  // Close on click outside
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
-        cancelWikilink(view)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [view])
 
   // Scroll selected item into view
   useEffect(() => {
