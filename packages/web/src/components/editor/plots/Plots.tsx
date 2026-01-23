@@ -4,17 +4,14 @@
 // Manages the block tree structure. Owns selection state and keyboard navigation.
 // Drop-in replacement for OutlinerEditor - same props interface.
 //
-// Actions (CodeMirror) handles text editing and reports boundary events back to Plots.
+// Seeds handle text editing and report boundary events back to Plots.
 
 import { useMemo, useEffect, useCallback, useState, useRef } from 'react'
 import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
-import { Actions, ActionsBoundaryEvent } from './Actions'
+import { Seed, SeedBoundaryEvent } from './Seed'
 import { v4 as uuidv4 } from 'uuid'
-
-// Alias for boundary event type (Actions and Seed use the same event structure)
-type BoundaryEvent = ActionsBoundaryEvent
 
 interface PlotsProps {
   page: Page
@@ -524,10 +521,10 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   }, [flatBlockOrder, focusBlock])
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BOUNDARY EVENT HANDLER
+  // SEED BOUNDARY EVENT HANDLER
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleBoundaryEvent = useCallback((uuid: string, event: BoundaryEvent) => {
+  const handleBoundaryEvent = useCallback((uuid: string, event: SeedBoundaryEvent) => {
     switch (event.type) {
       case 'enter': {
         // Split block at cursor
@@ -664,9 +661,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
             }`}
           />
 
-          {/* Actions - CodeMirror editable content */}
+          {/* Seed - editable content */}
           <div className="flex-1">
-            <Actions
+            <Seed
               block={block}
               isSelected={isSelected}
               onChange={(content) => handleBlockChange(block.uuid, content)}

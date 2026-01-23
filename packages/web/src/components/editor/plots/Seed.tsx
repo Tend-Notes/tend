@@ -1,19 +1,24 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-// Seed: Block content component
+// Seed: Block content component (CodeMirror-based)
 //
-// Handles text editing within a single block. Uses contenteditable for now,
-// will be replaced with CodeMirror when Actions layer is implemented.
+// Handles text editing within a single block using CodeMirror.
+// Provides markdown formatting with delimiter hiding.
 //
 // Seed is responsible for:
-// - Text input and editing
+// - Text input and editing via CodeMirror
+// - Markdown formatting (bold, italic, strikethrough, highlight, code)
 // - Cursor position tracking
 // - Detecting boundary events (cursor at start/end) and delegating to Plots
-// - Rendering content (plain text now, formatted text via Actions later)
 
-import { useRef, useEffect, useCallback, KeyboardEvent, FormEvent } from 'react'
+import { useRef, useEffect, useCallback } from 'react'
+import { EditorView, keymap, placeholder } from '@codemirror/view'
+import { EditorState, Extension } from '@codemirror/state'
+import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Block } from '../../../types'
+import { markdownExtension } from '../extensions/markdown'
+import { hideDelimiters } from '../extensions/hideDelimiters'
 
-// Placeholder for Actions layer - will handle formatting, decorations, etc.
+// Placeholder for Actions layer - will handle formatting commands, decorations, etc.
 export interface SeedActions {
   renderContent: (content: string) => string
   applyFormat: (format: string, selection: { start: number; end: number }) => string
@@ -25,6 +30,7 @@ interface SeedProps {
   onChange: (content: string) => void
   onBoundaryEvent: (event: SeedBoundaryEvent) => void
   readonly?: boolean
+  extensions?: Extension[]
 }
 
 // Events that Seed reports to Plots for tree-level handling
@@ -43,269 +49,331 @@ export type SeedBoundaryEvent =
   | { type: 'shift-arrow-up' }
   | { type: 'shift-arrow-down' }
 
+/**
+ * Base theme for the CodeMirror editor to match Tend's styling.
+ */
+const baseTheme = EditorView.theme({
+  '&': {
+    fontSize: 'inherit',
+    fontFamily: 'inherit',
+  },
+  '.cm-content': {
+    padding: '0',
+    caretColor: 'var(--base05, currentColor)',
+  },
+  '.cm-line': {
+    padding: '0',
+  },
+  '&.cm-focused': {
+    outline: 'none',
+  },
+  '.cm-scroller': {
+    overflow: 'visible',
+  },
+  '.cm-placeholder': {
+    color: 'var(--base03, #666)',
+    fontStyle: 'italic',
+  },
+})
+
 export function Seed({
   block,
   isSelected,
   onChange,
   onBoundaryEvent,
   readonly = false,
+  extensions: additionalExtensions = [],
 }: SeedProps) {
-  const editorRef = useRef<HTMLDivElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
   const contentRef = useRef(block.content)
+  const onChangeRef = useRef(onChange)
+  const onBoundaryEventRef = useRef(onBoundaryEvent)
 
-  // Sync content ref when block changes externally
+  // Keep refs up to date
   useEffect(() => {
-    contentRef.current = block.content
-    const el = editorRef.current
-    if (el && el.textContent !== block.content) {
-      el.textContent = block.content
-    }
-  }, [block.content])
-
-  // Focus when selected
-  useEffect(() => {
-    if (isSelected && editorRef.current) {
-      editorRef.current.focus()
-    }
-  }, [isSelected])
+    onChangeRef.current = onChange
+    onBoundaryEventRef.current = onBoundaryEvent
+  }, [onChange, onBoundaryEvent])
 
   // ─────────────────────────────────────────────────────────────────────────
   // CURSOR HELPERS
   // ─────────────────────────────────────────────────────────────────────────
 
-  const getCursorOffset = useCallback((el: HTMLElement, selection: Selection): number => {
-    if (!selection.anchorNode || !selection.rangeCount) return 0
-    const range = selection.getRangeAt(0)
-    const preCaretRange = range.cloneRange()
-    preCaretRange.selectNodeContents(el)
-    preCaretRange.setEnd(range.startContainer, range.startOffset)
-    return preCaretRange.toString().length
+  const isAtStart = useCallback((view: EditorView): boolean => {
+    return view.state.selection.main.head === 0
   }, [])
 
-  const isAtStart = useCallback((el: HTMLElement, selection: Selection): boolean => {
-    return getCursorOffset(el, selection) === 0
-  }, [getCursorOffset])
+  const isAtEnd = useCallback((view: EditorView): boolean => {
+    return view.state.selection.main.head === view.state.doc.length
+  }, [])
 
-  const isAtEnd = useCallback((el: HTMLElement, selection: Selection): boolean => {
-    const text = el.textContent || ''
-    return getCursorOffset(el, selection) >= text.length
-  }, [getCursorOffset])
+  const getCursorOffset = useCallback((view: EditorView): number => {
+    return view.state.selection.main.head
+  }, [])
 
-  const setCursorPosition = useCallback((el: HTMLElement, offset: number) => {
-    const selection = window.getSelection()
-    if (!selection) return
+  // ─────────────────────────────────────────────────────────────────────────
+  // BOUNDARY EVENT KEYMAP
+  // ─────────────────────────────────────────────────────────────────────────
 
-    const range = document.createRange()
-    const text = el.textContent || ''
-    const targetOffset = Math.min(offset, text.length)
+  const boundaryKeymap = useCallback(() => {
+    return keymap.of([
+      // Enter - split block
+      {
+        key: 'Enter',
+        run: (view) => {
+          const cursorOffset = getCursorOffset(view)
+          const content = view.state.doc.toString()
+          onBoundaryEventRef.current({
+            type: 'enter',
+            cursorOffset,
+            content,
+          })
+          return true
+        },
+      },
+      // Shift+Enter - insert line break (let CodeMirror handle it)
+      {
+        key: 'Shift-Enter',
+        run: () => false,
+      },
+      // Tab - indent
+      {
+        key: 'Tab',
+        run: () => {
+          onBoundaryEventRef.current({ type: 'tab' })
+          return true
+        },
+      },
+      // Shift+Tab - outdent
+      {
+        key: 'Shift-Tab',
+        run: () => {
+          onBoundaryEventRef.current({ type: 'shift-tab' })
+          return true
+        },
+      },
+      // Alt+Arrow Up - move block up
+      {
+        key: 'Alt-ArrowUp',
+        run: () => {
+          onBoundaryEventRef.current({ type: 'alt-arrow-up' })
+          return true
+        },
+      },
+      // Alt+Arrow Down - move block down
+      {
+        key: 'Alt-ArrowDown',
+        run: () => {
+          onBoundaryEventRef.current({ type: 'alt-arrow-down' })
+          return true
+        },
+      },
+      // Shift+Arrow Up - extend block selection
+      {
+        key: 'Shift-ArrowUp',
+        run: () => {
+          onBoundaryEventRef.current({ type: 'shift-arrow-up' })
+          return true
+        },
+      },
+      // Shift+Arrow Down - extend block selection
+      {
+        key: 'Shift-ArrowDown',
+        run: () => {
+          onBoundaryEventRef.current({ type: 'shift-arrow-down' })
+          return true
+        },
+      },
+      // Backspace at start - merge with previous
+      {
+        key: 'Backspace',
+        run: (view) => {
+          if (view.state.selection.main.empty && isAtStart(view)) {
+            onBoundaryEventRef.current({ type: 'backspace-at-start' })
+            return true
+          }
+          return false
+        },
+      },
+      // Delete at end - merge with next
+      {
+        key: 'Delete',
+        run: (view) => {
+          if (view.state.selection.main.empty && isAtEnd(view)) {
+            onBoundaryEventRef.current({ type: 'delete-at-end' })
+            return true
+          }
+          return false
+        },
+      },
+      // Arrow Up - navigate to previous block
+      {
+        key: 'ArrowUp',
+        run: (view) => {
+          const hasLineBreaks = view.state.doc.lines > 1
+          if (!hasLineBreaks || isAtStart(view)) {
+            onBoundaryEventRef.current({
+              type: 'arrow-up',
+              cursorOffset: getCursorOffset(view),
+            })
+            return true
+          }
+          return false
+        },
+      },
+      // Arrow Down - navigate to next block
+      {
+        key: 'ArrowDown',
+        run: (view) => {
+          const hasLineBreaks = view.state.doc.lines > 1
+          if (!hasLineBreaks || isAtEnd(view)) {
+            onBoundaryEventRef.current({
+              type: 'arrow-down',
+              cursorOffset: getCursorOffset(view),
+            })
+            return true
+          }
+          return false
+        },
+      },
+      // Arrow Left at start - go to previous block
+      {
+        key: 'ArrowLeft',
+        run: (view) => {
+          if (view.state.selection.main.empty && isAtStart(view)) {
+            onBoundaryEventRef.current({ type: 'arrow-left-at-start' })
+            return true
+          }
+          return false
+        },
+      },
+      // Arrow Right at end - go to next block
+      {
+        key: 'ArrowRight',
+        run: (view) => {
+          if (view.state.selection.main.empty && isAtEnd(view)) {
+            onBoundaryEventRef.current({ type: 'arrow-right-at-end' })
+            return true
+          }
+          return false
+        },
+      },
+    ])
+  }, [getCursorOffset, isAtStart, isAtEnd])
 
-    // Walk text nodes to find position
-    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
-    let currentOffset = 0
-    let node: Node | null = walker.nextNode()
+  // ─────────────────────────────────────────────────────────────────────────
+  // EDITOR SETUP
+  // ─────────────────────────────────────────────────────────────────────────
 
-    while (node) {
-      const nodeLength = node.textContent?.length || 0
-      if (currentOffset + nodeLength >= targetOffset) {
-        range.setStart(node, targetOffset - currentOffset)
-        range.setEnd(node, targetOffset - currentOffset)
-        selection.removeAllRanges()
-        selection.addRange(range)
-        return
+  useEffect(() => {
+    if (!containerRef.current) return
+
+    const updateListener = EditorView.updateListener.of((update) => {
+      if (update.docChanged) {
+        const newContent = update.state.doc.toString()
+        if (newContent !== contentRef.current) {
+          contentRef.current = newContent
+          onChangeRef.current(newContent)
+        }
       }
-      currentOffset += nodeLength
-      node = walker.nextNode()
+    })
+
+    const extensions: Extension[] = [
+      baseTheme,
+      markdownExtension(),
+      hideDelimiters(),
+      history(),
+      keymap.of([...defaultKeymap, ...historyKeymap]),
+      boundaryKeymap(),
+      updateListener,
+      EditorView.lineWrapping,
+      placeholder(''),
+      ...additionalExtensions,
+    ]
+
+    if (readonly) {
+      extensions.push(EditorState.readOnly.of(true))
     }
 
-    // Fallback: put cursor at end
-    range.selectNodeContents(el)
-    range.collapse(false)
-    selection.removeAllRanges()
-    selection.addRange(range)
-  }, [])
+    const state = EditorState.create({
+      doc: block.content,
+      extensions,
+    })
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // INPUT HANDLER
-  // ─────────────────────────────────────────────────────────────────────────
+    const view = new EditorView({
+      state,
+      parent: containerRef.current,
+    })
 
-  const handleInput = useCallback((e: FormEvent<HTMLDivElement>) => {
-    const el = e.currentTarget
-    const newContent = el.textContent || ''
+    viewRef.current = view
 
-    if (newContent !== contentRef.current) {
-      contentRef.current = newContent
-      onChange(newContent)
+    return () => {
+      view.destroy()
+      viewRef.current = null
     }
-  }, [onChange])
+  }, [readonly, boundaryKeymap, additionalExtensions]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // KEYBOARD HANDLER
-  // ─────────────────────────────────────────────────────────────────────────
+  // Sync content when block changes externally
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
 
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
-    const el = editorRef.current
-    if (!el) return
-
-    const selection = window.getSelection()
-    if (!selection) return
-
-    // Enter - split block
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      const cursorOffset = getCursorOffset(el, selection)
-      const content = el.textContent || ''
-      onBoundaryEvent({
-        type: 'enter',
-        cursorOffset,
-        content,
+    if (block.content !== contentRef.current) {
+      contentRef.current = block.content
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: block.content,
+        },
       })
-      return
     }
+  }, [block.content])
 
-    // Shift+Enter - allow line break (default behavior)
-    if (e.key === 'Enter' && e.shiftKey) {
-      // Let browser insert line break
-      return
+  // Focus when selected
+  useEffect(() => {
+    if (isSelected && viewRef.current) {
+      viewRef.current.focus()
     }
-
-    // Tab - indent/outdent
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      if (e.shiftKey) {
-        onBoundaryEvent({ type: 'shift-tab' })
-      } else {
-        onBoundaryEvent({ type: 'tab' })
-      }
-      return
-    }
-
-    // Alt+Arrow - move block
-    if (e.altKey && e.key === 'ArrowUp') {
-      e.preventDefault()
-      onBoundaryEvent({ type: 'alt-arrow-up' })
-      return
-    }
-    if (e.altKey && e.key === 'ArrowDown') {
-      e.preventDefault()
-      onBoundaryEvent({ type: 'alt-arrow-down' })
-      return
-    }
-
-    // Backspace at start
-    if (e.key === 'Backspace' && selection.isCollapsed && isAtStart(el, selection)) {
-      e.preventDefault()
-      onBoundaryEvent({ type: 'backspace-at-start' })
-      return
-    }
-
-    // Delete at end
-    if (e.key === 'Delete' && selection.isCollapsed && isAtEnd(el, selection)) {
-      e.preventDefault()
-      onBoundaryEvent({ type: 'delete-at-end' })
-      return
-    }
-
-    // Shift+Arrow Up - extend selection upward
-    if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      onBoundaryEvent({ type: 'shift-arrow-up' })
-      return
-    }
-
-    // Shift+Arrow Down - extend selection downward
-    if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey) {
-      e.preventDefault()
-      onBoundaryEvent({ type: 'shift-arrow-down' })
-      return
-    }
-
-    // Arrow Up - navigate if at start or single line
-    if (e.key === 'ArrowUp' && !e.altKey && !e.shiftKey) {
-      if (selection.isCollapsed) {
-        const hasLineBreaks = (el.textContent || '').includes('\n')
-        if (!hasLineBreaks || isAtStart(el, selection)) {
-          e.preventDefault()
-          onBoundaryEvent({
-            type: 'arrow-up',
-            cursorOffset: getCursorOffset(el, selection),
-          })
-          return
-        }
-      }
-    }
-
-    // Arrow Down - navigate if at end or single line
-    if (e.key === 'ArrowDown' && !e.altKey && !e.shiftKey) {
-      if (selection.isCollapsed) {
-        const hasLineBreaks = (el.textContent || '').includes('\n')
-        if (!hasLineBreaks || isAtEnd(el, selection)) {
-          e.preventDefault()
-          onBoundaryEvent({
-            type: 'arrow-down',
-            cursorOffset: getCursorOffset(el, selection),
-          })
-          return
-        }
-      }
-    }
-
-    // Arrow Left at start
-    if (e.key === 'ArrowLeft' && !e.altKey && !e.shiftKey) {
-      if (selection.isCollapsed && isAtStart(el, selection)) {
-        e.preventDefault()
-        onBoundaryEvent({ type: 'arrow-left-at-start' })
-        return
-      }
-    }
-
-    // Arrow Right at end
-    if (e.key === 'ArrowRight' && !e.altKey && !e.shiftKey) {
-      if (selection.isCollapsed && isAtEnd(el, selection)) {
-        e.preventDefault()
-        onBoundaryEvent({ type: 'arrow-right-at-end' })
-        return
-      }
-    }
-  }, [getCursorOffset, isAtStart, isAtEnd, onBoundaryEvent])
+  }, [isSelected])
 
   // ─────────────────────────────────────────────────────────────────────────
   // FOCUS EVENT - expose cursor positioning to Plots
   // ─────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const el = editorRef.current
-    if (!el) return
+    const container = containerRef.current
+    if (!container) return
 
     const handleSeedFocus = (e: Event) => {
       const detail = (e as CustomEvent).detail
       const position = detail?.position
+      const view = viewRef.current
 
-      el.focus()
+      if (!view) return
+
+      view.focus()
 
       if (position === 'start') {
-        setCursorPosition(el, 0)
+        view.dispatch({
+          selection: { anchor: 0 },
+        })
       } else if (position === 'end') {
-        setCursorPosition(el, (el.textContent || '').length)
+        view.dispatch({
+          selection: { anchor: view.state.doc.length },
+        })
       } else if (typeof position === 'number') {
-        setCursorPosition(el, position)
+        const pos = Math.min(position, view.state.doc.length)
+        view.dispatch({
+          selection: { anchor: pos },
+        })
       }
     }
 
-    el.addEventListener('seed-focus', handleSeedFocus)
-    return () => el.removeEventListener('seed-focus', handleSeedFocus)
-  }, [setCursorPosition])
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // INITIALIZE CONTENT
-  // ─────────────────────────────────────────────────────────────────────────
-
-  // Set initial content on mount (contenteditable manages its own DOM)
-  useEffect(() => {
-    const el = editorRef.current
-    if (el) {
-      el.textContent = block.content
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    container.addEventListener('seed-focus', handleSeedFocus)
+    return () => container.removeEventListener('seed-focus', handleSeedFocus)
+  }, [])
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER
@@ -313,16 +381,11 @@ export function Seed({
 
   return (
     <div
-      ref={editorRef}
+      ref={containerRef}
       data-seed-editor
-      contentEditable={!readonly}
-      suppressContentEditableWarning
-      className={`block-content outline-none min-h-[1.5em] whitespace-pre-wrap ${
+      className={`block-content outline-none min-h-[1.5em] ${
         readonly ? 'cursor-default' : ''
       }`}
-      onInput={readonly ? undefined : handleInput}
-      onKeyDown={readonly ? undefined : handleKeyDown}
-      style={{ caretColor: 'var(--base05, currentColor)' }}
     />
   )
 }
