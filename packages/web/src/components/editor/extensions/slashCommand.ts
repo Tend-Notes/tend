@@ -4,7 +4,7 @@
 // Detects when user types `/` at start of content or after whitespace
 // and provides state for showing the slash command popup.
 
-import { EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view'
+import { EditorView } from '@codemirror/view'
 import { Extension } from '@codemirror/state'
 
 // State for the slash command popup
@@ -61,74 +61,65 @@ function findSlashTrigger(doc: string, cursorPos: number): number {
 export function slashCommandStateListener(
   onStateChange: (state: SlashCommandState | null) => void
 ): Extension {
-  return ViewPlugin.fromClass(
-    class {
-      lastState: SlashCommandState | null = null
+  let lastState: SlashCommandState | null = null
 
-      constructor(view: EditorView) {
-        this.checkState(view)
+  return EditorView.updateListener.of((update) => {
+    if (!update.view.hasFocus) {
+      if (lastState !== null) {
+        lastState = null
+        onStateChange(null)
       }
-
-      checkState(view: EditorView) {
-        const doc = view.state.doc.toString()
-        const cursorPos = view.state.selection.main.head
-
-        const slashPos = findSlashTrigger(doc, cursorPos)
-
-        if (slashPos === -1) {
-          if (this.lastState !== null) {
-            this.lastState = null
-            onStateChange(null)
-          }
-          return
-        }
-
-        // Extract query (content after /)
-        const query = doc.slice(slashPos + 1, cursorPos)
-
-        // Don't trigger if query contains newlines or special chars
-        if (query.includes('\n') || query.includes('/')) {
-          if (this.lastState !== null) {
-            this.lastState = null
-            onStateChange(null)
-          }
-          return
-        }
-
-        // Get coordinates for popup positioning
-        const coords = view.coordsAtPos(slashPos)
-        const top = coords ? coords.bottom + 4 : 0
-        const left = coords ? coords.left : 0
-
-        const newState: SlashCommandState = {
-          from: slashPos,
-          to: cursorPos,
-          query,
-          coords: { top, left },
-        }
-
-        // Only notify if state changed
-        if (
-          !this.lastState ||
-          this.lastState.from !== newState.from ||
-          this.lastState.to !== newState.to ||
-          this.lastState.query !== newState.query
-        ) {
-          this.lastState = newState
-          onStateChange(newState)
-        }
-      }
-
-      update(update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet) {
-          this.checkState(update.view)
-        }
-      }
-    },
-    {
-      eventHandlers: {},
+      return
     }
-  ).extension
+
+    const doc = update.state.doc.toString()
+    const cursorPos = update.state.selection.main.head
+
+    const slashPos = findSlashTrigger(doc, cursorPos)
+
+    if (slashPos === -1) {
+      if (lastState !== null) {
+        lastState = null
+        onStateChange(null)
+      }
+      return
+    }
+
+    // Extract query (content after /)
+    const query = doc.slice(slashPos + 1, cursorPos)
+
+    // Don't trigger if query contains newlines or special chars
+    if (query.includes('\n') || query.includes('/')) {
+      if (lastState !== null) {
+        lastState = null
+        onStateChange(null)
+      }
+      return
+    }
+
+    // Get coordinates for popup positioning
+    const coords = update.view.coordsAtPos(slashPos)
+    const top = coords ? coords.bottom + 4 : 0
+    const left = coords ? coords.left : 0
+
+    const newState: SlashCommandState = {
+      from: slashPos,
+      to: cursorPos,
+      query,
+      coords: { top, left },
+    }
+
+    // Only notify if state changed
+    if (
+      !lastState ||
+      lastState.from !== newState.from ||
+      lastState.to !== newState.to ||
+      lastState.query !== newState.query
+    ) {
+      lastState = newState
+      onStateChange(newState)
+    }
+  })
 }
 
 /**
