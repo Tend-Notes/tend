@@ -177,7 +177,7 @@ fn default_gardens_config() -> GardensConfig {
     }
 }
 
-/// Save gardens configuration
+/// Save gardens configuration with restrictive permissions
 fn save_gardens_config(config: &GardensConfig) -> Result<(), std::io::Error> {
     let path = gardens_config_path();
 
@@ -187,7 +187,17 @@ fn save_gardens_config(config: &GardensConfig) -> Result<(), std::io::Error> {
     }
 
     let content = serde_json::to_string_pretty(config)?;
-    std::fs::write(path, content)
+    std::fs::write(&path, &content)?;
+
+    // Set restrictive permissions (0600 - owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&path, permissions)?;
+    }
+
+    Ok(())
 }
 
 /// List all gardens

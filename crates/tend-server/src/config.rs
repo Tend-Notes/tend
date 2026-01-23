@@ -249,14 +249,22 @@ impl Config {
         Ok(config)
     }
 
-    /// Save configuration to file
+    /// Save configuration to file with restrictive permissions
     pub fn save(&self) -> anyhow::Result<()> {
         let config_dir = self.data_dir.join(".tend");
         std::fs::create_dir_all(&config_dir)?;
 
         let config_path = config_dir.join("config.toml");
         let content = toml::to_string_pretty(self)?;
-        std::fs::write(config_path, content)?;
+        std::fs::write(&config_path, content)?;
+
+        // Set restrictive permissions (0600 - owner read/write only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(&config_path, permissions)?;
+        }
 
         Ok(())
     }
