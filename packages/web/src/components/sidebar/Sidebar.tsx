@@ -38,7 +38,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
     usePageStore()
   const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
   const { contentTypes } = useSettingsStore()
-  const { recentSheets } = useRecentSheetsStore()
+  const { recentSheets, recentTags } = useRecentSheetsStore()
 
   // Visual width during drag (can exceed bounds for bounceback effect)
   const [visualWidth, setVisualWidth] = useState(sidebarWidth)
@@ -194,6 +194,34 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                   </div>
                 )
               })}
+
+              {/* Tags section */}
+              {recentTags.length > 0 && (
+                <div className="mb-4">
+                  <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
+                    Tags
+                  </h2>
+                  <ul>
+                    {recentTags.map((tag) => {
+                      const tagPath = `tags/${tag.name}`
+                      return (
+                        <li key={tag.name}>
+                          <button
+                            onClick={() => navigateToPage(tagPath)}
+                            className={`w-full px-2 py-1 text-left text-sm transition-colors ${
+                              currentPageName === tagPath
+                                ? 'text-base-06'
+                                : 'text-base-04 hover:text-base-05'
+                            }`}
+                          >
+                            #{tag.name}
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
           </>
         )
