@@ -9,6 +9,7 @@
 import { useMemo, useEffect, useCallback, useState, useRef } from 'react'
 import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
+import { useSelectionStore } from '../../../stores/selectionStore'
 import { Seed, SeedBoundaryEvent } from './Seed'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -19,6 +20,18 @@ interface PlotsProps {
 
 export function Plots({ page, readonly = false }: PlotsProps) {
   const updateCurrentPage = usePageStore((state) => state.updateCurrentPage)
+  const {
+    setFocusedBlock,
+    extendSelectionInDirection,
+    clearSelection,
+    isInSelection,
+  } = useSelectionStore()
+  // Subscribe to selection state changes to trigger re-renders
+  const anchorUuid = useSelectionStore((state) => state.anchorUuid)
+  const focusUuid = useSelectionStore((state) => state.focusUuid)
+  // Force re-render when selection changes (these aren't used directly but trigger updates)
+  void anchorUuid
+  void focusUuid
   const containerRef = useRef<HTMLDivElement>(null)
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null)
   const pendingFocusRef = useRef<{ uuid: string; position: 'start' | 'end' | number } | null>(null)
@@ -56,8 +69,10 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   // Focus a block's Seed at a specific position
   const focusBlock = useCallback((uuid: string, position: 'start' | 'end' | number) => {
     setSelectedUuid(uuid)
+    setFocusedBlock(uuid)
+    clearSelection()
     pendingFocusRef.current = { uuid, position }
-  }, [])
+  }, [setFocusedBlock, clearSelection])
 
   // Apply pending focus after render
   useEffect(() => {
@@ -382,33 +397,41 @@ export function Plots({ page, readonly = false }: PlotsProps) {
 
       const siblings = block.parentUuid
         ? blocks.find((b) => b.uuid === block.parentUuid)?.children || []
-        : page.rootBlocks
+        : [...page.rootBlocks]
 
       const currentIndex = siblings.indexOf(uuid)
 
       if (currentIndex > 0) {
+        // Swap positions with previous sibling
+        ;[siblings[currentIndex - 1], siblings[currentIndex]] =
+          [siblings[currentIndex], siblings[currentIndex - 1]]
+
         if (block.parentUuid) {
           const parent = blocks.find((b) => b.uuid === block.parentUuid)
-          if (!parent) return
-          const newChildren = [...parent.children]
-          ;[newChildren[currentIndex - 1], newChildren[currentIndex]] =
-            [newChildren[currentIndex], newChildren[currentIndex - 1]]
-          parent.children = newChildren
+          if (parent) {
+            parent.children = siblings
+          }
           updateCurrentPage(blocks)
         } else {
-          const newRootBlocks = [...page.rootBlocks]
-          ;[newRootBlocks[currentIndex - 1], newRootBlocks[currentIndex]] =
-            [newRootBlocks[currentIndex], newRootBlocks[currentIndex - 1]]
+          // For root blocks, set both at once to avoid race conditions
+          const blockMap: Record<string, Block> = {}
+          for (const b of blocks) {
+            blockMap[b.uuid] = b
+          }
           usePageStore.setState((state) => {
             if (state.currentPage) {
-              state.currentPage.rootBlocks = newRootBlocks
+              state.currentPage.blocks = blockMap
+              state.currentPage.rootBlocks = siblings
+              state.hasUnsavedChanges = true
             }
           })
-          updateCurrentPage(blocks)
         }
+      } else if (block.parentUuid) {
+        // At top of siblings - outdent (move before parent)
+        handleOutdent(uuid)
       }
     },
-    [getAllBlocks, page.rootBlocks, updateCurrentPage]
+    [getAllBlocks, page.rootBlocks, handleOutdent]
   )
 
   const handleMoveDown = useCallback(
@@ -419,33 +442,41 @@ export function Plots({ page, readonly = false }: PlotsProps) {
 
       const siblings = block.parentUuid
         ? blocks.find((b) => b.uuid === block.parentUuid)?.children || []
-        : page.rootBlocks
+        : [...page.rootBlocks]
 
       const currentIndex = siblings.indexOf(uuid)
 
       if (currentIndex < siblings.length - 1) {
+        // Swap positions with next sibling
+        ;[siblings[currentIndex], siblings[currentIndex + 1]] =
+          [siblings[currentIndex + 1], siblings[currentIndex]]
+
         if (block.parentUuid) {
           const parent = blocks.find((b) => b.uuid === block.parentUuid)
-          if (!parent) return
-          const newChildren = [...parent.children]
-          ;[newChildren[currentIndex], newChildren[currentIndex + 1]] =
-            [newChildren[currentIndex + 1], newChildren[currentIndex]]
-          parent.children = newChildren
+          if (parent) {
+            parent.children = siblings
+          }
           updateCurrentPage(blocks)
         } else {
-          const newRootBlocks = [...page.rootBlocks]
-          ;[newRootBlocks[currentIndex], newRootBlocks[currentIndex + 1]] =
-            [newRootBlocks[currentIndex + 1], newRootBlocks[currentIndex]]
+          // For root blocks, set both at once to avoid race conditions
+          const blockMap: Record<string, Block> = {}
+          for (const b of blocks) {
+            blockMap[b.uuid] = b
+          }
           usePageStore.setState((state) => {
             if (state.currentPage) {
-              state.currentPage.rootBlocks = newRootBlocks
+              state.currentPage.blocks = blockMap
+              state.currentPage.rootBlocks = siblings
+              state.hasUnsavedChanges = true
             }
           })
-          updateCurrentPage(blocks)
         }
+      } else if (block.parentUuid) {
+        // At bottom of siblings - outdent (move after parent)
+        handleOutdent(uuid)
       }
     },
-    [getAllBlocks, page.rootBlocks, updateCurrentPage]
+    [getAllBlocks, page.rootBlocks, handleOutdent]
   )
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -514,18 +545,34 @@ export function Plots({ page, readonly = false }: PlotsProps) {
 
       case 'tab':
         handleIndent(uuid)
+        // Refocus same block after indent
+        requestAnimationFrame(() => focusBlock(uuid, 'start'))
         break
 
       case 'shift-tab':
         handleOutdent(uuid)
+        // Refocus same block after outdent
+        requestAnimationFrame(() => focusBlock(uuid, 'start'))
         break
 
       case 'alt-arrow-up':
         handleMoveUp(uuid)
+        // Refocus same block after move
+        requestAnimationFrame(() => focusBlock(uuid, 'start'))
         break
 
       case 'alt-arrow-down':
         handleMoveDown(uuid)
+        // Refocus same block after move
+        requestAnimationFrame(() => focusBlock(uuid, 'start'))
+        break
+
+      case 'shift-arrow-up':
+        extendSelectionInDirection('up', flatBlockOrder)
+        break
+
+      case 'shift-arrow-down':
+        extendSelectionInDirection('down', flatBlockOrder)
         break
     }
   }, [
@@ -535,6 +582,8 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     handleMergeWithNext,
     navigateUp,
     navigateDown,
+    extendSelectionInDirection,
+    flatBlockOrder,
     handleIndent,
     handleOutdent,
     handleMoveUp,
@@ -552,13 +601,28 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       .filter(Boolean)
     const hasChildren = block.children.length > 0
     const isSelected = block.uuid === selectedUuid
+    const isInMultiSelection = isInSelection(block.uuid, flatBlockOrder)
 
     return (
       <div
         key={block.uuid}
-        className="block-container"
+        className={`block-container ${isInMultiSelection ? 'bg-base-0D/20' : ''}`}
         data-block-id={block.uuid}
-        onClick={() => focusBlock(block.uuid, 'end')}
+        onClick={(e) => {
+          // Only handle clicks on the container itself, not on the Seed
+          // Let the Seed handle its own click focus naturally
+          const target = e.target as HTMLElement
+          if (!target.closest('[data-seed-editor]')) {
+            focusBlock(block.uuid, 'end')
+          } else {
+            // Stop propagation so parent block-containers don't interfere
+            e.stopPropagation()
+            // Just update selection state without repositioning cursor
+            setSelectedUuid(block.uuid)
+            setFocusedBlock(block.uuid)
+            clearSelection()
+          }
+        }}
       >
         <div className="block flex items-start py-0.5">
           {/* Bullet */}

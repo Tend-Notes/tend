@@ -40,6 +40,8 @@ export type SeedBoundaryEvent =
   | { type: 'shift-tab' }
   | { type: 'alt-arrow-up' }
   | { type: 'alt-arrow-down' }
+  | { type: 'shift-arrow-up' }
+  | { type: 'shift-arrow-down' }
 
 export function Seed({
   block,
@@ -200,6 +202,20 @@ export function Seed({
     if (e.key === 'Delete' && selection.isCollapsed && isAtEnd(el, selection)) {
       e.preventDefault()
       onBoundaryEvent({ type: 'delete-at-end' })
+      return
+    }
+
+    // Shift+Arrow Up - extend selection upward
+    if (e.key === 'ArrowUp' && e.shiftKey && !e.altKey) {
+      e.preventDefault()
+      onBoundaryEvent({ type: 'shift-arrow-up' })
+      return
+    }
+
+    // Shift+Arrow Down - extend selection downward
+    if (e.key === 'ArrowDown' && e.shiftKey && !e.altKey) {
+      e.preventDefault()
+      onBoundaryEvent({ type: 'shift-arrow-down' })
       return
     }
 
