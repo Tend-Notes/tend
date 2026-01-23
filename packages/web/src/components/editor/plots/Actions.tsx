@@ -16,7 +16,9 @@ import { markdownExtension } from '../extensions/markdown'
 import { hideDelimiters } from '../extensions/hideDelimiters'
 import { wikilinkExtension } from '../extensions/wikilink'
 import { formattingKeymap } from '../extensions/formatting'
+import { taskStatus } from '../extensions/taskStatus'
 import { usePageStore } from '../../../stores/pageStore'
+import { useSettingsStore } from '../../../stores/settingsStore'
 
 /**
  * Build href for a wikilink target.
@@ -53,6 +55,7 @@ function buildWikilinkHref(target: string): string {
 export function useActions(): Extension[] {
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
+  const taskStatusSet = useSettingsStore((state) => state.taskStatusSet)
 
   // Navigation callback for wikilinks (SPA navigation without full page reload)
   const handleWikilinkNavigate = useCallback((target: string) => {
@@ -77,6 +80,7 @@ export function useActions(): Extension[] {
         onNavigate: handleWikilinkNavigate,
       }),
       formattingKeymap(),
+      taskStatus(taskStatusSet),
     ]
-  }, [handleWikilinkNavigate])
+  }, [handleWikilinkNavigate, taskStatusSet])
 }
