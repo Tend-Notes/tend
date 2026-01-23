@@ -24,7 +24,7 @@ const shortcuts = [
     { keys: ['Alt', 'Shift', 'B'], description: 'Bold' },
     { keys: ['Alt', 'Shift', 'I'], description: 'Italic' },
     { keys: ['Alt', 'Shift', 'U'], description: 'Underline' },
-    { keys: ['Alt', 'Shift', 'S'], description: 'Strikethrough' },
+    { keys: ['Alt', 'Shift', '-'], description: 'Strikethrough' },
     { keys: ['Alt', 'Shift', 'H'], description: 'Highlight' },
   ]},
   { category: 'Links', items: [

@@ -15,6 +15,7 @@ import { Extension } from '@codemirror/state'
 import { markdownExtension } from '../extensions/markdown'
 import { hideDelimiters } from '../extensions/hideDelimiters'
 import { wikilinkExtension } from '../extensions/wikilink'
+import { formattingKeymap } from '../extensions/formatting'
 
 /**
  * Build href for a wikilink target.
@@ -40,6 +41,7 @@ export function useActions(): Extension[] {
       markdownExtension(),
       hideDelimiters(),
       wikilinkExtension(buildWikilinkHref),
+      formattingKeymap(),
     ]
   }, [])
 }

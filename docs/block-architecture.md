@@ -100,7 +100,7 @@ interface BlockProps {
 | Alt-Shift-B | - | Bold (`**`) |
 | Alt-Shift-I | - | Italic (`*`) |
 | Alt-Shift-U | - | Underline (`__`) |
-| Alt-Shift-S | - | Strikethrough (`~~`) |
+| Alt-Shift-- | - | Strikethrough (`~~`) |
 | Alt-Shift-H | - | Highlight (`==`) |
 | `*`, `~`, `_`, `=` | With selection | Wrap selection with format delimiters |
 | `[` | With selection | Wiki-link wrapping |
