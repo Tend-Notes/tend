@@ -4,6 +4,7 @@ import { usePageStore } from '../../stores/pageStore'
 import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
+import { useTagStore } from '../../stores/tagStore'
 import { SidebarOptions } from './SidebarOptions'
 import { SidebarTags } from './SidebarTags'
 import { SidebarTodos } from './SidebarTodos'
@@ -39,6 +40,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
   const { contentTypes } = useSettingsStore()
   const { recentSheets, recentTags } = useRecentSheetsStore()
+  const getTagColor = useTagStore((state) => state.getTagColor)
 
   // Visual width during drag (can exceed bounds for bounceback effect)
   const [visualWidth, setVisualWidth] = useState(sidebarWidth)
@@ -204,15 +206,17 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                   <ul>
                     {recentTags.map((tag) => {
                       const tagPath = `tags/${tag.name}`
+                      const tagColor = getTagColor(tag.name)
+                      const isActive = currentPageName === tagPath
                       return (
-                        <li key={tag.name}>
+                        <li key={tag.name} className="px-2 py-1">
                           <button
                             onClick={() => navigateToPage(tagPath)}
-                            className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                              currentPageName === tagPath
-                                ? 'text-base-06'
-                                : 'text-base-04 hover:text-base-05'
-                            }`}
+                            className="tag-pill text-sm"
+                            style={{
+                              '--tag-color': tagColor,
+                              opacity: isActive ? 1 : 0.8,
+                            } as React.CSSProperties}
                           >
                             #{tag.name}
                           </button>
