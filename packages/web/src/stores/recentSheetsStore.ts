@@ -60,6 +60,19 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
     }),
     {
       name: 'tend-recent-sheets',
+      // Migration: filter out tag pages from persisted data
+      migrate: (persistedState: unknown) => {
+        const state = persistedState as { recentSheets?: Record<string, PageMeta[]> }
+        if (state.recentSheets) {
+          const cleaned: Record<string, PageMeta[]> = {}
+          for (const [key, sheets] of Object.entries(state.recentSheets)) {
+            cleaned[key] = sheets.filter((s) => !s.name.startsWith('tags/'))
+          }
+          return { ...state, recentSheets: cleaned }
+        }
+        return state
+      },
+      version: 1,
     }
   )
 )

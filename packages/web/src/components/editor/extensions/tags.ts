@@ -103,12 +103,13 @@ function buildTagDecorations(
   const decorations: Range<Decoration>[] = []
   const doc = view.state.doc.toString()
   const cursorPos = view.state.selection.main.head
+  const hasFocus = view.hasFocus
 
   const tags = findTags(doc)
 
   for (const tag of tags) {
     // Check if cursor is inside this tag
-    const cursorInTag = cursorPos >= tag.from && cursorPos <= tag.to
+    const cursorInTag = hasFocus && cursorPos >= tag.from && cursorPos <= tag.to
 
     if (cursorInTag) {
       // Show as styled text (not widget) when cursor is inside
@@ -124,6 +125,9 @@ function buildTagDecorations(
       )
     }
   }
+
+  // Sort by position
+  decorations.sort((a, b) => a.from - b.from)
 
   return Decoration.set(decorations)
 }
@@ -141,7 +145,7 @@ function createTagPlugin(options: TagExtensionOptions) {
       }
 
       update(update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet) {
+        if (update.docChanged || update.selectionSet || update.focusChanged) {
           this.decorations = buildTagDecorations(update.view, options)
         }
       }
