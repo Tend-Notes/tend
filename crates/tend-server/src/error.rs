@@ -4,7 +4,20 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use regex::Regex;
 use serde_json::json;
+use std::sync::LazyLock;
+
+/// Regex to match file paths (Unix and Windows style)
+static PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // Match Unix paths (/foo/bar) and Windows paths (C:\foo\bar)
+    Regex::new(r#"(?:[A-Za-z]:)?(?:[/\\][\w\-. ]+)+"#).unwrap()
+});
+
+/// Sanitize error message to remove sensitive information like file paths
+fn sanitize_error(msg: &str) -> String {
+    PATH_RE.replace_all(msg, "[path]").to_string()
+}
 
 /// Application error type
 #[derive(Debug)]
@@ -27,31 +40,39 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
             AppError::NotFound(msg) => {
-                let body = Json(json!({ "error": msg }));
+                let body = Json(json!({ "error": sanitize_error(&msg) }));
                 (StatusCode::NOT_FOUND, body).into_response()
             }
             AppError::BadRequest(msg) => {
-                let body = Json(json!({ "error": msg }));
+                let body = Json(json!({ "error": sanitize_error(&msg) }));
                 (StatusCode::BAD_REQUEST, body).into_response()
             }
             AppError::Unauthorized(msg) => {
-                let body = Json(json!({ "error": msg }));
+                let body = Json(json!({ "error": sanitize_error(&msg) }));
                 (StatusCode::UNAUTHORIZED, body).into_response()
             }
             AppError::Internal(msg) => {
-                let body = Json(json!({ "error": msg }));
+                // Log full error for debugging, return sanitized to client
+                tracing::error!("Internal error: {}", msg);
+                let body = Json(json!({ "error": sanitize_error(&msg) }));
                 (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
             }
             AppError::Storage(e) => {
-                let body = Json(json!({ "error": e.to_string() }));
+                let msg = e.to_string();
+                tracing::error!("Storage error: {}", msg);
+                let body = Json(json!({ "error": sanitize_error(&msg) }));
                 (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
             }
             AppError::Search(e) => {
-                let body = Json(json!({ "error": e.to_string() }));
+                let msg = e.to_string();
+                tracing::error!("Search error: {}", msg);
+                let body = Json(json!({ "error": sanitize_error(&msg) }));
                 (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
             }
             AppError::Git(e) => {
-                let body = Json(json!({ "error": e.to_string() }));
+                let msg = e.to_string();
+                tracing::error!("Git error: {}", msg);
+                let body = Json(json!({ "error": sanitize_error(&msg) }));
                 (StatusCode::INTERNAL_SERVER_ERROR, body).into_response()
             }
             AppError::Conflict {
@@ -59,7 +80,7 @@ impl IntoResponse for AppError {
                 message,
             } => {
                 let body = Json(json!({
-                    "error": message,
+                    "error": sanitize_error(&message),
                     "code": "VERSION_CONFLICT",
                     "currentVersion": current_version,
                 }));
