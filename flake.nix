@@ -39,7 +39,7 @@
         frontend = pkgs.stdenv.mkDerivation {
           pname = "tend-frontend";
           version = "0.1.0";
-          src = ./packages/web;
+          src = ./.;
 
           nativeBuildInputs = with pkgs; [
             nodejs_22
@@ -56,10 +56,11 @@
             export PNPM_HOME="$TMPDIR/pnpm"
             mkdir -p "$PNPM_HOME"
 
-            # Install dependencies
+            # Install dependencies (lockfile is at repo root)
             pnpm install --frozen-lockfile
 
-            # Build
+            # Build frontend
+            cd packages/web
             pnpm run build
 
             runHook postBuild
@@ -67,7 +68,7 @@
 
           installPhase = ''
             runHook preInstall
-            cp -r dist $out
+            cp -r packages/web/dist $out
             runHook postInstall
           '';
         };
