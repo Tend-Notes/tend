@@ -182,6 +182,7 @@ pub async fn update_sheet(
         root_blocks: req.root_blocks.iter().filter_map(|s| s.parse().ok()).collect(),
         blocks: req.blocks.into_iter().filter_map(|(k, v)| k.parse().ok().map(|uuid| (uuid, v))).collect(),
         properties: existing.properties,
+        content_type: existing.content_type,
         is_journal: existing.is_journal,
         journal_date: existing.journal_date,
         created_at: existing.created_at,

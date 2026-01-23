@@ -125,6 +125,7 @@ const DRAFT_DEBOUNCE_MS = 300
 let pendingSaveData: {
   pageName: string
   blocks: Block[]
+  contentType: string
   isJournal: boolean
   journalDate: string | null
 } | null = null
@@ -544,6 +545,7 @@ export const usePageStore = create<PageState>()(
         clearTimeout(saveTimeout)
       }
 
+      const contentType = currentPage.contentType
       const isJournal = currentPage.isJournal
       const journalDate = currentPage.journalDate
 
@@ -551,6 +553,7 @@ export const usePageStore = create<PageState>()(
       pendingSaveData = {
         pageName,
         blocks,
+        contentType,
         isJournal,
         journalDate,
       }
@@ -563,10 +566,13 @@ export const usePageStore = create<PageState>()(
 
           const apiBlocks = blocks.map(api.blockToApiFormat)
           let updatedPage: Page
-          if (isJournal && journalDate) {
+          if (contentType === 'journal' && journalDate) {
             updatedPage = await api.journals.update(journalDate, apiBlocks, version)
-          } else {
+          } else if (contentType === 'page') {
             updatedPage = await api.pages.update(pageName, apiBlocks, version)
+          } else {
+            // Custom content type - use sheets API
+            updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
           }
           // Server save succeeded - clear the draft and pending save data
           pendingSaveData = null
@@ -706,7 +712,7 @@ export const usePageStore = create<PageState>()(
 
       // If there's pending save data, save it immediately
       if (pendingSaveData) {
-        const { pageName, blocks, isJournal, journalDate } = pendingSaveData
+        const { pageName, blocks, contentType, journalDate } = pendingSaveData
         pendingSaveData = null
 
         try {
@@ -715,10 +721,13 @@ export const usePageStore = create<PageState>()(
 
           const apiBlocks = blocks.map(api.blockToApiFormat)
           let updatedPage: Page
-          if (isJournal && journalDate) {
+          if (contentType === 'journal' && journalDate) {
             updatedPage = await api.journals.update(journalDate, apiBlocks, version)
-          } else {
+          } else if (contentType === 'page') {
             updatedPage = await api.pages.update(pageName, apiBlocks, version)
+          } else {
+            // Custom content type - use sheets API
+            updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
           }
 
           await draftStore.deleteDraft(pageName)

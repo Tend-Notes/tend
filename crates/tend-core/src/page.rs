@@ -30,10 +30,15 @@ pub struct Page {
     /// Page-level properties (from first block if it only contains properties)
     pub properties: HashMap<String, String>,
 
-    /// Whether this is a journal page
+    /// Content type ID (e.g., "page", "journal", "meeting")
+    /// All pages belong to a content type - pages and journals are built-in types.
+    #[serde(default = "default_content_type")]
+    pub content_type: String,
+
+    /// Whether this is a journal page (derived from content_type == "journal")
     pub is_journal: bool,
 
-    /// Journal date (if this is a journal page)
+    /// Journal date (for journals) or sheet date (for saveByDate content types)
     pub journal_date: Option<NaiveDate>,
 
     /// File creation timestamp
@@ -45,6 +50,10 @@ pub struct Page {
     /// Version number for conflict detection (increments on each save)
     #[serde(default = "default_version")]
     pub version: u64,
+}
+
+fn default_content_type() -> String {
+    "page".to_string()
 }
 
 fn default_version() -> u64 {
@@ -62,6 +71,7 @@ impl Page {
             root_blocks: Vec::new(),
             blocks: HashMap::new(),
             properties: HashMap::new(),
+            content_type: "page".to_string(),
             is_journal: false,
             journal_date: None,
             created_at: now,
@@ -83,8 +93,29 @@ impl Page {
             root_blocks: Vec::new(),
             blocks: HashMap::new(),
             properties: HashMap::new(),
+            content_type: "journal".to_string(),
             is_journal: true,
             journal_date: Some(date),
+            created_at: now,
+            modified_at: now,
+            version: 1,
+        }
+    }
+
+    /// Create a new sheet for a custom content type
+    pub fn new_sheet(name: impl Into<String>, content_type_id: impl Into<String>, date: Option<NaiveDate>) -> Self {
+        let name = name.into();
+        let content_type_id = content_type_id.into();
+        let now = Utc::now();
+        Self {
+            title: name.clone(),
+            name,
+            root_blocks: Vec::new(),
+            blocks: HashMap::new(),
+            properties: HashMap::new(),
+            content_type: content_type_id,
+            is_journal: false,
+            journal_date: date,
             created_at: now,
             modified_at: now,
             version: 1,
@@ -181,6 +212,9 @@ impl Page {
 pub struct PageMeta {
     pub name: String,
     pub title: String,
+    /// Content type ID (e.g., "page", "journal", "meeting")
+    #[serde(default = "default_content_type")]
+    pub content_type: String,
     pub is_journal: bool,
     pub journal_date: Option<NaiveDate>,
     pub block_count: usize,
@@ -193,6 +227,7 @@ impl From<&Page> for PageMeta {
         Self {
             name: page.name.clone(),
             title: page.title.clone(),
+            content_type: page.content_type.clone(),
             is_journal: page.is_journal,
             journal_date: page.journal_date,
             block_count: page.blocks.len(),

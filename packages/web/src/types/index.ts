@@ -18,7 +18,10 @@ export interface Page {
   rootBlocks: string[]
   blocks: Record<string, Block>
   properties: Record<string, string>
+  /** Content type ID (e.g., "page", "journal", "meeting") */
+  contentType: string
   isJournal: boolean
+  /** Journal date (for journals) or sheet date (for saveByDate content types) */
   journalDate: string | null
   createdAt: string
   modifiedAt: string
@@ -30,7 +33,10 @@ export interface Page {
 export interface PageMeta {
   name: string
   title: string
+  /** Content type ID (e.g., "page", "journal", "meeting") */
+  contentType: string
   isJournal: boolean
+  /** Journal date (for journals) or sheet date (for saveByDate content types) */
   journalDate: string | null
   blockCount: number
   createdAt: string

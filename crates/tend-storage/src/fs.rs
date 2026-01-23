@@ -138,6 +138,9 @@ impl FileManager {
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
 
+        // Set content type
+        page.content_type = "page".to_string();
+
         // Get file metadata for timestamps
         let metadata = tokio::fs::metadata(&path).await?;
         if let Ok(modified) = metadata.modified() {
@@ -165,6 +168,7 @@ impl FileManager {
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
 
         // Set journal-specific fields
+        page.content_type = "journal".to_string();
         page.is_journal = true;
         page.journal_date = Some(date);
         page.title = date.format("%A, %B %-d, %Y").to_string();
@@ -373,6 +377,9 @@ impl FileManager {
         let content = tokio::fs::read_to_string(&path).await?;
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
+
+        // Set content type
+        page.content_type = content_type.id.clone();
 
         // Set journal_date for saveByDate content types (used for building URLs)
         if content_type.save_by_date {
