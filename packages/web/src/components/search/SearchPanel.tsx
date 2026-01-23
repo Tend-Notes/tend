@@ -6,7 +6,7 @@ import * as api from '../../lib/api'
 import type { SearchResult } from '../../types'
 import type { SearchStatus } from '../../lib/api'
 
-export function SearchPanel() {
+function SearchPanel() {
   const { searchOpen, closeSearch } = useUIStore()
   const { navigateToPage, navigateToJournal } = usePageStore()
   const [query, setQuery] = useState('')
@@ -174,3 +174,5 @@ export function SearchPanel() {
     </div>
   )
 }
+
+export default SearchPanel

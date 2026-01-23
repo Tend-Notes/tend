@@ -1,14 +1,25 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
-import { SidebarGraph } from './SidebarGraph'
-import { SidebarHistory } from './SidebarHistory'
 import { SidebarOptions } from './SidebarOptions'
 import { SidebarTags } from './SidebarTags'
 import { SidebarTodos } from './SidebarTodos'
+
+// Lazy load heavy sidebar panels
+const SidebarGraph = lazy(() => import('./SidebarGraph'))
+const SidebarHistory = lazy(() => import('./SidebarHistory'))
+
+// Loading fallback for lazy-loaded sidebar panels
+function SidebarLoading() {
+  return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="text-sm text-base-04">Loading...</div>
+    </div>
+  )
+}
 
 // Re-export the type for backwards compatibility
 export type { SidebarMode }
@@ -78,16 +89,20 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
     switch (mode) {
       case 'history':
         return (
-          <SidebarHistory
-            onBack={() => onModeChange('navigation')}
-            pageName={currentPageName}
-            isJournal={isCurrentJournal}
-          />
+          <Suspense fallback={<SidebarLoading />}>
+            <SidebarHistory
+              onBack={() => onModeChange('navigation')}
+              pageName={currentPageName}
+              isJournal={isCurrentJournal}
+            />
+          </Suspense>
         )
 
       case 'graph':
         return (
-          <SidebarGraph onBack={() => onModeChange('navigation')} />
+          <Suspense fallback={<SidebarLoading />}>
+            <SidebarGraph onBack={() => onModeChange('navigation')} />
+          </Suspense>
         )
 
       case 'options':

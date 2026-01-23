@@ -25,7 +25,7 @@ function pageNameToFilePath(pageName: string, isJournal: boolean): string {
   return `pages/${pageName}.md`
 }
 
-export function SidebarHistory({ onBack, pageName, isJournal }: SidebarHistoryProps) {
+function SidebarHistory({ onBack, pageName, isJournal }: SidebarHistoryProps) {
   const [commits, setCommits] = useState<CommitInfo[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [selectedCommit, setSelectedCommit] = useState<string | null>(null)
@@ -311,3 +311,5 @@ function formatRelativeTime(timestamp: string): string {
 
   return date.toLocaleDateString()
 }
+
+export default SidebarHistory

@@ -30,7 +30,7 @@ interface SimLink extends SimulationLinkDatum<SimNode> {
   weight: number
 }
 
-export function SidebarGraph({ onBack }: SidebarGraphProps) {
+function SidebarGraph({ onBack }: SidebarGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const gRef = useRef<SVGGElement>(null)
@@ -457,3 +457,5 @@ function GraphHeader({ onBack }: { onBack: () => void }) {
     </div>
   )
 }
+
+export default SidebarGraph

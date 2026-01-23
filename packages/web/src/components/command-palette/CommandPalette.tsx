@@ -37,7 +37,7 @@ function CommandItem({
   )
 }
 
-export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
+function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [search, setSearch] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [gitStatus, setGitStatus] = useState<string | null>(null)
@@ -553,3 +553,5 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     </Command.Dialog>
   )
 }
+
+export default CommandPalette

@@ -33,7 +33,7 @@ const shortcuts = [
   ]},
 ]
 
-export function KeyboardHelp({ open, onClose }: KeyboardHelpProps) {
+function KeyboardHelp({ open, onClose }: KeyboardHelpProps) {
   if (!open) return null
 
   return (
@@ -97,3 +97,5 @@ export function KeyboardHelp({ open, onClose }: KeyboardHelpProps) {
     </div>
   )
 }
+
+export default KeyboardHelp

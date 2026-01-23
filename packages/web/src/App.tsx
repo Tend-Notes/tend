@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Sidebar } from './components/sidebar/Sidebar'
 import { MainContent } from './components/layout/MainContent'
-import { CommandPalette } from './components/command-palette/CommandPalette'
-import { SearchPanel } from './components/search/SearchPanel'
-import { KeyboardHelp } from './components/ui/KeyboardHelp'
 import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
 import { usePageStore } from './stores/pageStore'
+
+// Lazy load heavy/rarely-used components to reduce initial bundle size
+const CommandPalette = lazy(() => import('./components/command-palette/CommandPalette'))
+const SearchPanel = lazy(() => import('./components/search/SearchPanel'))
+const KeyboardHelp = lazy(() => import('./components/ui/KeyboardHelp'))
 import { useUIStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
@@ -147,20 +149,23 @@ function App() {
       {/* Main content area */}
       <MainContent />
 
-      {/* Command palette */}
-      <CommandPalette
-        open={commandPaletteOpen}
-        onOpenChange={(open) => open ? openCommandPalette() : closeCommandPalette()}
-      />
+      {/* Lazy-loaded overlays wrapped in Suspense */}
+      <Suspense fallback={null}>
+        {/* Command palette */}
+        <CommandPalette
+          open={commandPaletteOpen}
+          onOpenChange={(open) => open ? openCommandPalette() : closeCommandPalette()}
+        />
 
-      {/* Search panel */}
-      <SearchPanel />
+        {/* Search panel */}
+        <SearchPanel />
 
-      {/* Keyboard help overlay */}
-      <KeyboardHelp
-        open={keyboardHelpOpen}
-        onClose={() => setKeyboardHelpOpen(false)}
-      />
+        {/* Keyboard help overlay */}
+        <KeyboardHelp
+          open={keyboardHelpOpen}
+          onClose={() => setKeyboardHelpOpen(false)}
+        />
+      </Suspense>
 
       {/* Draft recovery dialog */}
       <DraftRecoveryDialog />
