@@ -2,21 +2,22 @@
 // Seed: Block content component (CodeMirror-based)
 //
 // Handles text editing within a single block using CodeMirror.
-// Provides markdown formatting with delimiter hiding.
+// Pure text editing - no formatting or decorations.
 //
 // Seed is responsible for:
 // - Text input and editing via CodeMirror
-// - Markdown formatting (bold, italic, strikethrough, highlight, code)
 // - Cursor position tracking
 // - Detecting boundary events (cursor at start/end) and delegating to Plots
+//
+// Formatting, syntax highlighting, and decorations are handled by Actions,
+// which passes extensions to Seed via the extensions prop.
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
-import { EditorState, Prec, Extension } from '@codemirror/state'
+import { EditorState, Prec } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Block } from '../../../types'
-import { markdownExtension } from '../extensions/markdown'
-import { hideDelimiters } from '../extensions/hideDelimiters'
+import { useActions } from './Actions'
 
 // Placeholder for Actions layer - will handle formatting commands, decorations, etc.
 export interface SeedActions {
@@ -59,7 +60,6 @@ interface SeedProps {
   onFocus?: () => void
   onBlur?: () => void
   readonly?: boolean
-  extensions?: Extension[]
 }
 
 /**
@@ -102,13 +102,15 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       onFocus,
       onBlur,
       readonly = false,
-      extensions: additionalExtensions = [],
     },
     ref
   ) => {
     const containerRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
     const contentRef = useRef(block.content)
+
+    // Get formatting extensions from Actions
+    const actionExtensions = useActions()
 
     // Track external updates to avoid feedback loops
     const isExternalUpdate = useRef(false)
@@ -365,11 +367,9 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           createUpdateListener(),
           createEventHandlers(),
           baseTheme,
-          markdownExtension(),
-          hideDelimiters(),
           EditorView.lineWrapping,
           EditorView.editable.of(!readonly),
-          ...additionalExtensions,
+          ...actionExtensions,
         ],
       })
 
