@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::NaiveDate;
+use secrecy::{ExposeSecret, SecretString};
 use tend_core::parser::{is_journal_filename, parse_journal_filename, parse_markdown};
 use tend_core::serializer::serialize_page;
 use tend_core::{ContentType, Page, PageMeta};
@@ -26,8 +27,8 @@ pub struct EncryptedFileManager {
     /// Root path of the garden
     root: PathBuf,
 
-    /// Passphrase for encryption/decryption (held in memory)
-    passphrase: String,
+    /// Passphrase for encryption/decryption (held in memory with zeroization on drop)
+    passphrase: SecretString,
 
     /// Lock for write operations
     write_lock: Arc<RwLock<()>>,
@@ -49,7 +50,7 @@ impl EncryptedFileManager {
 
         Ok(Self {
             root,
-            passphrase,
+            passphrase: SecretString::from(passphrase),
             write_lock: Arc::new(RwLock::new(())),
             pending_writes: Arc::new(RwLock::new(HashSet::new())),
         })
@@ -177,7 +178,7 @@ impl EncryptedFileManager {
         }
 
         let encrypted = tokio::fs::read(&path).await?;
-        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
+        let content = decrypt(&encrypted, self.passphrase.expose_secret()).map_err(|e| match e {
             EncryptionError::WrongPassphrase => {
                 StorageError::Other("Wrong passphrase".to_string())
             }
@@ -209,7 +210,7 @@ impl EncryptedFileManager {
         }
 
         let encrypted = tokio::fs::read(&path).await?;
-        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
+        let content = decrypt(&encrypted, self.passphrase.expose_secret()).map_err(|e| match e {
             EncryptionError::WrongPassphrase => {
                 StorageError::Other("Wrong passphrase".to_string())
             }
@@ -256,7 +257,7 @@ impl EncryptedFileManager {
         let _guard = self.write_lock.read().await;
 
         let content = serialize_page(page);
-        let encrypted = encrypt(&content, &self.passphrase)
+        let encrypted = encrypt(&content, self.passphrase.expose_secret())
             .map_err(|e| StorageError::Other(format!("Encryption failed: {}", e)))?;
 
         let tmp_path = path.with_extension("tmp");
@@ -420,13 +421,18 @@ impl EncryptedFileManager {
         }
 
         let encrypted = tokio::fs::read(&path).await?;
-        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
+        let content = decrypt(&encrypted, self.passphrase.expose_secret()).map_err(|e| match e {
             EncryptionError::WrongPassphrase => StorageError::Other("Wrong passphrase".to_string()),
             _ => StorageError::Other(format!("Decryption failed: {}", e)),
         })?;
 
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
+
+        // Set journal_date for saveByDate content types (used for building URLs)
+        if content_type.save_by_date {
+            page.journal_date = date;
+        }
 
         let metadata = tokio::fs::metadata(&path).await?;
         if let Ok(modified) = metadata.modified() {

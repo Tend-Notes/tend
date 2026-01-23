@@ -468,6 +468,35 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       return () => container.removeEventListener('seed-focus', handleSeedFocus)
     }, [])
 
+    // Handle insert text via custom event from Plots
+    useEffect(() => {
+      const container = containerRef.current
+      if (!container) return
+
+      const handleInsertText = (e: Event) => {
+        const detail = (e as CustomEvent).detail
+        const text = detail?.text
+        const view = viewRef.current
+
+        if (!view || !text) return
+
+        // Insert text at current cursor position
+        const pos = view.state.selection.main.head
+        view.dispatch({
+          changes: { from: pos, insert: text },
+          selection: { anchor: pos + text.length },
+        })
+
+        // Notify onChange
+        const newContent = view.state.doc.toString()
+        contentRef.current = newContent
+        onChangeRef.current(newContent)
+      }
+
+      container.addEventListener('seed-insert-text', handleInsertText)
+      return () => container.removeEventListener('seed-insert-text', handleInsertText)
+    }, [])
+
 
     return (
       <>

@@ -26,6 +26,12 @@ interface UIState {
   /** Callback to invoke when a sheet is created (e.g., to insert a link) */
   onSheetCreated: ((link: string) => void) | null
 
+  // Editor integration
+  /** Callback to insert text at the current cursor position in the editor */
+  insertTextAtCursor: ((text: string) => void) | null
+  /** UUID of the last focused block (persists when focus leaves editor) */
+  lastFocusedBlockUuid: string | null
+
   // Theme
   theme: string
 
@@ -43,6 +49,8 @@ interface UIState {
   openCommandPaletteForContentType: (contentType: ContentType, onCreated?: (link: string) => void) => void
   closeCommandPalette: () => void
   clearPendingContentType: () => void
+  setInsertTextAtCursor: (fn: ((text: string) => void) | null) => void
+  setLastFocusedBlockUuid: (uuid: string | null) => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -94,6 +102,12 @@ export const useUIStore = create<UIState>()(
         set({ commandPaletteOpen: true, pendingContentType: contentType, onSheetCreated: onCreated || null }),
       closeCommandPalette: () => set({ commandPaletteOpen: false, pendingContentType: null, onSheetCreated: null }),
       clearPendingContentType: () => set({ pendingContentType: null }),
+
+      // Editor integration
+      insertTextAtCursor: null as ((text: string) => void) | null,
+      setInsertTextAtCursor: (fn) => set({ insertTextAtCursor: fn }),
+      lastFocusedBlockUuid: null as string | null,
+      setLastFocusedBlockUuid: (uuid) => set({ lastFocusedBlockUuid: uuid }),
     }),
     {
       name: 'tend-ui',

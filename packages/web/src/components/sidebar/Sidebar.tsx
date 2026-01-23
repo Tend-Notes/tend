@@ -3,8 +3,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { sheets } from '../../lib/api'
-import type { PageMeta } from '../../types'
 import { SidebarGraph } from './SidebarGraph'
 import { SidebarHistory } from './SidebarHistory'
 import { SidebarOptions } from './SidebarOptions'
@@ -24,37 +22,13 @@ interface SidebarProps {
 }
 
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
-  const { pages, journals, currentPageName, navigateToPage, navigateToJournal, loadTodaysJournal } =
+  const { pages, journals, customSheets, currentPageName, navigateToPage, navigateToJournal, loadTodaysJournal } =
     usePageStore()
   const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
   const { contentTypes } = useSettingsStore()
 
   // Custom content types (excluding built-in page and journal)
   const customContentTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')
-
-  // Sheets for custom content types
-  const [customSheets, setCustomSheets] = useState<Record<string, PageMeta[]>>({})
-
-  // Load sheets for custom content types
-  useEffect(() => {
-    const loadCustomSheets = async () => {
-      const sheetsMap: Record<string, PageMeta[]> = {}
-      for (const ct of customContentTypes) {
-        try {
-          const ctSheets = await sheets.list(ct.id)
-          sheetsMap[ct.id] = ctSheets
-        } catch (err) {
-          console.error(`Failed to load sheets for ${ct.id}:`, err)
-          sheetsMap[ct.id] = []
-        }
-      }
-      setCustomSheets(sheetsMap)
-    }
-
-    if (customContentTypes.length > 0) {
-      loadCustomSheets()
-    }
-  }, [customContentTypes.length]) // Re-fetch when content types change
 
   // Visual width during drag (can exceed bounds for bounceback effect)
   const [visualWidth, setVisualWidth] = useState(sidebarWidth)
@@ -165,7 +139,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                     Journals
                   </h2>
                   <ul>
-                    {journals.slice(0, 7).map((journal) => (
+                    {journals.slice(0, 10).map((journal) => (
                       <li key={journal.name}>
                         <button
                           onClick={() => navigateToJournal(journal.journalDate!)}
@@ -183,30 +157,44 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 </div>
               )}
 
-              {/* Pages */}
-              {pages.length > 0 && (
-                <div className="mb-4">
-                  <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
-                    Pages
-                  </h2>
-                  <ul>
-                    {pages.map((page) => (
-                      <li key={page.name}>
-                        <button
-                          onClick={() => navigateToPage(page.name)}
-                          className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                            currentPageName === page.name
-                              ? 'text-base-06'
-                              : 'text-base-04 hover:text-base-05'
-                          }`}
-                        >
-                          {page.title}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+              {/* Pages - filter out pages that belong to custom content type directories */}
+              {(() => {
+                // Build set of custom content type directories to filter out (case-insensitive)
+                const contentTypeDirs = new Set(customContentTypes.map(ct => ct.directory.toLowerCase()))
+                const filteredPages = pages.filter(page => {
+                  // Exclude pages whose names start with a content type directory
+                  const nameLower = page.name.toLowerCase()
+                  for (const dir of contentTypeDirs) {
+                    if (nameLower.startsWith(dir + '/')) {
+                      return false
+                    }
+                  }
+                  return true
+                })
+                return filteredPages.length > 0 && (
+                  <div className="mb-4">
+                    <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
+                      Pages
+                    </h2>
+                    <ul>
+                      {filteredPages.slice(0, 10).map((page) => (
+                        <li key={page.name}>
+                          <button
+                            onClick={() => navigateToPage(page.name)}
+                            className={`w-full px-2 py-1 text-left text-sm transition-colors ${
+                              currentPageName === page.name
+                                ? 'text-base-06'
+                                : 'text-base-04 hover:text-base-05'
+                            }`}
+                          >
+                            {page.title}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )
+              })()}
 
               {/* Custom content types */}
               {customContentTypes.map((ct) => {
@@ -218,20 +206,26 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                       {ct.name}
                     </h2>
                     <ul>
-                      {ctSheets.slice(0, 7).map((sheet) => (
-                        <li key={sheet.name}>
-                          <button
-                            onClick={() => navigateToPage(sheet.name)}
-                            className={`w-full px-2 py-1 text-left text-sm transition-colors ${
-                              currentPageName === sheet.name
-                                ? 'text-base-06'
-                                : 'text-base-04 hover:text-base-05'
-                            }`}
-                          >
-                            {sheet.title}
-                          </button>
-                        </li>
-                      ))}
+                      {ctSheets.slice(0, 10).map((sheet) => {
+                        // Build full path: directory/date/name for saveByDate, directory/name otherwise
+                        const fullPath = ct.saveByDate && sheet.journalDate
+                          ? `${ct.directory}/${sheet.journalDate}/${sheet.name}`
+                          : `${ct.directory}/${sheet.name}`
+                        return (
+                          <li key={fullPath}>
+                            <button
+                              onClick={() => navigateToPage(fullPath)}
+                              className={`w-full px-2 py-1 text-left text-sm transition-colors ${
+                                currentPageName === fullPath
+                                  ? 'text-base-06'
+                                  : 'text-base-04 hover:text-base-05'
+                              }`}
+                            >
+                              {sheet.title}
+                            </button>
+                          </li>
+                        )
+                      })}
                     </ul>
                   </div>
                 )

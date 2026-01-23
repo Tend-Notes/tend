@@ -3717,6 +3717,7 @@ dependencies = [
  "directories",
  "futures-util",
  "regex",
+ "scopeguard",
  "serde",
  "serde_json",
  "tend-core",

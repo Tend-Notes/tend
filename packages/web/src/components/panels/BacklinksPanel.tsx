@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Backlinks panel - shows pages/blocks that link to the current page
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import type { BacklinkRef } from '../../types'
 import * as api from '../../lib/api'
 import { usePageStore } from '../../stores/pageStore'
@@ -16,24 +16,34 @@ export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const { navigateToPage, navigateToJournal } = usePageStore()
 
-  const fetchBacklinks = useCallback(async () => {
+  useEffect(() => {
     if (!pageName) return
 
+    let cancelled = false
     setIsLoading(true)
-    try {
-      const refs = await api.pages.getBacklinks(pageName)
-      setBacklinks(refs)
-    } catch (err) {
-      console.error('Failed to fetch backlinks:', err)
-      setBacklinks([])
-    } finally {
-      setIsLoading(false)
+
+    api.pages.getBacklinks(pageName)
+      .then((refs) => {
+        if (!cancelled) {
+          setBacklinks(refs)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('Failed to fetch backlinks:', err)
+          setBacklinks([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
     }
   }, [pageName])
-
-  useEffect(() => {
-    fetchBacklinks()
-  }, [fetchBacklinks])
 
   // Group backlinks by page
   const groupedBacklinks = backlinks.reduce(

@@ -47,8 +47,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [sheetName, setSheetName] = useState('')
   const [useToday, setUseToday] = useState(true)
   const [sheetDate, setSheetDate] = useState('')
-  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage } = usePageStore()
-  const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated } = useUIStore()
+  const [sheetError, setSheetError] = useState<string | null>(null)
+  const [existingSheets, setExistingSheets] = useState<string[]>([])
+  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles } = usePageStore()
+  const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor } = useUIStore()
   const { contentTypes } = useSettingsStore()
 
   // Custom content types (excluding built-in page and journal)
@@ -66,6 +68,8 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setSheetName('')
       setUseToday(true)
       setSheetDate('')
+      setSheetError(null)
+      setExistingSheets([])
       clearPendingContentType()
     }
   }, [open, clearPendingContentType])
@@ -73,26 +77,51 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // If opened with a pending content type (e.g., from slash command), start creating that sheet
   useEffect(() => {
     if (open && pendingContentType) {
-      setCreatingSheet(pendingContentType)
+      const ct = pendingContentType
+      setCreatingSheet(ct)
       setSheetName('')
       setUseToday(true)
       setSheetDate(new Date().toISOString().split('T')[0])
+      setSheetError(null)
       clearPendingContentType()
+
+      // Load existing sheets for collision detection
+      api.sheets.list(ct.id)
+        .then(sheets => setExistingSheets(sheets.map(s => s.name.toLowerCase())))
+        .catch(() => setExistingSheets([]))
     }
   }, [open, pendingContentType, clearPendingContentType])
 
   // Start creating a sheet - show the name input form
-  const handleStartCreateSheet = useCallback((contentType: ContentType) => {
+  const handleStartCreateSheet = useCallback(async (contentType: ContentType) => {
     setSearch('') // Clear search so the form shows properly
     setCreatingSheet(contentType)
     setSheetName('')
     setUseToday(true)
     setSheetDate(new Date().toISOString().split('T')[0])
+    setSheetError(null)
+
+    // Load existing sheets for collision detection
+    try {
+      const sheets = await api.sheets.list(contentType.id)
+      // Extract just the names (lowercase for case-insensitive comparison)
+      setExistingSheets(sheets.map(s => s.name.toLowerCase()))
+    } catch {
+      // If we can't load sheets, just continue without collision detection
+      setExistingSheets([])
+    }
   }, [])
 
   // Actually create the sheet
   const handleCreateSheet = useCallback(async () => {
     if (!creatingSheet || !sheetName.trim()) return
+
+    // Check for name collision (case-insensitive)
+    const normalizedName = sheetName.trim().toLowerCase()
+    if (existingSheets.includes(normalizedName)) {
+      setSheetError(`A ${creatingSheet.name.toLowerCase()} named "${sheetName.trim()}" already exists`)
+      return
+    }
 
     try {
       const dateOption = creatingSheet.saveByDate
@@ -108,15 +137,20 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       const wikiLink = `[[${linkPath}]]`
 
       // Invoke callback to insert link at cursor position
+      // Use explicit callback if provided, otherwise fall back to global insert
       if (onSheetCreated) {
         onSheetCreated(wikiLink)
+      } else if (insertTextAtCursor) {
+        // Add a space after the wiki-link for continued typing
+        insertTextAtCursor(wikiLink + ' ')
       }
 
       onOpenChange(false)
     } catch (err) {
       console.error(`Failed to create ${creatingSheet.name}:`, err)
+      setSheetError(err instanceof Error ? err.message : `Failed to create ${creatingSheet.name}`)
     }
-  }, [creatingSheet, sheetName, useToday, sheetDate, onOpenChange, onSheetCreated])
+  }, [creatingSheet, sheetName, useToday, sheetDate, onOpenChange, onSheetCreated, existingSheets, insertTextAtCursor])
 
   // Git: Commit now (auto-generated message)
   const handleGitCommitNow = useCallback(async () => {
@@ -265,7 +299,10 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             <input
               type="text"
               value={sheetName}
-              onChange={(e) => setSheetName(e.target.value)}
+              onChange={(e) => {
+                setSheetName(e.target.value)
+                setSheetError(null) // Clear error when typing
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && sheetName.trim()) {
                   e.preventDefault()
@@ -275,9 +312,14 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 }
               }}
               placeholder={`Enter ${creatingSheet.name.toLowerCase()} name...`}
-              className="w-full px-3 py-2 text-sm bg-base-00 border border-base-02 rounded focus:outline-none focus:border-base-04"
+              className={`w-full px-3 py-2 text-sm bg-base-00 border rounded focus:outline-none ${
+                sheetError ? 'border-base-08 focus:border-base-08' : 'border-base-02 focus:border-base-04'
+              }`}
               autoFocus
             />
+            {sheetError && (
+              <div className="text-xs text-base-08">{sheetError}</div>
+            )}
             {/* Date options for saveByDate content types */}
             {creatingSheet.saveByDate && (
               <div className="space-y-2">
@@ -399,6 +441,15 @@ export function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   )}
                 </CommandItem>
               )}
+              <CommandItem
+                onSelect={() => {
+                  clearRecentFiles()
+                  onOpenChange(false)
+                }}
+                value="purge recent file list clear"
+              >
+                Purge recent file list
+              </CommandItem>
             </Command.Group>
 
             {/* Git */}

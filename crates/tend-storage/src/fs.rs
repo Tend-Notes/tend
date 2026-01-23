@@ -374,6 +374,11 @@ impl FileManager {
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
 
+        // Set journal_date for saveByDate content types (used for building URLs)
+        if content_type.save_by_date {
+            page.journal_date = date;
+        }
+
         // Get file metadata for timestamps
         let metadata = tokio::fs::metadata(&path).await?;
         if let Ok(modified) = metadata.modified() {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 //! WebSocket handler for real-time notifications
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use axum::{
@@ -8,6 +9,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::StatusCode,
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -15,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tracing::{debug, warn};
 
-use crate::state::AppState;
+use crate::state::{AppState, MAX_WS_CONNECTIONS};
 
 /// Events that can be broadcast to connected clients
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,12 +69,32 @@ pub fn create_event_channel() -> (EventSender, broadcast::Receiver<WsEvent>) {
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
-) -> impl IntoResponse {
-    ws.on_upgrade(|socket| handle_socket(socket, state))
+) -> Result<impl IntoResponse, StatusCode> {
+    // Check connection limit before upgrading
+    let current = state.ws_connection_count.load(Ordering::Relaxed);
+    if current >= MAX_WS_CONNECTIONS {
+        warn!(
+            "WebSocket connection limit reached ({}/{})",
+            current, MAX_WS_CONNECTIONS
+        );
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    Ok(ws.on_upgrade(|socket| handle_socket(socket, state)))
 }
 
 /// Handle a WebSocket connection
 async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+    // Increment connection count
+    let count = state.ws_connection_count.fetch_add(1, Ordering::Relaxed) + 1;
+    debug!("WebSocket client connected ({} active)", count);
+
+    // Ensure we decrement on exit
+    let _guard = scopeguard::guard(Arc::clone(&state), |s| {
+        let remaining = s.ws_connection_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        debug!("WebSocket client disconnected ({} active)", remaining);
+    });
+
     let (mut sender, mut receiver) = socket.split();
 
     // Subscribe to events
@@ -83,8 +105,6 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     if sender.send(Message::Text(connected_msg.into())).await.is_err() {
         return;
     }
-
-    debug!("WebSocket client connected");
 
     // Spawn task to forward broadcast events to this client
     let mut send_task = tokio::spawn(async move {
@@ -130,6 +150,5 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
             send_task.abort();
         }
     }
-
-    debug!("WebSocket client disconnected");
+    // _guard drop will log disconnect and decrement counter
 }

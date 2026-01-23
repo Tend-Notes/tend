@@ -9,6 +9,7 @@ import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 import { useActivityLogStore } from './activityLogStore'
 import { useSyncStatusStore } from './syncStatusStore'
+import { useSettingsStore } from './settingsStore'
 
 interface PageState {
   // Current page/journal being viewed
@@ -18,6 +19,10 @@ interface PageState {
   // Page list for sidebar
   pages: PageMeta[]
   journals: PageMeta[]
+  // Sheets for custom content types (keyed by content type ID)
+  customSheets: Record<string, PageMeta[]>
+  // When true, sidebar lists have been purged and auto-reload is disabled
+  recentFilesPurged: boolean
 
   // Loading states
   isLoading: boolean
@@ -42,6 +47,7 @@ interface PageState {
   // Actions
   loadPages: () => Promise<void>
   loadJournals: () => Promise<void>
+  loadCustomSheets: () => Promise<void>
   loadTodaysJournal: () => Promise<void>
   navigateToPage: (name: string, pushHistory?: boolean) => Promise<void>
   navigateToJournal: (date: string, pushHistory?: boolean) => Promise<void>
@@ -58,23 +64,52 @@ interface PageState {
   dismissConflict: () => void
   // Flush any pending saves immediately (called before navigation)
   flushPendingSave: () => Promise<void>
+  // Clear the pages and journals lists (for "purge recent file list")
+  clearRecentFiles: () => void
 }
 
 // Helper to build URL path for content
 // Encodes each path segment separately to preserve directory structure
-function buildUrlPath(type: 'page' | 'journal', name: string): string {
+//
+// URL structure:
+// - Journals: /journal/YYYY-MM-DD
+// - Pages: /page/name
+// - Custom content types: /content-type-dir/name (e.g., /person/John%20Smith)
+function buildUrlPath(type: 'page' | 'journal' | 'content-type', name: string): string {
   const encodedSegments = name.split('/').map(segment => encodeURIComponent(segment))
+  if (type === 'content-type') {
+    // Content types go directly at root: /person/John%20Smith
+    return `/${encodedSegments.join('/')}`
+  }
   return `/${type}/${encodedSegments.join('/')}`
 }
 
 // Helper to parse URL path into type and name
 // Decodes each path segment separately to preserve directory structure
-function parseUrlPath(path: string): { type: 'page' | 'journal' | null; name: string | null } {
+//
+// Returns:
+// - { type: 'journal', name: 'YYYY-MM-DD' } for /journal/YYYY-MM-DD
+// - { type: 'page', name: 'pagename' } for /page/pagename
+// - { type: 'content-type', name: 'person/John Smith' } for /person/John%20Smith
+function parseUrlPath(path: string): { type: 'page' | 'journal' | 'content-type' | null; name: string | null } {
+  // Check for journal or page prefix first
   const match = path.match(/^\/(page|journal)\/(.+)$/)
   if (match) {
     const decodedSegments = match[2].split('/').map(segment => decodeURIComponent(segment))
     return { type: match[1] as 'page' | 'journal', name: decodedSegments.join('/') }
   }
+
+  // Check for content type paths (e.g., /person/John%20Smith or /meeting/2026-01-23/Name)
+  // These are at root level with format: /directory/... (remaining path)
+  const contentTypeMatch = path.match(/^\/([^/]+)\/(.+)$/)
+  if (contentTypeMatch) {
+    const directory = decodeURIComponent(contentTypeMatch[1])
+    // Decode each segment separately to handle paths like /meeting/2026-01-23/Name%20Here
+    const remainingSegments = contentTypeMatch[2].split('/').map(segment => decodeURIComponent(segment))
+    // Return the full path as name (directory/remaining/segments)
+    return { type: 'content-type', name: `${directory}/${remainingSegments.join('/')}` }
+  }
+
   return { type: null, name: null }
 }
 
@@ -100,6 +135,8 @@ export const usePageStore = create<PageState>()(
     currentPageName: null,
     pages: [],
     journals: [],
+    customSheets: {},
+    recentFilesPurged: false,
     isLoading: false,
     error: null,
     hasUnsavedChanges: false,
@@ -107,6 +144,9 @@ export const usePageStore = create<PageState>()(
     pendingConflict: null,
 
     loadPages: async () => {
+      // Don't reload if user has purged the list
+      if (get().recentFilesPurged) return
+
       try {
         const pages = await api.pages.list()
         set((state) => {
@@ -120,6 +160,9 @@ export const usePageStore = create<PageState>()(
     },
 
     loadJournals: async () => {
+      // Don't reload if user has purged the list
+      if (get().recentFilesPurged) return
+
       try {
         const journals = await api.journals.list()
         set((state) => {
@@ -130,6 +173,29 @@ export const usePageStore = create<PageState>()(
           state.error = e instanceof Error ? e.message : 'Failed to load journals'
         })
       }
+    },
+
+    loadCustomSheets: async () => {
+      // Don't reload if user has purged the list
+      if (get().recentFilesPurged) return
+
+      const contentTypes = useSettingsStore.getState().contentTypes
+      const customTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')
+
+      const sheetsMap: Record<string, PageMeta[]> = {}
+      for (const ct of customTypes) {
+        try {
+          const ctSheets = await api.sheets.list(ct.id)
+          sheetsMap[ct.id] = ctSheets
+        } catch {
+          // Silently fail for content types not yet saved to backend
+          sheetsMap[ct.id] = []
+        }
+      }
+
+      set((state) => {
+        state.customSheets = sheetsMap
+      })
     },
 
     loadTodaysJournal: async () => {
@@ -194,8 +260,40 @@ export const usePageStore = create<PageState>()(
         state.pendingDraftRecovery = null
       })
 
+      // Check if this is a content type path (e.g., "person/John Smith" or "meeting/2026-01-23/Name")
+      // by looking for a matching content type directory
+      const contentTypes = useSettingsStore.getState().contentTypes
+      const slashIndex = name.indexOf('/')
+      let contentType = null
+      let sheetName = name
+      let sheetDate: string | undefined
+
+      if (slashIndex > 0) {
+        const possibleDir = name.slice(0, slashIndex)
+        contentType = contentTypes.find(ct => ct.directory === possibleDir && ct.id !== 'page' && ct.id !== 'journal')
+        if (contentType) {
+          const remainder = name.slice(slashIndex + 1)
+          // For saveByDate content types, the path may be: directory/YYYY-MM-DD/name
+          if (contentType.saveByDate) {
+            const dateMatch = remainder.match(/^(\d{4}-\d{2}-\d{2})\/(.+)$/)
+            if (dateMatch) {
+              sheetDate = dateMatch[1]
+              sheetName = dateMatch[2]
+            } else {
+              // No date in path - use remainder as name
+              sheetName = remainder
+            }
+          } else {
+            sheetName = remainder
+          }
+        }
+      }
+
       try {
-        const page = await api.pages.get(name)
+        // Use sheets API for content type paths, pages API for regular pages
+        const page = contentType
+          ? await api.sheets.get(contentType.id, sheetName, sheetDate)
+          : await api.pages.get(name)
 
         // Check for stale draft
         const draft = await draftStore.getDraft(page.name)
@@ -226,14 +324,19 @@ export const usePageStore = create<PageState>()(
 
         // Update browser history
         if (pushHistory) {
-          const url = buildUrlPath('page', name)
-          window.history.pushState({ type: 'page', name }, '', url)
+          // Use content-type URL path for custom content types, page path for regular pages
+          const urlType = contentType ? 'content-type' : 'page'
+          const url = buildUrlPath(urlType, name)
+          window.history.pushState({ type: urlType, name }, '', url)
         }
       } catch (e) {
         // If page doesn't exist (404), create it
         if (e instanceof Error && e.message.includes('404')) {
           try {
-            const newPage = await api.pages.create(name)
+            // Create sheet or page based on content type
+            const newPage = contentType
+              ? await api.sheets.create(contentType.id, sheetName, { date: sheetDate })
+              : await api.pages.create(name)
             set((state) => {
               state.currentPage = newPage
               state.currentPageName = name
@@ -241,11 +344,14 @@ export const usePageStore = create<PageState>()(
             })
             // Update browser history
             if (pushHistory) {
-              const url = buildUrlPath('page', name)
-              window.history.pushState({ type: 'page', name }, '', url)
+              const urlType = contentType ? 'content-type' : 'page'
+              const url = buildUrlPath(urlType, name)
+              window.history.pushState({ type: urlType, name }, '', url)
             }
-            // Refresh pages list
-            get().loadPages()
+            // Refresh pages list (only for actual pages, not sheets)
+            if (!contentType) {
+              get().loadPages()
+            }
             return
           } catch (createErr) {
             set((state) => {
@@ -322,6 +428,8 @@ export const usePageStore = create<PageState>()(
         if (type === 'journal') {
           await get().navigateToJournal(name, false)
         } else {
+          // Both 'page' and 'content-type' use navigateToPage
+          // navigateToPage will detect content type paths and route appropriately
           await get().navigateToPage(name, false)
         }
       } else {
@@ -354,8 +462,10 @@ export const usePageStore = create<PageState>()(
             state.currentPage = null
             state.currentPageName = null
           }
+          // Remove from pages list immediately for responsive UI
+          state.pages = state.pages.filter(p => p.name !== name)
         })
-        // Refresh pages list
+        // Also refresh from server to ensure consistency
         get().loadPages()
       } catch (e) {
         set((state) => {
@@ -628,6 +738,15 @@ export const usePageStore = create<PageState>()(
           console.warn('Failed to flush pending save:', e)
         }
       }
+    },
+
+    clearRecentFiles: () => {
+      set((state) => {
+        state.pages = []
+        state.journals = []
+        state.customSheets = {}
+        state.recentFilesPurged = true
+      })
     },
   }))
 )

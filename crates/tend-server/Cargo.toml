@@ -47,3 +47,6 @@ regex = { workspace = true }
 
 # URL encoding for Logseq import
 urlencoding = "2.1"
+
+# Scope guard for cleanup
+scopeguard = "1.2"

@@ -10,6 +10,7 @@ import { useMemo, useEffect, useCallback, useState, useRef } from 'react'
 import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
+import { useUIStore } from '../../../stores/uiStore'
 import { Seed, SeedBoundaryEvent } from './Seed'
 import { useBlockFlip } from './useBlockFlip'
 import { v4 as uuidv4 } from 'uuid'
@@ -725,6 +726,50 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       setSelectedUuid(flatBlockOrder[0])
     }
   }, [selectedUuid, flatBlockOrder])
+
+  // Track last focused block for inserting text when editor isn't focused
+  const setLastFocusedBlockUuid = useUIStore((state) => state.setLastFocusedBlockUuid)
+
+  // Update last focused block when selection changes
+  useEffect(() => {
+    if (selectedUuid) {
+      setLastFocusedBlockUuid(selectedUuid)
+    }
+  }, [selectedUuid, setLastFocusedBlockUuid])
+
+  // Register insertTextAtCursor callback with UI store
+  const setInsertTextAtCursor = useUIStore((state) => state.setInsertTextAtCursor)
+  useEffect(() => {
+    const insertText = (text: string) => {
+      // First try to find a currently focused editor
+      const activeEl = document.activeElement
+      let seedEditor = activeEl?.closest('[data-seed-editor]') || document.querySelector('[data-seed-editor]:focus-within')
+
+      // If no editor is focused, use the last focused block
+      if (!seedEditor) {
+        const targetUuid = useUIStore.getState().lastFocusedBlockUuid
+        if (targetUuid) {
+          const blockEl = document.querySelector(`[data-block-id="${targetUuid}"]`)
+          seedEditor = blockEl?.querySelector('[data-seed-editor]') as HTMLElement | null
+        }
+      }
+
+      if (!seedEditor) return
+
+      // Dispatch custom event to insert text
+      const event = new CustomEvent('seed-insert-text', {
+        detail: { text },
+        bubbles: false,
+      })
+      seedEditor.dispatchEvent(event)
+    }
+
+    setInsertTextAtCursor(insertText)
+
+    return () => {
+      setInsertTextAtCursor(null)
+    }
+  }, [setInsertTextAtCursor])
 
   if (rootBlocks.length === 0) {
     return (

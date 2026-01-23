@@ -24,6 +24,7 @@ function App() {
   const closeCommandPalette = useUIStore((state) => state.closeCommandPalette)
   const loadPages = usePageStore((state) => state.loadPages)
   const loadJournals = usePageStore((state) => state.loadJournals)
+  const loadCustomSheets = usePageStore((state) => state.loadCustomSheets)
   const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
@@ -46,11 +47,15 @@ function App() {
     loadJournals()
     initializeFromUrl()
 
-    // Load content types from API
+    // Load content types from API, then load custom sheets
     contentTypesApi.list()
-      .then((types) => setContentTypes(types))
+      .then((types) => {
+        setContentTypes(types)
+        // Load custom sheets after content types are available
+        loadCustomSheets()
+      })
       .catch((err) => console.error('Failed to load content types:', err))
-  }, [loadPages, loadJournals, initializeFromUrl, setContentTypes])
+  }, [loadPages, loadJournals, loadCustomSheets, initializeFromUrl, setContentTypes])
 
   // Handle browser back/forward navigation
   useEffect(() => {

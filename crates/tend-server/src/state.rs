@@ -329,6 +329,9 @@ impl GardenState {
     }
 }
 
+/// Maximum number of concurrent WebSocket connections
+pub const MAX_WS_CONNECTIONS: usize = 100;
+
 /// Shared application state
 pub struct AppState {
     pub config: Config,
@@ -336,6 +339,8 @@ pub struct AppState {
     pub garden: RwLock<GardenState>,
     /// Broadcast channel for WebSocket events
     pub event_sender: EventSender,
+    /// Current WebSocket connection count
+    pub ws_connection_count: std::sync::atomic::AtomicUsize,
 }
 
 impl AppState {
@@ -351,6 +356,7 @@ impl AppState {
             config: config.clone(),
             garden: RwLock::new(garden),
             event_sender,
+            ws_connection_count: std::sync::atomic::AtomicUsize::new(0),
         })
     }
 

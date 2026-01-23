@@ -267,14 +267,29 @@ export function wikilinkStateListener(
 
 /**
  * Build href for a wikilink target
+ * Encodes each path segment separately to preserve directory structure
+ *
+ * URL structure:
+ * - Journals: /journal/YYYY-MM-DD
+ * - Pages: /page/name
+ * - Custom content types: /content-type-dir/name (e.g., /person/John%20Smith)
  */
 function defaultBuildHref(target: string): string {
-  // Check if it's a journal link
+  // Journal links: journals/YYYY-MM-DD -> /journal/YYYY-MM-DD
   if (target.startsWith('journals/')) {
     const date = target.slice('journals/'.length)
     return `/journal/${encodeURIComponent(date)}`
   }
-  // Regular page
+
+  // Check if this is a content type path (has a slash)
+  const slashIndex = target.indexOf('/')
+  if (slashIndex > 0) {
+    // Content type path: person/John Smith -> /person/John%20Smith
+    const encodedSegments = target.split('/').map(segment => encodeURIComponent(segment))
+    return `/${encodedSegments.join('/')}`
+  }
+
+  // Plain page: name -> /page/name
   return `/page/${encodeURIComponent(target)}`
 }
 

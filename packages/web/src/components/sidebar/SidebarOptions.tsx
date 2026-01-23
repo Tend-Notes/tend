@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Sidebar options view - settings and configuration
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { contentTypes as contentTypesApi } from '../../lib/api'
@@ -837,7 +837,12 @@ function ContentTypesSection() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)
+
+  // Keep a ref to always have latest contentTypes for async operations
+  const contentTypesRef = useRef(contentTypes)
+  useEffect(() => {
+    contentTypesRef.current = contentTypes
+  }, [contentTypes])
 
   // Load content types from API on mount
   useEffect(() => {
@@ -855,42 +860,41 @@ function ContentTypesSection() {
     loadContentTypes()
   }, [setContentTypes])
 
-  // Save to API (manual)
+  // Manual save handler - uses ref to always get latest content types
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      await contentTypesApi.update(contentTypes)
-      setDirty(false)
+      await contentTypesApi.update(contentTypesRef.current)
       setError(null)
+      // Close the editing panel after successful save
+      setEditingId(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save content types')
     } finally {
       setSaving(false)
     }
-  }, [contentTypes])
+  }, [])
 
-  // Update handlers that mark dirty
+  // Update handler
   const handleUpdate = useCallback((id: string, updates: Partial<ContentType>) => {
     updateContentType(id, updates)
-    setDirty(true)
   }, [updateContentType])
 
   const handleAddType = useCallback(() => {
+    const newName = 'New Type'
     const newType: ContentType = {
       id: `custom-${Date.now()}`,
-      name: 'New Type',
-      directory: 'custom',
+      name: newName,
+      directory: newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom',
       saveByDate: false,
       template: '',
     }
     addContentType(newType)
     setEditingId(newType.id)
-    setDirty(true)
   }, [addContentType])
 
   const handleRemove = useCallback((id: string) => {
     removeContentType(id)
-    setDirty(true)
   }, [removeContentType])
 
   if (loading) {
@@ -910,7 +914,9 @@ function ContentTypesSection() {
           onEdit={() => setEditingId(editingId === type.id ? null : type.id)}
           onUpdate={(updates) => handleUpdate(type.id, updates)}
           onRemove={() => handleRemove(type.id)}
+          onSave={handleSave}
           isBuiltIn={type.id === 'page' || type.id === 'journal'}
+          isSaving={saving}
         />
       ))}
       <button
@@ -919,17 +925,18 @@ function ContentTypesSection() {
       >
         + Add content type
       </button>
-      {dirty && (
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="w-full py-1.5 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save'}
-        </button>
-      )}
     </div>
   )
+}
+
+// Convert a name to a directory-safe slug (lowercase, hyphenated)
+function nameToDirectory(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with hyphens
+    .replace(/^-+|-+$/g, '')      // Remove leading/trailing hyphens
+    || 'custom'                   // Fallback if empty
 }
 
 // Individual content type row
@@ -939,15 +946,44 @@ function ContentTypeRow({
   onEdit,
   onUpdate,
   onRemove,
+  onSave,
   isBuiltIn,
+  isSaving,
 }: {
   type: ContentType
   isEditing: boolean
   onEdit: () => void
   onUpdate: (updates: Partial<ContentType>) => void
   onRemove: () => void
+  onSave: () => void
   isBuiltIn: boolean
+  isSaving: boolean
 }) {
+  // Track whether the user has manually edited the directory
+  const [directoryManuallyEdited, setDirectoryManuallyEdited] = useState(false)
+
+  // Reset manual edit flag when starting to edit a new type
+  useEffect(() => {
+    if (isEditing) {
+      // If directory matches what we'd auto-generate from name, consider it not manually edited
+      setDirectoryManuallyEdited(type.directory !== nameToDirectory(type.name))
+    }
+  }, [isEditing, type.id])
+
+  const handleNameChange = (newName: string) => {
+    // Update name, and auto-update directory if not manually edited
+    if (!directoryManuallyEdited) {
+      onUpdate({ name: newName, directory: nameToDirectory(newName) })
+    } else {
+      onUpdate({ name: newName })
+    }
+  }
+
+  const handleDirectoryChange = (newDirectory: string) => {
+    setDirectoryManuallyEdited(true)
+    onUpdate({ directory: newDirectory })
+  }
+
   return (
     <div className="border border-base-02 rounded overflow-hidden">
       <button
@@ -971,7 +1007,7 @@ function ContentTypeRow({
                 <input
                   type="text"
                   value={type.name}
-                  onChange={(e) => onUpdate({ name: e.target.value })}
+                  onChange={(e) => handleNameChange(e.target.value)}
                   disabled={isBuiltIn}
                   className="flex-1 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04 disabled:opacity-50"
                 />
@@ -981,7 +1017,7 @@ function ContentTypeRow({
                 <input
                   type="text"
                   value={type.directory}
-                  onChange={(e) => onUpdate({ directory: e.target.value })}
+                  onChange={(e) => handleDirectoryChange(e.target.value)}
                   disabled={isBuiltIn}
                   className="flex-1 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04 disabled:opacity-50"
                 />
@@ -1003,14 +1039,23 @@ function ContentTypeRow({
                   Edit...
                 </button>
               </div>
-              {!isBuiltIn && (
+              <div className="flex items-center gap-2 pt-1">
                 <button
-                  onClick={onRemove}
-                  className="text-xs text-base-08 hover:text-base-09 transition-colors"
+                  onClick={onSave}
+                  disabled={isSaving}
+                  className="px-2 py-1 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
                 >
-                  Remove
+                  {isSaving ? 'Saving...' : 'Save'}
                 </button>
-              )}
+                {!isBuiltIn && (
+                  <button
+                    onClick={onRemove}
+                    className="text-xs text-base-08 hover:text-base-09 transition-colors"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
             </div>
           </motion.div>
         )}
