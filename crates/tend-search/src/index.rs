@@ -46,31 +46,8 @@ impl SearchIndex {
             Index::create_in_dir(index_path, schema)?
         };
 
-        // 50MB writer heap - if this fails due to lock, try to recover
-        let writer = match index.writer(50_000_000) {
-            Ok(w) => w,
-            Err(e) => {
-                // Check if it's a lock error
-                let err_str = e.to_string();
-                if err_str.contains("LockBusy") || err_str.contains("Lockfile") {
-                    // Try to remove the stale lock file and retry
-                    let lock_path = index_path.join(".tantivy-writer.lock");
-                    if lock_path.exists() {
-                        info!("Attempting to remove stale lock file: {}", lock_path.display());
-                        if let Err(remove_err) = std::fs::remove_file(&lock_path) {
-                            debug!("Failed to remove lock file: {}", remove_err);
-                            return Err(e.into());
-                        }
-                        // Retry creating the writer
-                        index.writer(50_000_000)?
-                    } else {
-                        return Err(e.into());
-                    }
-                } else {
-                    return Err(e.into());
-                }
-            }
-        };
+        // 50MB writer heap
+        let writer = index.writer(50_000_000)?;
 
         let reader = index
             .reader_builder()
