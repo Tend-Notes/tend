@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use axum::{routing::get, Router};
 use tend_storage::{FileEvent, SimpleFileWatcher};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn, Level};
@@ -171,18 +171,38 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Build CORS layer based on configuration
+    let cors_layer = if config.cors.allowed_origins.is_empty() {
+        // No origins configured = same-origin only (most restrictive)
+        info!("CORS: same-origin only (no cross-origin requests allowed)");
+        CorsLayer::new()
+    } else if config.cors.allowed_origins.len() == 1 && config.cors.allowed_origins[0] == "*" {
+        // Wildcard = allow all origins (least restrictive, for development/trusted proxies)
+        info!("CORS: allowing all origins (permissive mode)");
+        CorsLayer::permissive()
+    } else {
+        // Specific origins listed
+        use axum::http::HeaderValue;
+        let origins: Vec<HeaderValue> = config
+            .cors
+            .allowed_origins
+            .iter()
+            .filter_map(|o| o.parse().ok())
+            .collect();
+        info!("CORS: allowing specific origins: {:?}", config.cors.allowed_origins);
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods(tower_http::cors::Any)
+            .allow_headers(tower_http::cors::Any)
+    };
+
     // Build router
     let app = Router::new()
         .nest("/api/v1", routes::api_router())
         .route("/ws", get(ws::ws_handler))
         .fallback_service(ServeDir::new(&config.static_dir).append_index_html_on_directories(true))
         .layer(TraceLayer::new_for_http())
-        .layer(
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
+        .layer(cors_layer)
         .with_state(state);
 
     // Start server

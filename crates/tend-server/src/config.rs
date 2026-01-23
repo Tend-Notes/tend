@@ -28,6 +28,31 @@ pub struct Config {
     /// Git backup configuration
     #[serde(default)]
     pub git: GitConfig,
+
+    /// CORS configuration
+    #[serde(default)]
+    pub cors: CorsConfig,
+}
+
+/// CORS configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorsConfig {
+    /// Allowed origins. Empty = same-origin only, ["*"] = allow all, or list specific origins.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+}
+
+impl Default for CorsConfig {
+    fn default() -> Self {
+        Self {
+            // Check env var for development convenience, otherwise same-origin only
+            // TEND_CORS_ORIGINS="*" or TEND_CORS_ORIGINS="http://localhost:5173,http://localhost:3000"
+            allowed_origins: std::env::var("TEND_CORS_ORIGINS")
+                .ok()
+                .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default(),
+        }
+    }
 }
 
 /// Git backup configuration
@@ -145,6 +170,7 @@ impl Default for Config {
             data_dir: default_data_dir(),
             static_dir: default_static_dir(),
             git: GitConfig::default(),
+            cors: CorsConfig::default(),
         }
     }
 }

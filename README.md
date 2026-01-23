@@ -54,9 +54,15 @@ Environment variables:
 |----------|---------|-------------|
 | `TEND_PORT` | `3000` | Port to listen on |
 | `TEND_GARDEN_PATH` | `/data` | Path to garden directory |
+| `TEND_CORS_ORIGINS` | (none) | CORS allowed origins (see below) |
 | `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `GIT_AUTHOR_NAME` | `Tend` | Git commit author name |
 | `GIT_AUTHOR_EMAIL` | `tend@localhost` | Git commit author email |
+
+**CORS Configuration:**
+- Empty/unset: Same-origin only (most secure, recommended for production)
+- `*`: Allow all origins (for development or trusted reverse proxy setups)
+- Comma-separated list: Allow specific origins (e.g., `https://notes.example.com,https://app.example.com`)
 
 #### Building the Docker Image
 
@@ -271,11 +277,12 @@ pnpm install
 pnpm dev
 
 # In another terminal, run backend (port 3000)
+# TEND_CORS_ORIGINS=* allows cross-origin requests from the Vite dev server
 cd ../..
-cargo run -p tend-server
+TEND_CORS_ORIGINS="*" cargo run -p tend-server
 ```
 
-The frontend dev server proxies API requests to the backend.
+The frontend dev server (port 5173) and backend (port 3000) are different origins, so CORS must be enabled during development. The `.env.development` file sets `TEND_CORS_ORIGINS=*` for convenience.
 
 ## Acknowledgements
 
