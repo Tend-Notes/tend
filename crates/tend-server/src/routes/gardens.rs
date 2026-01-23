@@ -288,8 +288,10 @@ pub async fn create_garden(
             .map_err(|e| AppError::Internal(format!("Failed to encrypt verification file: {}", e)))?;
 
         let verify_path = garden_path.join(".tend").join("encryption.verify");
-        std::fs::create_dir_all(verify_path.parent().unwrap())
-            .map_err(|e| AppError::Internal(format!("Failed to create .tend directory: {}", e)))?;
+        if let Some(parent) = verify_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AppError::Internal(format!("Failed to create .tend directory: {}", e)))?;
+        }
         std::fs::write(&verify_path, encrypted_verify)
             .map_err(|e| AppError::Internal(format!("Failed to write verification file: {}", e)))?;
 

@@ -116,12 +116,9 @@ export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
                   >
                     <div className="flex items-start gap-2">
                       <span className="text-base-03 mt-0.5">•</span>
-                      <span
-                        className="flex-1"
-                        dangerouslySetInnerHTML={{
-                          __html: highlightLinks(block.content, pageName),
-                        }}
-                      />
+                      <span className="flex-1">
+                        <HighlightedContent content={block.content} currentPageName={pageName} />
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -141,20 +138,48 @@ export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
   )
 }
 
-// Highlight wiki-links in content, emphasizing the current page
-function highlightLinks(content: string, currentPageName: string): string {
-  // Escape HTML first
-  const escaped = content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
+/**
+ * Safely render content with highlighted wiki-links.
+ * Uses React elements instead of dangerouslySetInnerHTML to prevent XSS.
+ */
+function HighlightedContent({ content, currentPageName }: { content: string; currentPageName: string }) {
+  // Parse content into segments: text and wiki-links
+  const segments: Array<{ type: 'text' | 'link'; value: string }> = []
+  const linkRegex = /\[\[([^\]]+)\]\]/g
+  let lastIndex = 0
+  let match
 
-  // Highlight wiki-links
-  return escaped.replace(/\[\[([^\]]+)\]\]/g, (_, pageName) => {
-    const isCurrentPage = pageName.toLowerCase() === currentPageName.toLowerCase()
-    const className = isCurrentPage
-      ? 'text-base-0E font-medium'
-      : 'text-base-0D'
-    return `<span class="${className}">[[${pageName}]]</span>`
-  })
+  while ((match = linkRegex.exec(content)) !== null) {
+    // Add text before this match
+    if (match.index > lastIndex) {
+      segments.push({ type: 'text', value: content.slice(lastIndex, match.index) })
+    }
+    // Add the link
+    segments.push({ type: 'link', value: match[1] })
+    lastIndex = match.index + match[0].length
+  }
+
+  // Add remaining text
+  if (lastIndex < content.length) {
+    segments.push({ type: 'text', value: content.slice(lastIndex) })
+  }
+
+  return (
+    <>
+      {segments.map((segment, i) => {
+        if (segment.type === 'text') {
+          return <span key={i}>{segment.value}</span>
+        }
+        const isCurrentPage = segment.value.toLowerCase() === currentPageName.toLowerCase()
+        return (
+          <span
+            key={i}
+            className={isCurrentPage ? 'text-base-0E font-medium' : 'text-base-0D'}
+          >
+            [[{segment.value}]]
+          </span>
+        )
+      })}
+    </>
+  )
 }

@@ -84,6 +84,29 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // Start search index TTL cleanup task for encrypted gardens
+    // Checks every hour if the search index should be cleaned up due to inactivity
+    {
+        let ttl_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            let check_interval = Duration::from_secs(3600); // Check every hour
+            loop {
+                tokio::time::sleep(check_interval).await;
+
+                let garden = ttl_state.garden.read().await;
+                // Only check encrypted gardens with TTL enabled
+                if garden.encrypted && garden.search_config.ttl_hours > 0 {
+                    if garden.is_index_expired().await {
+                        info!("Search index TTL expired for encrypted garden, cleaning up...");
+                        if let Err(e) = garden.delete_search_index().await {
+                            warn!("Failed to delete expired search index: {}", e);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     // Start file watcher for real-time updates
     // Note: The file watcher watches the initial garden. When switching gardens,
     // file change notifications from the old garden will be ignored since paths won't match.

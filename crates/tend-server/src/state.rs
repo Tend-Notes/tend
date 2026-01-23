@@ -57,14 +57,6 @@ impl UnifiedFileManager {
         }
     }
 
-    /// Check if a path is pending write
-    pub async fn is_pending_write(&self, path: &Path) -> bool {
-        match self {
-            Self::Plain(fm) => fm.is_pending_write(path).await,
-            Self::Encrypted(efm) => efm.is_pending_write(path).await,
-        }
-    }
-
     /// Get pending writes reference
     pub fn pending_writes(&self) -> Arc<RwLock<HashSet<PathBuf>>> {
         match self {
@@ -126,14 +118,6 @@ impl UnifiedFileManager {
         match self {
             Self::Plain(fm) => fm.page_exists(name).await,
             Self::Encrypted(efm) => efm.page_exists(name).await,
-        }
-    }
-
-    /// Check if a journal exists
-    pub async fn journal_exists(&self, date: NaiveDate) -> bool {
-        match self {
-            Self::Plain(fm) => fm.journal_exists(date).await,
-            Self::Encrypted(efm) => efm.journal_exists(date).await,
         }
     }
 
