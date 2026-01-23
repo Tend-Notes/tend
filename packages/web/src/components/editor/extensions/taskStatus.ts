@@ -34,20 +34,31 @@ function getStatusInfo(
   return status ? { color: status.color, label: status.label } : null
 }
 
+// Get the next status keyword in the cycle
+function getNextStatus(currentKeyword: string, statusSet: TaskStatusSet): string {
+  const statuses = TASK_STATUS_SETS[statusSet]
+  const currentIndex = statuses.findIndex((s) => s.keyword === currentKeyword)
+  const nextIndex = (currentIndex + 1) % statuses.length
+  return statuses[nextIndex].keyword
+}
+
 // Widget that renders the task status badge
 class TaskStatusWidget extends WidgetType {
   constructor(
     readonly keyword: string,
     readonly color: string,
-    readonly isDone: boolean
+    readonly isDone: boolean,
+    readonly statusSet: TaskStatusSet
   ) {
     super()
   }
 
-  toDOM(): HTMLElement {
+  toDOM(view: EditorView): HTMLElement {
     const badge = document.createElement('span')
     badge.className = 'task-status-badge'
     badge.textContent = this.keyword
+    // Convert 'base-0A' to 'base0A' for CSS variable
+    const cssColor = this.color.replace('-', '')
     badge.style.cssText = `
       display: inline-block;
       padding: 1px 6px;
@@ -55,10 +66,26 @@ class TaskStatusWidget extends WidgetType {
       font-size: 0.75em;
       font-weight: 600;
       border-radius: 3px;
-      background-color: var(--${this.color}, #666);
+      background-color: var(--${cssColor}, #666);
       color: var(--base00, #fff);
-      vertical-align: middle;
+      cursor: pointer;
+      user-select: none;
     `
+    badge.title = 'Click to cycle status'
+
+    badge.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const nextKeyword = getNextStatus(this.keyword, this.statusSet)
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: this.keyword.length,
+          insert: nextKeyword,
+        },
+      })
+    })
+
     return badge
   }
 
@@ -67,6 +94,7 @@ class TaskStatusWidget extends WidgetType {
   }
 
   ignoreEvent(): boolean {
+    // Allow click events to pass through
     return false
   }
 }
@@ -95,7 +123,7 @@ function buildTaskDecorations(
       // Replace the keyword with a widget
       decorations.push(
         Decoration.replace({
-          widget: new TaskStatusWidget(keyword, info.color, isDone),
+          widget: new TaskStatusWidget(keyword, info.color, isDone, statusSet),
         }).range(0, keywordEnd)
       )
 
