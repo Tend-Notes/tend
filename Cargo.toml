@@ -66,6 +66,9 @@ age = "0.11"
 toml = "0.8"
 directories = "5"
 
+# Testing
+tempfile = "3"
+
 # Internal crates
 tend-core = { path = "crates/tend-core" }
 tend-storage = { path = "crates/tend-storage" }

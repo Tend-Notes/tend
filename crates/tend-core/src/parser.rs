@@ -1,22 +1,38 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-//! Logseq-compatible Markdown parser
+//! Markdown parser with embedded block metadata support
 //!
-//! Parses Markdown files in Logseq's outliner format into our Block and Page models.
+//! Parses Markdown files in outliner format into our Block and Page models.
+//! Block UUIDs and parent relationships are read from an embedded footer
+//! comment, falling back to inline Logseq-style `id::` properties, or
+//! generating new UUIDs if neither is present.
 //!
-//! Logseq format:
+//! Tend format (preferred):
+//! ```markdown
+//! - Block content here
+//!   - Child block
+//!
+//! <!-- tend:blocks
+//! uuid|parent|order
+//! abc123||0
+//! def456|abc123|0
+//! -->
+//! ```
+//!
+//! Logseq format (supported for import):
 //! ```markdown
 //! - Block content here
 //!   id:: uuid-here
-//!   property:: value
 //!   - Child block
 //!     id:: child-uuid
 //! ```
 
 use regex::Regex;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 use uuid::Uuid;
 
 use crate::block::Block;
+use crate::block_metadata::{parse_content_with_footer, BlockMetadata};
 use crate::error::CoreError;
 use crate::page::Page;
 
@@ -28,10 +44,19 @@ static BULLET_RE: LazyLock<Regex> =
 static PROPERTY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\s*)([a-zA-Z][a-zA-Z0-9_-]*)::\s*(.*)$").unwrap());
 
-/// Parse a Logseq-format Markdown file into a Page
+/// Parse a Markdown file into a Page
+///
+/// Supports two UUID sources (in order of preference):
+/// 1. Embedded footer (`<!-- tend:blocks ... -->`)
+/// 2. Inline Logseq-style properties (`id:: uuid`)
+/// 3. If neither present, generates new UUIDs
 pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError> {
+    // First, extract footer metadata if present
+    let parsed = parse_content_with_footer(content);
+    let markdown = &parsed.markdown;
+
     let mut page = Page::new(page_name);
-    let lines: Vec<&str> = content.lines().collect();
+    let lines: Vec<&str> = markdown.lines().collect();
 
     if lines.is_empty() {
         return Ok(page);
@@ -56,12 +81,12 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
             }
 
             let indent = caps.get(1).map_or(0, |m| m.as_str().len());
-            let content = caps.get(2).map_or("", |m| m.as_str()).to_string();
+            let block_content = caps.get(2).map_or("", |m| m.as_str()).to_string();
 
             // Calculate depth (assuming 2 spaces per level)
             let depth = indent / 2;
 
-            let mut block = Block::new(content);
+            let mut block = Block::new(block_content);
             block.depth = depth;
 
             current_block = Some(block);
@@ -74,10 +99,14 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
             if let Some(ref mut block) = current_block {
                 // Property belongs to the current block
                 if key == "id" {
-                    // Parse UUID and set it on the block
-                    if let Ok(uuid) = Uuid::parse_str(value) {
-                        block.uuid = uuid;
+                    // Parse UUID from inline property (Logseq format)
+                    // Only use if we don't have footer metadata
+                    if parsed.metadata.is_none() {
+                        if let Ok(uuid) = Uuid::parse_str(value) {
+                            block.uuid = uuid;
+                        }
                     }
+                    // If we have footer metadata, ignore inline ids
                 } else if key == "collapsed" {
                     block.collapsed = value == "true";
                 } else {
@@ -103,7 +132,73 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
         save_block(&mut page, &mut block_stack, block);
     }
 
+    // If we have footer metadata, apply UUIDs based on order
+    if let Some(metadata) = parsed.metadata {
+        apply_footer_metadata(&mut page, &metadata);
+    }
+
     Ok(page)
+}
+
+/// Apply footer metadata to reassign UUIDs and rebuild parent relationships
+fn apply_footer_metadata(page: &mut Page, metadata: &[BlockMetadata]) {
+    // The blocks are already in order in root_blocks and children
+    // We need to map from the order they were parsed to the UUIDs in metadata
+
+    // First, collect all blocks in depth-first order (same order as footer)
+    let ordered_uuids: Vec<Uuid> = page.root_blocks.iter()
+        .flat_map(|root| collect_uuids_depth_first(page, root))
+        .collect();
+
+    // If counts don't match, metadata is out of sync - keep generated UUIDs
+    if ordered_uuids.len() != metadata.len() {
+        return;
+    }
+
+    // Build mapping from old UUID to new UUID from metadata
+    let mut uuid_mapping: HashMap<Uuid, Uuid> = HashMap::new();
+    for (old_uuid, meta) in ordered_uuids.iter().zip(metadata.iter()) {
+        uuid_mapping.insert(*old_uuid, meta.uuid);
+    }
+
+    // Rebuild blocks with new UUIDs
+    let mut new_blocks: HashMap<Uuid, Block> = HashMap::new();
+
+    for (old_uuid, new_uuid) in &uuid_mapping {
+        if let Some(mut block) = page.blocks.remove(old_uuid) {
+            block.uuid = *new_uuid;
+
+            // Update parent_uuid
+            if let Some(old_parent) = block.parent_uuid {
+                block.parent_uuid = uuid_mapping.get(&old_parent).copied();
+            }
+
+            // Update children UUIDs
+            block.children = block.children.iter()
+                .filter_map(|old_child| uuid_mapping.get(old_child).copied())
+                .collect();
+
+            new_blocks.insert(*new_uuid, block);
+        }
+    }
+
+    page.blocks = new_blocks;
+
+    // Update root_blocks
+    page.root_blocks = page.root_blocks.iter()
+        .filter_map(|old| uuid_mapping.get(old).copied())
+        .collect();
+}
+
+/// Collect UUIDs in depth-first order
+fn collect_uuids_depth_first(page: &Page, uuid: &Uuid) -> Vec<Uuid> {
+    let mut result = vec![*uuid];
+    if let Some(block) = page.blocks.get(uuid) {
+        for child in &block.children {
+            result.extend(collect_uuids_depth_first(page, child));
+        }
+    }
+    result
 }
 
 /// Save a block and update the hierarchy
@@ -195,7 +290,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_block_with_id() {
+    fn test_parse_block_with_inline_id() {
+        // Logseq-style inline id:: when no footer present
         let content = r#"- Block with ID
   id:: 12345678-1234-1234-1234-123456789abc"#;
 
@@ -274,5 +370,115 @@ custom:: value
 
         // Check that block was parsed correctly
         assert_eq!(page.blocks.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_with_footer_metadata() {
+        let content = r#"- First block
+- Second block
+
+<!-- tend:blocks
+DO NOT EDIT - Tend uses this to track block relationships.
+If corrupted, Tend will rebuild from markdown structure.
+
+uuid|parent|order
+aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||0
+bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb||1
+-->"#;
+
+        let page = parse_markdown(content, "Test").unwrap();
+
+        assert_eq!(page.root_blocks.len(), 2);
+        assert_eq!(page.blocks.len(), 2);
+
+        // UUIDs should come from footer
+        let first_uuid = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let second_uuid = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+
+        assert!(page.blocks.contains_key(&first_uuid));
+        assert!(page.blocks.contains_key(&second_uuid));
+
+        assert_eq!(page.root_blocks[0], first_uuid);
+        assert_eq!(page.root_blocks[1], second_uuid);
+    }
+
+    #[test]
+    fn test_parse_nested_with_footer() {
+        let content = r#"- Parent
+  - Child
+
+<!-- tend:blocks
+DO NOT EDIT - Tend uses this to track block relationships.
+If corrupted, Tend will rebuild from markdown structure.
+
+uuid|parent|order
+aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||0
+bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb|aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa|0
+-->"#;
+
+        let page = parse_markdown(content, "Test").unwrap();
+
+        let parent_uuid = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        let child_uuid = Uuid::parse_str("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb").unwrap();
+
+        assert_eq!(page.root_blocks.len(), 1);
+        assert_eq!(page.root_blocks[0], parent_uuid);
+
+        let parent = page.get_block(&parent_uuid).unwrap();
+        assert_eq!(parent.children.len(), 1);
+        assert_eq!(parent.children[0], child_uuid);
+
+        let child = page.get_block(&child_uuid).unwrap();
+        assert_eq!(child.parent_uuid, Some(parent_uuid));
+    }
+
+    #[test]
+    fn test_footer_takes_precedence_over_inline_id() {
+        // Footer UUIDs should override inline id:: properties
+        let content = r#"- Block with inline ID
+  id:: 99999999-9999-9999-9999-999999999999
+
+<!-- tend:blocks
+DO NOT EDIT - Tend uses this to track block relationships.
+If corrupted, Tend will rebuild from markdown structure.
+
+uuid|parent|order
+aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||0
+-->"#;
+
+        let page = parse_markdown(content, "Test").unwrap();
+
+        // UUID from footer should be used, not inline
+        let footer_uuid = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        assert!(page.blocks.contains_key(&footer_uuid));
+
+        // Inline UUID should NOT be present
+        let inline_uuid = Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
+        assert!(!page.blocks.contains_key(&inline_uuid));
+    }
+
+    #[test]
+    fn test_mismatched_footer_falls_back_to_generated() {
+        // If footer has wrong number of blocks, ignore it
+        let content = r#"- Block A
+- Block B
+- Block C
+
+<!-- tend:blocks
+DO NOT EDIT - Tend uses this to track block relationships.
+If corrupted, Tend will rebuild from markdown structure.
+
+uuid|parent|order
+aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||0
+-->"#;
+
+        let page = parse_markdown(content, "Test").unwrap();
+
+        // Should have 3 blocks with generated UUIDs (footer mismatch)
+        assert_eq!(page.blocks.len(), 3);
+
+        // Footer UUID should NOT be used since count doesn't match
+        let footer_uuid = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        assert!(!page.blocks.contains_key(&footer_uuid));
     }
 }
