@@ -107,11 +107,18 @@ class WikilinkWidget extends WidgetType {
     link.href = this.buildHref(this.target)
     link.className = 'wiki-link'
     link.textContent = this.target
-    // Prevent CodeMirror from handling the click
-    link.addEventListener('click', (e) => {
-      // Let the browser handle it naturally (supports ctrl+click, middle-click)
+
+    // Prevent CodeMirror from handling mousedown (which would move cursor)
+    link.addEventListener('mousedown', (e) => {
       e.stopPropagation()
+      // For regular left-click, navigate immediately
+      if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault()
+        window.location.href = link.href
+      }
+      // For ctrl/cmd+click or middle-click, let browser handle it
     })
+
     return link
   }
 
