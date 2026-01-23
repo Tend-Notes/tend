@@ -556,7 +556,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     return (
       <div
         key={block.uuid}
-        className={`block-container ${isSelected ? 'ring-2 ring-base-0D' : ''}`}
+        className="block-container"
         data-block-id={block.uuid}
         onClick={() => focusBlock(block.uuid, 'end')}
       >

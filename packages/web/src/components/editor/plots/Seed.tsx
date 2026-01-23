@@ -19,18 +19,11 @@ export interface SeedActions {
   applyFormat: (format: string, selection: { start: number; end: number }) => string
 }
 
-// Default actions - plain text only
-const defaultActions: SeedActions = {
-  renderContent: (content: string) => content,
-  applyFormat: (_format: string, _selection: { start: number; end: number }) => '',
-}
-
 interface SeedProps {
   block: Block
   isSelected: boolean
   onChange: (content: string) => void
   onBoundaryEvent: (event: SeedBoundaryEvent) => void
-  actions?: SeedActions
   readonly?: boolean
 }
 
@@ -53,7 +46,6 @@ export function Seed({
   isSelected,
   onChange,
   onBoundaryEvent,
-  actions = defaultActions,
   readonly = false,
 }: SeedProps) {
   const editorRef = useRef<HTMLDivElement>(null)
@@ -288,11 +280,20 @@ export function Seed({
   }, [setCursorPosition])
 
   // ─────────────────────────────────────────────────────────────────────────
-  // RENDER
+  // INITIALIZE CONTENT
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Use actions.renderContent for display (placeholder for now)
-  const displayContent = actions.renderContent(block.content)
+  // Set initial content on mount (contenteditable manages its own DOM)
+  useEffect(() => {
+    const el = editorRef.current
+    if (el) {
+      el.textContent = block.content
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────
 
   return (
     <div
@@ -305,9 +306,7 @@ export function Seed({
       }`}
       onInput={readonly ? undefined : handleInput}
       onKeyDown={readonly ? undefined : handleKeyDown}
-      data-placeholder={readonly ? undefined : 'Type something...'}
-    >
-      {displayContent}
-    </div>
+      style={{ caretColor: 'var(--base05, currentColor)' }}
+    />
   )
 }
