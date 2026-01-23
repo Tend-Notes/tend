@@ -12,12 +12,14 @@
 // Formatting, syntax highlighting, and decorations are handled by Actions.
 // If Actions fails or is unavailable, Seed continues as a plain text editor.
 
-import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
 import { EditorState, Prec, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Block } from '../../../types'
 import { useActions } from './Actions'
+import { wikilinkStateListener, type WikilinkState } from '../extensions/wikilink'
+import { WikilinkSuggestions } from '../extensions/WikilinkSuggestions'
 
 // Safe wrapper for Actions - Seed works without formatting if Actions fails
 function useSafeActions(): Extension[] {
@@ -118,8 +120,20 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     const viewRef = useRef<EditorView | null>(null)
     const contentRef = useRef(block.content)
 
+    // Track wikilink popup state
+    const [wikilinkState, setWikilinkState] = useState<WikilinkState | null>(null)
+    const setWikilinkStateRef = useRef(setWikilinkState)
+    setWikilinkStateRef.current = setWikilinkState
+
     // Get formatting extensions from Actions (fails gracefully to empty array)
     const actionExtensions = useSafeActions()
+
+    // Create wikilink state listener (stable reference via ref)
+    const createWikilinkListener = useCallback(() => {
+      return wikilinkStateListener((state) => {
+        setWikilinkStateRef.current(state)
+      })
+    }, [])
 
     // Track external updates to avoid feedback loops
     const isExternalUpdate = useRef(false)
@@ -375,6 +389,7 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           keymap.of([...defaultKeymap, ...historyKeymap]),
           createUpdateListener(),
           createEventHandlers(),
+          createWikilinkListener(),
           baseTheme,
           EditorView.lineWrapping,
           EditorView.editable.of(!readonly),
@@ -453,14 +468,20 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       return () => container.removeEventListener('seed-focus', handleSeedFocus)
     }, [])
 
+
     return (
-      <div
-        ref={containerRef}
-        data-seed-editor
-        className={`block-content outline-none min-h-[1.5em] ${
-          readonly ? 'cursor-default' : ''
-        }`}
-      />
+      <>
+        <div
+          ref={containerRef}
+          data-seed-editor
+          className={`block-content outline-none min-h-[1.5em] ${
+            readonly ? 'cursor-default' : ''
+          }`}
+        />
+        {wikilinkState && viewRef.current && (
+          <WikilinkSuggestions view={viewRef.current} state={wikilinkState} />
+        )}
+      </>
     )
   }
 )
