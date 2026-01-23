@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use tend_search::SearchResult;
 
 use crate::error::AppError;
-use crate::state::AppState;
+use crate::state::{AppState, IndexStatus};
 
 #[derive(Debug, Deserialize)]
 pub struct SearchQuery {
@@ -27,20 +27,107 @@ fn default_limit() -> usize {
 #[serde(rename_all = "camelCase")]
 pub struct SearchResponse {
     pub results: Vec<SearchResult>,
-    /// Search status for encrypted gardens
+    /// Search status
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<SearchStatus>,
+    pub status: Option<SearchStatusResponse>,
 }
 
+/// Full search status response
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SearchStatus {
-    /// Whether search is disabled for this garden
-    pub disabled: bool,
-    /// Whether the index is currently being rebuilt
-    pub rebuilding: bool,
+pub struct SearchStatusResponse {
+    /// Current index status
+    pub index_status: IndexStatus,
+    /// Number of documents in the index (if ready)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_docs: Option<u64>,
+    /// Whether this is an encrypted garden
+    pub encrypted: bool,
     /// Message to display to user
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+}
+
+/// Get search index status
+pub async fn status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SearchStatusResponse>, AppError> {
+    let garden = state.garden.read().await;
+    let index_status = garden.get_index_status().await;
+
+    let num_docs = if let Some(ref index) = garden.search_index {
+        Some(index.read().await.num_docs())
+    } else {
+        None
+    };
+
+    let message = match index_status {
+        IndexStatus::Disabled => Some("Search is disabled for this garden".to_string()),
+        IndexStatus::Ready => None,
+        IndexStatus::Building => Some("Search index is being built...".to_string()),
+        IndexStatus::NotBuilt => Some("Search index needs to be built".to_string()),
+        IndexStatus::Expired => Some("Search index expired and was deleted".to_string()),
+    };
+
+    Ok(Json(SearchStatusResponse {
+        index_status,
+        num_docs,
+        encrypted: garden.encrypted,
+        message,
+    }))
+}
+
+/// Trigger index rebuild
+pub async fn rebuild(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SearchStatusResponse>, AppError> {
+    // Get current status first
+    let current_status = {
+        let garden = state.garden.read().await;
+        garden.get_index_status().await
+    };
+
+    // Don't rebuild if already building or disabled
+    if current_status == IndexStatus::Building {
+        return Ok(Json(SearchStatusResponse {
+            index_status: IndexStatus::Building,
+            num_docs: None,
+            encrypted: state.garden.read().await.encrypted,
+            message: Some("Index build already in progress".to_string()),
+        }));
+    }
+
+    if current_status == IndexStatus::Disabled {
+        return Ok(Json(SearchStatusResponse {
+            index_status: IndexStatus::Disabled,
+            num_docs: None,
+            encrypted: state.garden.read().await.encrypted,
+            message: Some("Search is disabled for this garden".to_string()),
+        }));
+    }
+
+    // Build the index (this will block - consider spawning a task for large gardens)
+    {
+        let mut garden = state.garden.write().await;
+        garden.build_index().await.map_err(|e| {
+            AppError::Internal(format!("Failed to build index: {}", e))
+        })?;
+    }
+
+    // Return updated status
+    let garden = state.garden.read().await;
+    let num_docs = if let Some(ref index) = garden.search_index {
+        Some(index.read().await.num_docs())
+    } else {
+        None
+    };
+
+    Ok(Json(SearchStatusResponse {
+        index_status: IndexStatus::Ready,
+        num_docs,
+        encrypted: garden.encrypted,
+        message: Some("Index built successfully".to_string()),
+    }))
 }
 
 /// Search for blocks
@@ -56,30 +143,57 @@ pub async fn search(
     }
 
     let garden = state.garden.read().await;
+    let index_status = garden.get_index_status().await;
 
-    // Check if search is disabled
-    if !garden.search_config.enabled {
-        return Ok(Json(SearchResponse {
-            results: Vec::new(),
-            status: Some(SearchStatus {
-                disabled: true,
-                rebuilding: false,
-                message: Some("Search is disabled for this encrypted garden".to_string()),
-            }),
-        }));
+    // Check index status
+    match index_status {
+        IndexStatus::Disabled => {
+            return Ok(Json(SearchResponse {
+                results: Vec::new(),
+                status: Some(SearchStatusResponse {
+                    index_status: IndexStatus::Disabled,
+                    num_docs: None,
+                    encrypted: garden.encrypted,
+                    message: Some("Search is disabled for this garden".to_string()),
+                }),
+            }));
+        }
+        IndexStatus::Building => {
+            return Ok(Json(SearchResponse {
+                results: Vec::new(),
+                status: Some(SearchStatusResponse {
+                    index_status: IndexStatus::Building,
+                    num_docs: None,
+                    encrypted: garden.encrypted,
+                    message: Some("Search index is being built...".to_string()),
+                }),
+            }));
+        }
+        IndexStatus::NotBuilt | IndexStatus::Expired => {
+            return Ok(Json(SearchResponse {
+                results: Vec::new(),
+                status: Some(SearchStatusResponse {
+                    index_status,
+                    num_docs: None,
+                    encrypted: garden.encrypted,
+                    message: Some("Search index needs to be built".to_string()),
+                }),
+            }));
+        }
+        IndexStatus::Ready => {}
     }
 
     // Check if we have a search index
     let search_index = match &garden.search_index {
         Some(index) => index,
         None => {
-            // Search is enabled but index doesn't exist (was deleted by TTL or never built)
             return Ok(Json(SearchResponse {
                 results: Vec::new(),
-                status: Some(SearchStatus {
-                    disabled: false,
-                    rebuilding: false,
-                    message: Some("Search index needs to be rebuilt. This may take a moment.".to_string()),
+                status: Some(SearchStatusResponse {
+                    index_status: IndexStatus::NotBuilt,
+                    num_docs: None,
+                    encrypted: garden.encrypted,
+                    message: Some("Search index not available".to_string()),
                 }),
             }));
         }

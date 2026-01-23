@@ -36,6 +36,8 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/journals/{date}", put(journals::update_journal))
         // Search
         .route("/search", get(search::search))
+        .route("/search/status", get(search::status))
+        .route("/search/rebuild", post(search::rebuild))
         // Tags
         .route("/tags", get(tags::list_tags))
         // Todos

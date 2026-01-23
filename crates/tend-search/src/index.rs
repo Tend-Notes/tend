@@ -2,6 +2,7 @@
 //! Search index management
 
 use std::path::Path;
+use std::time::SystemTime;
 
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
@@ -12,6 +13,46 @@ use tracing::{debug, info};
 
 use crate::error::SearchError;
 use crate::schema::create_schema;
+
+/// Information about an existing search index
+#[derive(Debug, Clone)]
+pub struct IndexInfo {
+    /// Number of documents in the index
+    pub num_docs: u64,
+    /// Last modification time of the index directory
+    pub modified_at: Option<SystemTime>,
+}
+
+/// Check if a valid index exists at the given path without opening it fully
+pub fn index_exists(index_path: &Path) -> bool {
+    index_path.exists() && index_path.join("meta.json").exists()
+}
+
+/// Get information about an existing index
+pub fn get_index_info(index_path: &Path) -> Option<IndexInfo> {
+    if !index_exists(index_path) {
+        return None;
+    }
+
+    // Get modification time from meta.json
+    let meta_path = index_path.join("meta.json");
+    let modified_at = std::fs::metadata(&meta_path)
+        .ok()
+        .and_then(|m| m.modified().ok());
+
+    // Try to open and get doc count
+    let index = Index::open_in_dir(index_path).ok()?;
+    let reader = index
+        .reader_builder()
+        .reload_policy(ReloadPolicy::Manual)
+        .try_into()
+        .ok()?;
+
+    Some(IndexInfo {
+        num_docs: reader.searcher().num_docs(),
+        modified_at,
+    })
+}
 
 /// Search result item
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -129,6 +170,8 @@ impl SearchIndex {
     /// Commit changes to the index
     pub fn commit(&mut self) -> Result<(), SearchError> {
         self.writer.commit()?;
+        // Reload the reader to see the new changes
+        self.reader.reload()?;
         Ok(())
     }
 

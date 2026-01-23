@@ -9,4 +9,4 @@ pub mod index;
 pub mod schema;
 
 pub use error::SearchError;
-pub use index::{SearchIndex, SearchResult};
+pub use index::{get_index_info, index_exists, IndexInfo, SearchIndex, SearchResult};

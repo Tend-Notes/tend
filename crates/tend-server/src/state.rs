@@ -9,13 +9,29 @@ use std::time::Instant;
 use chrono::NaiveDate;
 use tend_core::{ContentType, Page, PageMeta};
 use tend_git::BackupManager;
-use tend_search::SearchIndex;
+use tend_search::{index_exists, SearchIndex};
 use tend_storage::{EncryptedFileManager, FileManager, StorageError};
 use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::config::{base_data_dir, Config, GitConfig};
 use crate::ws::{EventSender, WsEvent};
+
+/// Status of the search index
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexStatus {
+    /// Search is disabled for this garden
+    Disabled,
+    /// Index exists and is ready for searches
+    Ready,
+    /// Index is being built in the background
+    Building,
+    /// No index exists (needs to be built)
+    NotBuilt,
+    /// Index was deleted due to TTL expiry (encrypted gardens)
+    Expired,
+}
 
 /// Search configuration for a garden
 #[derive(Debug, Clone)]
@@ -176,13 +192,15 @@ impl UnifiedFileManager {
 pub struct GardenState {
     pub data_dir: PathBuf,
     pub file_manager: UnifiedFileManager,
-    /// Search index - None if search is disabled for this garden
+    /// Search index - None if search is disabled or not yet built
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
     pub backup_manager: BackupManager,
     /// Whether this garden is encrypted
     pub encrypted: bool,
     /// Search configuration
     pub search_config: SearchConfig,
+    /// Current status of the search index
+    pub index_status: Arc<RwLock<IndexStatus>>,
     /// Last time the search index was used (for TTL tracking)
     pub last_search_use: Arc<RwLock<Option<Instant>>>,
 }
@@ -235,54 +253,41 @@ impl GardenState {
         // Initialize backup manager
         let backup_manager = BackupManager::new(&data_dir, git_config.auto_push);
 
-        // Initialize search index only if search is enabled
-        let search_index = if search_config.enabled {
-            let index_path = data_dir.join(".tend").join("search_index");
-            let search_index = SearchIndex::open(&index_path)?;
-            let search_index = Arc::new(RwLock::new(search_index));
-
-            // Index existing pages
-            info!(
-                "Indexing pages for {} garden: {}",
-                if encrypted { "encrypted" } else { "plain" },
-                data_dir.display()
-            );
-            {
-                let mut index = search_index.write().await;
-
-                // Index pages
-                let pages = file_manager.list_pages().await?;
-                for page_meta in pages {
-                    if let Ok(page) = file_manager.read_page(&page_meta.name).await {
-                        if let Err(e) = index.index_page(&page) {
-                            tracing::warn!("Failed to index page {}: {}", page_meta.name, e);
-                        }
-                    }
-                }
-
-                // Index journals
-                let journals = file_manager.list_journals().await?;
-                for journal_meta in journals {
-                    if let Some(date) = journal_meta.journal_date {
-                        if let Ok(page) = file_manager.read_journal(date).await {
-                            if let Err(e) = index.index_page(&page) {
-                                tracing::warn!("Failed to index journal {}: {}", journal_meta.name, e);
-                            }
-                        }
-                    }
-                }
-
-                index.commit()?;
-            }
-            info!("Indexing complete for garden: {}", data_dir.display());
-            Some(search_index)
-        } else {
+        // Determine initial index status and open existing index if available
+        let index_path = data_dir.join(".tend").join("search_index");
+        let (search_index, index_status) = if !search_config.enabled {
             info!(
                 "Search disabled for {} garden: {}",
                 if encrypted { "encrypted" } else { "plain" },
                 data_dir.display()
             );
-            None
+            (None, IndexStatus::Disabled)
+        } else if index_exists(&index_path) {
+            // Existing index found - open it without re-indexing
+            info!(
+                "Opening existing search index for {} garden: {}",
+                if encrypted { "encrypted" } else { "plain" },
+                data_dir.display()
+            );
+            match SearchIndex::open(&index_path) {
+                Ok(index) => {
+                    let num_docs = index.num_docs();
+                    info!("Search index ready with {} documents", num_docs);
+                    (Some(Arc::new(RwLock::new(index))), IndexStatus::Ready)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to open existing index, will need rebuild: {}", e);
+                    (None, IndexStatus::NotBuilt)
+                }
+            }
+        } else {
+            // No index exists
+            info!(
+                "No search index found for {} garden: {}",
+                if encrypted { "encrypted" } else { "plain" },
+                data_dir.display()
+            );
+            (None, IndexStatus::NotBuilt)
         };
 
         Ok(Self {
@@ -292,6 +297,7 @@ impl GardenState {
             backup_manager,
             encrypted,
             search_config,
+            index_status: Arc::new(RwLock::new(index_status)),
             last_search_use: Arc::new(RwLock::new(None)),
         })
     }
@@ -325,6 +331,79 @@ impl GardenState {
             tokio::fs::remove_dir_all(&index_path).await?;
             info!("Deleted expired search index: {}", index_path.display());
         }
+        // Update status
+        let mut status = self.index_status.write().await;
+        *status = IndexStatus::Expired;
+        Ok(())
+    }
+
+    /// Get current index status
+    pub async fn get_index_status(&self) -> IndexStatus {
+        *self.index_status.read().await
+    }
+
+    /// Build the search index (full re-index)
+    /// This should typically be called from a background task
+    pub async fn build_index(&mut self) -> anyhow::Result<()> {
+        if !self.search_config.enabled {
+            return Err(anyhow::anyhow!("Search is disabled for this garden"));
+        }
+
+        // Update status to building
+        {
+            let mut status = self.index_status.write().await;
+            *status = IndexStatus::Building;
+        }
+
+        let index_path = self.data_dir.join(".tend").join("search_index");
+
+        info!(
+            "Building search index for {} garden: {}",
+            if self.encrypted { "encrypted" } else { "plain" },
+            self.data_dir.display()
+        );
+
+        // Create new index
+        let search_index = SearchIndex::open(&index_path)?;
+        let search_index = Arc::new(RwLock::new(search_index));
+
+        // Index all pages
+        {
+            let mut index = search_index.write().await;
+
+            // Index pages
+            let pages = self.file_manager.list_pages().await?;
+            for page_meta in pages {
+                if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
+                    if let Err(e) = index.index_page(&page) {
+                        tracing::warn!("Failed to index page {}: {}", page_meta.name, e);
+                    }
+                }
+            }
+
+            // Index journals
+            let journals = self.file_manager.list_journals().await?;
+            for journal_meta in journals {
+                if let Some(date) = journal_meta.journal_date {
+                    if let Ok(page) = self.file_manager.read_journal(date).await {
+                        if let Err(e) = index.index_page(&page) {
+                            tracing::warn!("Failed to index journal {}: {}", journal_meta.name, e);
+                        }
+                    }
+                }
+            }
+
+            index.commit()?;
+            info!("Search index built with {} documents", index.num_docs());
+        }
+
+        // Update state
+        self.search_index = Some(search_index);
+        {
+            let mut status = self.index_status.write().await;
+            *status = IndexStatus::Ready;
+        }
+
         Ok(())
     }
 }
