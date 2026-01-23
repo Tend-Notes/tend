@@ -26,3 +26,4 @@ result
 # Environment
 .env
 .env.local
+CHANGELOG.md
