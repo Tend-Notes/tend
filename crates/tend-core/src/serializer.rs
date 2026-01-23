@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-//! Markdown serializer
+//! Markdown serializer with embedded block metadata
 //!
-//! Serializes our Page/Block models back to Logseq-compatible Markdown format.
+//! Serializes Page/Block models to clean Markdown with block metadata
+//! stored in a footer comment. The main body remains human-readable
+//! without inline UUID properties.
 
 use crate::block::Block;
+use crate::block_metadata::{blocks_to_metadata, serialize_footer};
 use crate::page::Page;
 use uuid::Uuid;
 
-/// Serialize a Page to Logseq-compatible Markdown
+/// Serialize a Page to Markdown with embedded block metadata footer
 pub fn serialize_page(page: &Page) -> String {
     let mut output = String::new();
 
@@ -25,14 +28,22 @@ pub fn serialize_page(page: &Page) -> String {
         output.push('\n');
     }
 
+    // Serialize block content (clean markdown, no inline ids)
     for root_uuid in &page.root_blocks {
         serialize_block_recursive(&mut output, page, root_uuid, 0);
+    }
+
+    // Add block metadata footer
+    if !page.root_blocks.is_empty() {
+        let metadata = blocks_to_metadata(&page.root_blocks, &page.blocks);
+        output.push_str(&serialize_footer(&metadata));
     }
 
     output
 }
 
 /// Serialize a single block and its children recursively
+/// Now writes clean markdown without inline id:: properties
 fn serialize_block_recursive(output: &mut String, page: &Page, uuid: &Uuid, depth: usize) {
     let Some(block) = page.get_block(uuid) else {
         return;
@@ -46,19 +57,13 @@ fn serialize_block_recursive(output: &mut String, page: &Page, uuid: &Uuid, dept
     output.push_str(&block.content);
     output.push('\n');
 
-    // Write the block ID
-    output.push_str(&indent);
-    output.push_str("  id:: ");
-    output.push_str(&block.uuid.to_string());
-    output.push('\n');
-
-    // Write collapsed state if true
+    // Write collapsed state if true (this is a UI property, keep inline)
     if block.collapsed {
         output.push_str(&indent);
         output.push_str("  collapsed:: true\n");
     }
 
-    // Write other properties (excluding id and collapsed which we handle specially)
+    // Write other user-facing properties (excluding id which goes in footer)
     for (key, value) in &block.properties {
         if key != "id" && key != "collapsed" {
             output.push_str(&indent);
@@ -77,6 +82,7 @@ fn serialize_block_recursive(output: &mut String, page: &Page, uuid: &Uuid, dept
 }
 
 /// Serialize a list of blocks (without page context) - useful for API responses
+/// This version still includes inline ids for compatibility
 pub fn serialize_blocks(blocks: &[Block]) -> String {
     let mut output = String::new();
 
@@ -87,7 +93,7 @@ pub fn serialize_blocks(blocks: &[Block]) -> String {
     output
 }
 
-/// Serialize a single block (without children)
+/// Serialize a single block (without children) - includes inline id for API use
 fn serialize_single_block(output: &mut String, block: &Block, depth: usize) {
     let indent = "  ".repeat(depth);
 
@@ -136,7 +142,29 @@ mod tests {
 
         assert!(output.contains("- First block"));
         assert!(output.contains("- Second block"));
-        assert!(output.contains("id::"));
+        // Should have footer with block metadata
+        assert!(output.contains("<!-- tend:blocks"));
+        assert!(output.contains("uuid|parent|order"));
+    }
+
+    #[test]
+    fn test_serialize_no_inline_ids() {
+        let mut page = Page::new("Test");
+
+        let block = Block::new("Test block");
+        page.add_block(block);
+
+        let output = serialize_page(&page);
+
+        // Main content should NOT have inline id::
+        let lines: Vec<&str> = output.lines().collect();
+        let content_lines: Vec<_> = lines.iter()
+            .take_while(|l| !l.starts_with("<!-- tend:blocks"))
+            .collect();
+
+        for line in content_lines {
+            assert!(!line.contains("id::"), "Found inline id:: in content: {}", line);
+        }
     }
 
     #[test]
@@ -164,6 +192,8 @@ mod tests {
         assert!(output.contains("- Parent"));
         // Child should be indented
         assert!(output.contains("  - Child"));
+        // Footer should have parent relationship
+        assert!(output.contains(&format!("{}|{}|0", child_uuid, parent_uuid)));
     }
 
     #[test]
@@ -189,17 +219,26 @@ mod tests {
     fn test_roundtrip() {
         use crate::parser::parse_markdown;
 
-        let original = r#"version:: 42
+        let mut page = Page::new("Test");
+        page.version = 42;
 
-- Parent block
-  id:: 12345678-1234-1234-1234-123456789abc
-  status:: active
-  - Child block
-    id:: 87654321-4321-4321-4321-cba987654321
-"#;
+        let mut parent = Block::with_uuid(
+            Uuid::parse_str("12345678-1234-1234-1234-123456789abc").unwrap(),
+            "Parent block",
+        );
+        parent.set_property("status", "active");
 
-        let page = parse_markdown(original, "Test").unwrap();
-        assert_eq!(page.version, 42);
+        let mut child = Block::with_uuid(
+            Uuid::parse_str("87654321-4321-4321-4321-cba987654321").unwrap(),
+            "Child block",
+        );
+        child.parent_uuid = Some(parent.uuid);
+        child.depth = 1;
+
+        parent.children.push(child.uuid);
+
+        page.add_block(parent);
+        page.add_block(child);
 
         let serialized = serialize_page(&page);
 
@@ -223,5 +262,23 @@ mod tests {
 
         assert_eq!(block1.content, block2.content);
         assert_eq!(block1.get_property("status"), block2.get_property("status"));
+
+        // Check child relationship preserved
+        let child1 = page
+            .get_block(&Uuid::parse_str("87654321-4321-4321-4321-cba987654321").unwrap())
+            .unwrap();
+        let child2 = page2
+            .get_block(&Uuid::parse_str("87654321-4321-4321-4321-cba987654321").unwrap())
+            .unwrap();
+
+        assert_eq!(child1.parent_uuid, child2.parent_uuid);
+    }
+
+    #[test]
+    fn test_empty_page_no_footer() {
+        let page = Page::new("Empty");
+        let output = serialize_page(&page);
+
+        assert!(!output.contains("<!-- tend:blocks"));
     }
 }
