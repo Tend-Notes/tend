@@ -376,10 +376,10 @@ impl AppState {
             new_data_dir.display()
         );
 
-        // Create new garden state
+        // Create new garden state first (this is for a different directory, so locks shouldn't conflict)
         let new_garden = GardenState::new(new_data_dir.clone(), &self.config.git).await?;
 
-        // Swap the garden state
+        // Swap the garden state - the old one is dropped when replaced
         {
             let mut garden = self.garden.write().await;
             *garden = new_garden;
