@@ -3,23 +3,19 @@
 
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { Page, PageMeta, Block } from '../types'
+import type { Page, Block } from '../types'
 import * as api from '../lib/api'
 import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 import { useActivityLogStore } from './activityLogStore'
 import { useSyncStatusStore } from './syncStatusStore'
 import { useSettingsStore } from './settingsStore'
+import { useRecentSheetsStore } from './recentSheetsStore'
 
 interface PageState {
   // Current page/journal being viewed
   currentPage: Page | null
   currentPageName: string | null
-
-  // Sheets for all content types (keyed by content type ID: 'page', 'journal', 'meeting', etc.)
-  sheets: Record<string, PageMeta[]>
-  // When true, sidebar lists have been purged and auto-reload is disabled
-  recentFilesPurged: boolean
 
   // Loading states
   isLoading: boolean
@@ -42,7 +38,6 @@ interface PageState {
   } | null
 
   // Actions
-  loadSheets: () => Promise<void>
   loadTodaysJournal: () => Promise<void>
   navigateToPage: (name: string, pushHistory?: boolean) => Promise<void>
   navigateToJournal: (date: string, pushHistory?: boolean) => Promise<void>
@@ -59,7 +54,7 @@ interface PageState {
   dismissConflict: () => void
   // Flush any pending saves immediately (called before navigation)
   flushPendingSave: () => Promise<void>
-  // Clear the sheets lists (for "purge recent file list")
+  // Clear the recent files history
   clearRecentFiles: () => void
 }
 
@@ -125,40 +120,29 @@ let pendingSaveData: {
   journalDate: string | null
 } | null = null
 
+// Helper to record sheet access in the recent sheets store
+function recordSheetAccess(page: Page) {
+  useRecentSheetsStore.getState().recordAccess(page.contentType, {
+    name: page.name,
+    title: page.title,
+    contentType: page.contentType,
+    isJournal: page.isJournal,
+    journalDate: page.journalDate,
+    blockCount: Object.keys(page.blocks).length,
+    createdAt: page.createdAt,
+    modifiedAt: page.modifiedAt,
+  })
+}
+
 export const usePageStore = create<PageState>()(
   immer((set, get) => ({
     currentPage: null,
     currentPageName: null,
-    sheets: {},
-    recentFilesPurged: false,
     isLoading: false,
     error: null,
     hasUnsavedChanges: false,
     pendingDraftRecovery: null,
     pendingConflict: null,
-
-    loadSheets: async () => {
-      // Don't reload if user has purged the list
-      if (get().recentFilesPurged) return
-
-      const contentTypes = useSettingsStore.getState().contentTypes
-      const sheetsMap: Record<string, PageMeta[]> = {}
-
-      // Load all content types uniformly using the sheets API
-      for (const ct of contentTypes) {
-        try {
-          const ctSheets = await api.sheets.list(ct.id)
-          sheetsMap[ct.id] = ctSheets
-        } catch {
-          // Silently fail for content types not yet saved to backend
-          sheetsMap[ct.id] = []
-        }
-      }
-
-      set((state) => {
-        state.sheets = sheetsMap
-      })
-    },
 
     loadTodaysJournal: async () => {
       set((state) => {
@@ -198,11 +182,12 @@ export const usePageStore = create<PageState>()(
           })
         }
 
+        // Record this access in recent sheets
+        recordSheetAccess(page)
+
         // Update URL without adding to history (initial load)
         const url = buildUrlPath('journal', page.journalDate || page.name)
         window.history.replaceState({ type: 'journal', name: page.journalDate || page.name }, '', url)
-        // Refresh sheets list
-        get().loadSheets()
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to load today\'s journal'
@@ -284,6 +269,9 @@ export const usePageStore = create<PageState>()(
           })
         }
 
+        // Record this access in recent sheets
+        recordSheetAccess(page)
+
         // Update browser history
         if (pushHistory) {
           // Use content-type URL path for custom content types, page path for regular pages
@@ -304,14 +292,14 @@ export const usePageStore = create<PageState>()(
               state.currentPageName = name
               state.isLoading = false
             })
+            // Record this access in recent sheets
+            recordSheetAccess(newPage)
             // Update browser history
             if (pushHistory) {
               const urlType = contentType ? 'content-type' : 'page'
               const url = buildUrlPath(urlType, name)
               window.history.pushState({ type: urlType, name }, '', url)
             }
-            // Refresh sheets list
-            get().loadSheets()
             return
           } catch (createErr) {
             set((state) => {
@@ -369,6 +357,9 @@ export const usePageStore = create<PageState>()(
           })
         }
 
+        // Record this access in recent sheets
+        recordSheetAccess(page)
+
         // Update browser history
         if (pushHistory) {
           const url = buildUrlPath('journal', date)
@@ -405,8 +396,8 @@ export const usePageStore = create<PageState>()(
           state.currentPage = page
           state.currentPageName = name
         })
-        // Refresh sheets list
-        get().loadSheets()
+        // Record this access in recent sheets
+        recordSheetAccess(page)
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to create page'
@@ -422,13 +413,9 @@ export const usePageStore = create<PageState>()(
             state.currentPage = null
             state.currentPageName = null
           }
-          // Remove from pages list immediately for responsive UI
-          if (state.sheets.page) {
-            state.sheets.page = state.sheets.page.filter(p => p.name !== name)
-          }
         })
-        // Also refresh from server to ensure consistency
-        get().loadSheets()
+        // Note: The deleted page will naturally fall out of recent sheets
+        // as the user navigates to other pages. No need to explicitly remove.
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to delete page'
@@ -711,10 +698,8 @@ export const usePageStore = create<PageState>()(
     },
 
     clearRecentFiles: () => {
-      set((state) => {
-        state.sheets = {}
-        state.recentFilesPurged = true
-      })
+      // Clear locally tracked recent sheets
+      useRecentSheetsStore.getState().clearAll()
     },
   }))
 )

@@ -22,8 +22,7 @@ function App() {
   const commandPaletteOpen = useUIStore((state) => state.commandPaletteOpen)
   const openCommandPalette = useUIStore((state) => state.openCommandPalette)
   const closeCommandPalette = useUIStore((state) => state.closeCommandPalette)
-  const loadSheets = usePageStore((state) => state.loadSheets)
-  const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
+    const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
@@ -39,19 +38,18 @@ function App() {
   // Apply theme based on user settings
   useTheme()
 
-  // Load initial data and handle URL
+  // Load initial data and handle URL - runs once on mount
   useEffect(() => {
-    // Load content types from API, then load all sheets
+    // Load content types from API (needed for content type routing)
     contentTypesApi.list()
       .then((types) => {
         setContentTypes(types)
-        // Load all sheets (pages, journals, and custom types) after content types are available
-        loadSheets()
       })
       .catch((err) => console.error('Failed to load content types:', err))
 
     initializeFromUrl()
-  }, [loadSheets, initializeFromUrl, setContentTypes])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // Run only on mount - these are stable store actions
 
   // Handle browser back/forward navigation
   useEffect(() => {

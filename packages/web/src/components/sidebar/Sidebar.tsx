@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
+import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { SidebarGraph } from './SidebarGraph'
 import { SidebarHistory } from './SidebarHistory'
 import { SidebarOptions } from './SidebarOptions'
@@ -22,10 +23,11 @@ interface SidebarProps {
 }
 
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
-  const { sheets, currentPageName, navigateToPage, navigateToJournal, loadTodaysJournal } =
+  const { currentPageName, currentPage, navigateToPage, navigateToJournal, loadTodaysJournal } =
     usePageStore()
   const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
   const { contentTypes } = useSettingsStore()
+  const { recentSheets } = useRecentSheetsStore()
 
   // Visual width during drag (can exceed bounds for bounceback effect)
   const [visualWidth, setVisualWidth] = useState(sidebarWidth)
@@ -69,8 +71,6 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   }, [visualWidth, setSidebarWidth])
 
   // Get current page info for history
-  const allSheets = Object.values(sheets).flat()
-  const currentPage = allSheets.find(p => p.name === currentPageName)
   const isCurrentJournal = currentPage?.isJournal ?? false
 
   // Render content based on mode
@@ -127,10 +127,10 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
               </button>
             </div>
 
-            {/* Navigation - all content types rendered uniformly */}
+            {/* Navigation - shows recently accessed sheets per content type */}
             <div className="flex-1 overflow-y-auto px-3">
               {contentTypes.map((ct) => {
-                const ctSheets = sheets[ct.id] || []
+                const ctSheets = recentSheets[ct.id] || []
                 if (ctSheets.length === 0) return null
 
                 return (
@@ -139,7 +139,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                       {ct.name}
                     </h2>
                     <ul>
-                      {ctSheets.slice(0, 10).map((sheet) => {
+                      {ctSheets.map((sheet) => {
                         // Build navigation path based on content type
                         let navPath: string
                         let navAction: () => void
