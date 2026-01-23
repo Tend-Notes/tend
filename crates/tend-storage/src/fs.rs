@@ -408,6 +408,11 @@ impl FileManager {
 
     /// Write a sheet for a content type
     pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
+        // Handle built-in types by delegating to existing methods
+        if content_type.id == "page" || content_type.id == "journal" {
+            return self.write_page(page).await;
+        }
+
         // Ensure directory exists
         self.ensure_content_type_dir(content_type, date).await?;
 
@@ -417,6 +422,23 @@ impl FileManager {
 
     /// Delete a sheet
     pub async fn delete_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<(), StorageError> {
+        // Handle built-in types by delegating to existing methods
+        if content_type.id == "page" {
+            return self.delete_page(name).await;
+        }
+        if content_type.id == "journal" {
+            // For journals, the name IS the date (YYYY-MM-DD)
+            let journal_date = NaiveDate::parse_from_str(name, "%Y-%m-%d")
+                .map_err(|_| StorageError::NotFound(format!("Invalid journal date: {}", name)))?;
+            let path = self.journal_path(journal_date);
+            if !path.exists() {
+                return Err(StorageError::NotFound(format!("Journal not found: {}", name)));
+            }
+            tokio::fs::remove_file(&path).await?;
+            info!("Deleted journal: {}", name);
+            return Ok(());
+        }
+
         let path = self.sheet_path(content_type, name, date);
 
         if !path.exists() {
@@ -441,6 +463,18 @@ impl FileManager {
 
     /// Check if a sheet exists
     pub async fn sheet_exists(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> bool {
+        // Handle built-in types
+        if content_type.id == "page" {
+            return self.page_exists(name).await;
+        }
+        if content_type.id == "journal" {
+            // For journals, the name IS the date (YYYY-MM-DD)
+            if let Ok(journal_date) = NaiveDate::parse_from_str(name, "%Y-%m-%d") {
+                return self.journal_path(journal_date).exists();
+            }
+            return false;
+        }
+
         self.sheet_path(content_type, name, date).exists()
     }
 }

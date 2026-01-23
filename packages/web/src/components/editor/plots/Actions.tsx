@@ -10,12 +10,13 @@
 //
 // Extensions (markdown, delimiter hiding, etc.) are imported here.
 
-import { useMemo } from 'react'
+import { useMemo, useCallback } from 'react'
 import { Extension } from '@codemirror/state'
 import { markdownExtension } from '../extensions/markdown'
 import { hideDelimiters } from '../extensions/hideDelimiters'
 import { wikilinkExtension } from '../extensions/wikilink'
 import { formattingKeymap } from '../extensions/formatting'
+import { usePageStore } from '../../../stores/pageStore'
 
 /**
  * Build href for a wikilink target.
@@ -50,12 +51,32 @@ function buildWikilinkHref(target: string): string {
  * Called by Seed to get the extensions to load.
  */
 export function useActions(): Extension[] {
+  const navigateToPage = usePageStore((state) => state.navigateToPage)
+  const navigateToJournal = usePageStore((state) => state.navigateToJournal)
+
+  // Navigation callback for wikilinks (SPA navigation without full page reload)
+  const handleWikilinkNavigate = useCallback((target: string) => {
+    // Journal links: journals/YYYY-MM-DD
+    if (target.startsWith('journals/')) {
+      const date = target.slice('journals/'.length)
+      navigateToJournal(date)
+      return
+    }
+
+    // Everything else goes through navigateToPage
+    // (handles both plain pages and content type paths)
+    navigateToPage(target)
+  }, [navigateToPage, navigateToJournal])
+
   return useMemo(() => {
     return [
       markdownExtension(),
       hideDelimiters(),
-      wikilinkExtension(buildWikilinkHref),
+      wikilinkExtension({
+        buildHref: buildWikilinkHref,
+        onNavigate: handleWikilinkNavigate,
+      }),
       formattingKeymap(),
     ]
-  }, [])
+  }, [handleWikilinkNavigate])
 }

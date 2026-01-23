@@ -98,7 +98,11 @@ const wikilinkContent = Decoration.mark({ class: 'cm-wikilink-content wiki-link'
  * Widget that renders an actual <a> element for the wikilink
  */
 class WikilinkWidget extends WidgetType {
-  constructor(readonly target: string, readonly buildHref: (target: string) => string) {
+  constructor(
+    readonly target: string,
+    readonly buildHref: (target: string) => string,
+    readonly onNavigate?: (target: string) => void
+  ) {
     super()
   }
 
@@ -111,12 +115,17 @@ class WikilinkWidget extends WidgetType {
     // Prevent CodeMirror from handling mousedown (which would move cursor)
     link.addEventListener('mousedown', (e) => {
       e.stopPropagation()
-      // For regular left-click, navigate immediately
+      // For regular left-click, navigate using callback (SPA navigation)
       if (e.button === 0 && !e.ctrlKey && !e.metaKey) {
         e.preventDefault()
-        window.location.href = link.href
+        if (this.onNavigate) {
+          this.onNavigate(this.target)
+        } else {
+          // Fallback to full page navigation if no callback provided
+          window.location.href = link.href
+        }
       }
-      // For ctrl/cmd+click or middle-click, let browser handle it
+      // For ctrl/cmd+click or middle-click, let browser handle it (new tab)
     })
 
     return link
@@ -130,7 +139,12 @@ class WikilinkWidget extends WidgetType {
 /**
  * Build decorations for wikilinks
  */
-function buildDecorations(view: EditorView, useWidgets: boolean, buildHref?: (target: string) => string): DecorationSet {
+function buildDecorations(
+  view: EditorView,
+  useWidgets: boolean,
+  buildHref?: (target: string) => string,
+  onNavigate?: (target: string) => void
+): DecorationSet {
   const decorations: Range<Decoration>[] = []
   const doc = view.state.doc.toString()
   const cursorPos = view.state.selection.main.head
@@ -151,7 +165,7 @@ function buildDecorations(view: EditorView, useWidgets: boolean, buildHref?: (ta
       // Cursor outside - replace entire wikilink with widget (actual <a> tag)
       decorations.push(
         Decoration.replace({
-          widget: new WikilinkWidget(wl.target, buildHref),
+          widget: new WikilinkWidget(wl.target, buildHref, onNavigate),
         }).range(wl.from, wl.to)
       )
     } else {
@@ -200,7 +214,10 @@ export function completeWikilink(view: EditorView, state: WikilinkState, target:
 /**
  * Create the wikilink decorations plugin
  */
-function createWikilinkPlugin(buildHref?: (target: string) => string) {
+function createWikilinkPlugin(
+  buildHref?: (target: string) => string,
+  onNavigate?: (target: string) => void
+) {
   const useWidgets = !!buildHref
 
   return ViewPlugin.fromClass(
@@ -208,12 +225,12 @@ function createWikilinkPlugin(buildHref?: (target: string) => string) {
       decorations: DecorationSet
 
       constructor(view: EditorView) {
-        this.decorations = buildDecorations(view, useWidgets, buildHref)
+        this.decorations = buildDecorations(view, useWidgets, buildHref, onNavigate)
       }
 
       update(update: ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.focusChanged) {
-          this.decorations = buildDecorations(update.view, useWidgets, buildHref)
+          this.decorations = buildDecorations(update.view, useWidgets, buildHref, onNavigate)
         }
       }
     },
@@ -294,11 +311,23 @@ function defaultBuildHref(target: string): string {
 }
 
 /**
+ * Options for wikilink extension
+ */
+export interface WikilinkOptions {
+  /** Build the href for a wikilink target (for the <a> element) */
+  buildHref?: (target: string) => string
+  /** Navigation callback for SPA navigation (prevents full page reload) */
+  onNavigate?: (target: string) => void
+}
+
+/**
  * Main extension factory
  */
-export function wikilinkExtension(buildHref?: (target: string) => string): Extension {
+export function wikilinkExtension(options?: WikilinkOptions): Extension {
+  const buildHref = options?.buildHref ?? defaultBuildHref
+  const onNavigate = options?.onNavigate
   return [
-    createWikilinkPlugin(buildHref ?? defaultBuildHref),
+    createWikilinkPlugin(buildHref, onNavigate),
     wikilinkTheme,
   ]
 }

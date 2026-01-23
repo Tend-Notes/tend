@@ -12,6 +12,7 @@ use serde::Deserialize;
 use tend_core::{Block, ContentType, Page, PageMeta};
 
 use crate::error::AppError;
+use crate::routes::pages::BlockData;
 use crate::state::AppState;
 
 use super::gardens::load_content_types;
@@ -43,16 +44,12 @@ pub struct CreateSheetRequest {
     pub content: Option<String>,
 }
 
-/// Request to update a sheet
+/// Request to update a sheet (same format as page updates)
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct UpdateSheetRequest {
-    pub name: String,
-    pub title: String,
-    pub root_blocks: Vec<String>,
-    pub blocks: std::collections::HashMap<String, Block>,
-    #[serde(default)]
-    pub version: u64,
+    pub blocks: Vec<BlockData>,
+    /// Expected version for conflict detection
+    pub version: Option<u64>,
 }
 
 /// Look up a content type by ID from the active garden's config
@@ -161,35 +158,59 @@ pub async fn update_sheet(
 
     let garden = state.garden.read().await;
 
-    // Read existing page for version check
-    let existing = garden.file_manager.read_sheet(&content_type, &path.name, date).await?;
+    // Read existing sheet or create new
+    let mut page = garden
+        .file_manager
+        .read_sheet(&content_type, &path.name, date)
+        .await
+        .unwrap_or_else(|_| Page::new_sheet(&path.name, &content_type.id, date));
 
     // Version conflict check
-    if req.version > 0 && existing.version != req.version {
-        return Err(AppError::Conflict {
-            current_version: existing.version,
-            message: format!(
-                "Version conflict: expected {}, got {}",
-                existing.version, req.version
-            ),
-        });
+    if let Some(expected_version) = req.version {
+        if page.version != expected_version {
+            return Err(AppError::Conflict {
+                current_version: page.version,
+                message: format!(
+                    "Version mismatch: expected {}, current {}",
+                    expected_version, page.version
+                ),
+            });
+        }
     }
 
-    // Build updated page
-    let page = Page {
-        name: req.name,
-        title: req.title,
-        root_blocks: req.root_blocks.iter().filter_map(|s| s.parse().ok()).collect(),
-        blocks: req.blocks.into_iter().filter_map(|(k, v)| k.parse().ok().map(|uuid| (uuid, v))).collect(),
-        properties: existing.properties,
-        content_type: existing.content_type,
-        is_journal: existing.is_journal,
-        journal_date: existing.journal_date,
-        created_at: existing.created_at,
-        modified_at: chrono::Utc::now(),
-        version: existing.version + 1,
-    };
+    // Clear existing blocks
+    page.blocks.clear();
+    page.root_blocks.clear();
 
+    // Add blocks from request (same as update_page)
+    for block_data in req.blocks {
+        let uuid = block_data
+            .uuid
+            .parse()
+            .map_err(|_| AppError::BadRequest("Invalid UUID".to_string()))?;
+
+        let mut block = Block::with_uuid(uuid, &block_data.content);
+
+        block.parent_uuid = block_data
+            .parent_uuid
+            .as_ref()
+            .and_then(|s| s.parse().ok());
+
+        block.children = block_data
+            .children
+            .iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        block.collapsed = block_data.collapsed;
+        block.properties = block_data.properties;
+
+        page.add_block(block);
+    }
+
+    // Increment version and update timestamp
+    page.version += 1;
+    page.touch();
     garden.file_manager.write_sheet(&content_type, &page, date).await?;
 
     // Update search index (if search is enabled)
