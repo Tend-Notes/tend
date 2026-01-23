@@ -20,6 +20,8 @@ import type { Block } from '../../../types'
 import { useActions } from './Actions'
 import { wikilinkStateListener, type WikilinkState } from '../extensions/wikilink'
 import { WikilinkSuggestions } from '../extensions/WikilinkSuggestions'
+import { slashCommandStateListener, type SlashCommandState } from '../extensions/slashCommand'
+import { SlashCommandSuggestions } from '../extensions/SlashCommandSuggestions'
 
 // Safe wrapper for Actions - Seed works without formatting if Actions fails
 function useSafeActions(): Extension[] {
@@ -123,6 +125,11 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     // Track wikilink popup state
     const [wikilinkState, setWikilinkState] = useState<WikilinkState | null>(null)
     const setWikilinkStateRef = useRef(setWikilinkState)
+
+    // Track slash command popup state
+    const [slashCommandState, setSlashCommandState] = useState<SlashCommandState | null>(null)
+    const setSlashCommandStateRef = useRef(setSlashCommandState)
+    setSlashCommandStateRef.current = setSlashCommandState
     setWikilinkStateRef.current = setWikilinkState
 
     // Get formatting extensions from Actions (fails gracefully to empty array)
@@ -132,6 +139,13 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     const createWikilinkListener = useCallback(() => {
       return wikilinkStateListener((state) => {
         setWikilinkStateRef.current(state)
+      })
+    }, [])
+
+    // Create slash command state listener
+    const createSlashCommandListener = useCallback(() => {
+      return slashCommandStateListener((state) => {
+        setSlashCommandStateRef.current(state)
       })
     }, [])
 
@@ -390,6 +404,7 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           createUpdateListener(),
           createEventHandlers(),
           createWikilinkListener(),
+          createSlashCommandListener(),
           baseTheme,
           EditorView.lineWrapping,
           EditorView.editable.of(!readonly),
@@ -509,6 +524,9 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
         />
         {wikilinkState && viewRef.current && (
           <WikilinkSuggestions view={viewRef.current} state={wikilinkState} />
+        )}
+        {slashCommandState && viewRef.current && (
+          <SlashCommandSuggestions view={viewRef.current} state={slashCommandState} />
         )}
       </>
     )
