@@ -634,19 +634,16 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         className={`block-container ${isInMultiSelection ? 'block-container--selected' : ''}`}
         data-block-id={block.uuid}
         onClick={(e) => {
-          // Only handle clicks on the container itself, not on the Seed
-          // Let the Seed handle its own click focus naturally
+          // Let CodeMirror handle clicks inside the editor completely
           const target = e.target as HTMLElement
-          if (!target.closest('[data-seed-editor]')) {
-            focusBlock(block.uuid, 'end')
-          } else {
-            // Stop propagation so parent block-containers don't interfere
+          if (target.closest('[data-seed-editor]')) {
+            // Inside the editor - stop propagation but do NOTHING else
+            // CodeMirror handles focus and cursor placement natively
             e.stopPropagation()
-            // Just update selection state without repositioning cursor
-            setSelectedUuid(block.uuid)
-            setFocusedBlock(block.uuid)
-            clearSelection()
+            return
           }
+          // Outside editor (e.g., container padding) - focus at end
+          focusBlock(block.uuid, 'end')
         }}
       >
         <div className="block flex items-start py-0.5">
@@ -668,6 +665,13 @@ export function Plots({ page, readonly = false }: PlotsProps) {
               isSelected={isSelected}
               onChange={(content) => handleBlockChange(block.uuid, content)}
               onBoundaryEvent={(event) => handleBoundaryEvent(block.uuid, event)}
+              onFocus={() => {
+                // Update selection state when CodeMirror gets focus
+                // This happens AFTER CodeMirror handles the click, not during
+                setSelectedUuid(block.uuid)
+                setFocusedBlock(block.uuid)
+                clearSelection()
+              }}
               readonly={readonly}
             />
           </div>
