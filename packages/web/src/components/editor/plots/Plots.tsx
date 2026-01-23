@@ -4,11 +4,12 @@
 // Manages the block tree structure. Owns selection state and keyboard navigation.
 // Drop-in replacement for OutlinerEditor - same props interface.
 //
-// TEST VERSION: Static placeholder blocks with keyboard-driven tree operations.
+// Seeds handle text editing and report boundary events back to Plots.
 
-import { useMemo, useEffect, useCallback, useState, useRef, KeyboardEvent } from 'react'
+import { useMemo, useEffect, useCallback, useState, useRef } from 'react'
 import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
+import { Seed, SeedBoundaryEvent } from './Seed'
 import { v4 as uuidv4 } from 'uuid'
 
 interface PlotsProps {
@@ -16,10 +17,11 @@ interface PlotsProps {
   readonly?: boolean
 }
 
-export function Plots({ page }: PlotsProps) {
+export function Plots({ page, readonly = false }: PlotsProps) {
   const updateCurrentPage = usePageStore((state) => state.updateCurrentPage)
   const containerRef = useRef<HTMLDivElement>(null)
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null)
+  const pendingFocusRef = useRef<{ uuid: string; position: 'start' | 'end' | number } | null>(null)
 
   // Get root blocks for rendering
   const rootBlocks = useMemo(() => {
@@ -51,6 +53,32 @@ export function Plots({ page }: PlotsProps) {
     return Object.values(page.blocks)
   }, [page.blocks])
 
+  // Focus a block's Seed at a specific position
+  const focusBlock = useCallback((uuid: string, position: 'start' | 'end' | number) => {
+    setSelectedUuid(uuid)
+    pendingFocusRef.current = { uuid, position }
+  }, [])
+
+  // Apply pending focus after render
+  useEffect(() => {
+    if (pendingFocusRef.current) {
+      const { uuid, position } = pendingFocusRef.current
+      pendingFocusRef.current = null
+
+      requestAnimationFrame(() => {
+        const blockEl = document.querySelector(`[data-block-id="${uuid}"]`)
+        const editorEl = blockEl?.querySelector('[data-seed-editor]') as HTMLElement
+        if (!editorEl) return
+
+        const event = new CustomEvent('seed-focus', {
+          detail: { position },
+          bubbles: false,
+        })
+        editorEl.dispatchEvent(event)
+      })
+    }
+  })
+
   // ─────────────────────────────────────────────────────────────────────────
   // TREE OPERATIONS
   // ─────────────────────────────────────────────────────────────────────────
@@ -65,8 +93,18 @@ export function Plots({ page }: PlotsProps) {
     [getAllBlocks, updateCurrentPage]
   )
 
+  const handleBlockChange = useCallback(
+    (uuid: string, content: string) => {
+      const blocks = getAllBlocks().map((b) =>
+        b.uuid === uuid ? { ...b, content } : b
+      )
+      updateCurrentPage(blocks)
+    },
+    [getAllBlocks, updateCurrentPage]
+  )
+
   const handleCreateBlock = useCallback(
-    (afterUuid: string): string => {
+    (afterUuid: string, contentForNewBlock: string = ''): string => {
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
       const afterBlock = blocks.find((b) => b.uuid === afterUuid)
       if (!afterBlock) return afterUuid
@@ -75,7 +113,7 @@ export function Plots({ page }: PlotsProps) {
 
       const newBlock: Block = {
         uuid: uuidv4(),
-        content: '',
+        content: contentForNewBlock,
         parentUuid: hasVisibleChildren ? afterUuid : afterBlock.parentUuid,
         children: [],
         collapsed: false,
@@ -117,23 +155,30 @@ export function Plots({ page }: PlotsProps) {
     [getAllBlocks, updateCurrentPage, page.rootBlocks]
   )
 
-  const handleDeleteBlock = useCallback(
-    (uuid: string): string | null => {
+  const handleMergeWithPrevious = useCallback(
+    (uuid: string) => {
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
-      if (blocks.length <= 1) return uuid
-
       const currentIndex = flatBlockOrder.indexOf(uuid)
-      const blockToDelete = blocks.find((b) => b.uuid === uuid)
-      if (!blockToDelete) return uuid
+      if (currentIndex <= 0) return
 
-      // Remove from parent's children
-      if (blockToDelete.parentUuid) {
-        const parent = blocks.find((b) => b.uuid === blockToDelete.parentUuid)
+      const currentBlock = blocks.find((b) => b.uuid === uuid)
+      const previousUuid = flatBlockOrder[currentIndex - 1]
+      const previousBlock = blocks.find((b) => b.uuid === previousUuid)
+
+      if (!currentBlock || !previousBlock) return
+
+      const cursorPos = previousBlock.content.length
+
+      // Append content
+      previousBlock.content = previousBlock.content + currentBlock.content
+
+      // Remove from parent
+      if (currentBlock.parentUuid) {
+        const parent = blocks.find((b) => b.uuid === currentBlock.parentUuid)
         if (parent) {
           parent.children = parent.children.filter((id) => id !== uuid)
         }
       } else {
-        // Remove from rootBlocks
         const newRootBlocks = page.rootBlocks.filter((id) => id !== uuid)
         usePageStore.setState((state) => {
           if (state.currentPage) {
@@ -142,18 +187,75 @@ export function Plots({ page }: PlotsProps) {
         })
       }
 
+      // Transfer children
+      if (currentBlock.children.length > 0) {
+        for (const childUuid of currentBlock.children) {
+          const child = blocks.find((b) => b.uuid === childUuid)
+          if (child) {
+            child.parentUuid = previousUuid
+          }
+        }
+        previousBlock.children = [...previousBlock.children, ...currentBlock.children]
+      }
+
       const updatedBlocks = blocks.filter((b) => b.uuid !== uuid)
       updateCurrentPage(updatedBlocks)
 
-      // Return previous block or next block
-      if (currentIndex > 0) {
-        return flatBlockOrder[currentIndex - 1]
-      } else if (flatBlockOrder.length > 1) {
-        return flatBlockOrder[1]
-      }
-      return null
+      focusBlock(previousUuid, cursorPos)
     },
-    [getAllBlocks, updateCurrentPage, flatBlockOrder, page.rootBlocks]
+    [getAllBlocks, flatBlockOrder, updateCurrentPage, focusBlock, page.rootBlocks]
+  )
+
+  const handleMergeWithNext = useCallback(
+    (uuid: string) => {
+      const currentIndex = flatBlockOrder.indexOf(uuid)
+      if (currentIndex >= flatBlockOrder.length - 1) return
+
+      const nextUuid = flatBlockOrder[currentIndex + 1]
+      // Merge next into current (delete at end = merge next into this)
+      const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+      const currentBlock = blocks.find((b) => b.uuid === uuid)
+      const nextBlock = blocks.find((b) => b.uuid === nextUuid)
+
+      if (!currentBlock || !nextBlock) return
+
+      const cursorPos = currentBlock.content.length
+
+      // Append content
+      currentBlock.content = currentBlock.content + nextBlock.content
+
+      // Remove next from parent
+      if (nextBlock.parentUuid) {
+        const parent = blocks.find((b) => b.uuid === nextBlock.parentUuid)
+        if (parent) {
+          parent.children = parent.children.filter((id) => id !== nextUuid)
+        }
+      } else {
+        const newRootBlocks = page.rootBlocks.filter((id) => id !== nextUuid)
+        usePageStore.setState((state) => {
+          if (state.currentPage) {
+            state.currentPage.rootBlocks = newRootBlocks
+          }
+        })
+      }
+
+      // Transfer next's children to current
+      if (nextBlock.children.length > 0) {
+        for (const childUuid of nextBlock.children) {
+          const child = blocks.find((b) => b.uuid === childUuid)
+          if (child) {
+            child.parentUuid = uuid
+          }
+        }
+        currentBlock.children = [...currentBlock.children, ...nextBlock.children]
+      }
+
+      const updatedBlocks = blocks.filter((b) => b.uuid !== nextUuid)
+      updateCurrentPage(updatedBlocks)
+
+      focusBlock(uuid, cursorPos)
+    },
+    [getAllBlocks, flatBlockOrder, updateCurrentPage, focusBlock, page.rootBlocks]
   )
 
   const handleIndent = useCallback(
@@ -285,7 +387,6 @@ export function Plots({ page }: PlotsProps) {
       const currentIndex = siblings.indexOf(uuid)
 
       if (currentIndex > 0) {
-        // Swap with previous sibling
         if (block.parentUuid) {
           const parent = blocks.find((b) => b.uuid === block.parentUuid)
           if (!parent) return
@@ -323,7 +424,6 @@ export function Plots({ page }: PlotsProps) {
       const currentIndex = siblings.indexOf(uuid)
 
       if (currentIndex < siblings.length - 1) {
-        // Swap with next sibling
         if (block.parentUuid) {
           const parent = blocks.find((b) => b.uuid === block.parentUuid)
           if (!parent) return
@@ -352,119 +452,94 @@ export function Plots({ page }: PlotsProps) {
   // NAVIGATION
   // ─────────────────────────────────────────────────────────────────────────
 
-  const navigateUp = useCallback(() => {
-    if (!selectedUuid) {
-      if (flatBlockOrder.length > 0) {
-        setSelectedUuid(flatBlockOrder[0])
-      }
-      return
-    }
-    const currentIndex = flatBlockOrder.indexOf(selectedUuid)
+  const navigateUp = useCallback((fromUuid: string, cursorOffset?: number) => {
+    const currentIndex = flatBlockOrder.indexOf(fromUuid)
     if (currentIndex > 0) {
-      setSelectedUuid(flatBlockOrder[currentIndex - 1])
+      const prevUuid = flatBlockOrder[currentIndex - 1]
+      focusBlock(prevUuid, cursorOffset !== undefined ? cursorOffset : 'end')
     }
-  }, [selectedUuid, flatBlockOrder])
+  }, [flatBlockOrder, focusBlock])
 
-  const navigateDown = useCallback(() => {
-    if (!selectedUuid) {
-      if (flatBlockOrder.length > 0) {
-        setSelectedUuid(flatBlockOrder[0])
-      }
-      return
-    }
-    const currentIndex = flatBlockOrder.indexOf(selectedUuid)
+  const navigateDown = useCallback((fromUuid: string, cursorOffset?: number) => {
+    const currentIndex = flatBlockOrder.indexOf(fromUuid)
     if (currentIndex < flatBlockOrder.length - 1) {
-      setSelectedUuid(flatBlockOrder[currentIndex + 1])
+      const nextUuid = flatBlockOrder[currentIndex + 1]
+      focusBlock(nextUuid, cursorOffset !== undefined ? cursorOffset : 'start')
     }
-  }, [selectedUuid, flatBlockOrder])
+  }, [flatBlockOrder, focusBlock])
 
   // ─────────────────────────────────────────────────────────────────────────
-  // KEYBOARD HANDLER
+  // SEED BOUNDARY EVENT HANDLER
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
-    if (!selectedUuid) {
-      // Any key selects first block
-      if (flatBlockOrder.length > 0) {
-        setSelectedUuid(flatBlockOrder[0])
+  const handleBoundaryEvent = useCallback((uuid: string, event: SeedBoundaryEvent) => {
+    switch (event.type) {
+      case 'enter': {
+        // Split block at cursor
+        const contentBefore = event.content.substring(0, event.cursorOffset)
+        const contentAfter = event.content.substring(event.cursorOffset)
+
+        // Update current block with content before cursor
+        handleBlockChange(uuid, contentBefore)
+
+        // Create new block with content after cursor
+        const newUuid = handleCreateBlock(uuid, contentAfter)
+        focusBlock(newUuid, 'start')
+        break
       }
-      return
-    }
 
-    // Arrow Up - navigate
-    if (e.key === 'ArrowUp' && !e.altKey) {
-      e.preventDefault()
-      navigateUp()
-      return
-    }
+      case 'backspace-at-start':
+        handleMergeWithPrevious(uuid)
+        break
 
-    // Arrow Down - navigate
-    if (e.key === 'ArrowDown' && !e.altKey) {
-      e.preventDefault()
-      navigateDown()
-      return
-    }
+      case 'delete-at-end':
+        handleMergeWithNext(uuid)
+        break
 
-    // Alt+Arrow Up - move block up
-    if (e.key === 'ArrowUp' && e.altKey) {
-      e.preventDefault()
-      handleMoveUp(selectedUuid)
-      return
-    }
+      case 'arrow-up':
+        navigateUp(uuid, event.cursorOffset)
+        break
 
-    // Alt+Arrow Down - move block down
-    if (e.key === 'ArrowDown' && e.altKey) {
-      e.preventDefault()
-      handleMoveDown(selectedUuid)
-      return
-    }
+      case 'arrow-down':
+        navigateDown(uuid, event.cursorOffset)
+        break
 
-    // Tab - indent
-    if (e.key === 'Tab' && !e.shiftKey) {
-      e.preventDefault()
-      handleIndent(selectedUuid)
-      return
-    }
+      case 'arrow-left-at-start':
+        navigateUp(uuid, 'end' as unknown as number) // Will be interpreted as 'end'
+        break
 
-    // Shift+Tab - outdent
-    if (e.key === 'Tab' && e.shiftKey) {
-      e.preventDefault()
-      handleOutdent(selectedUuid)
-      return
-    }
+      case 'arrow-right-at-end':
+        navigateDown(uuid, 'start' as unknown as number) // Will be interpreted as 'start'
+        break
 
-    // Enter - create new block
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      const newUuid = handleCreateBlock(selectedUuid)
-      setSelectedUuid(newUuid)
-      return
-    }
+      case 'tab':
+        handleIndent(uuid)
+        break
 
-    // Backspace - delete empty block
-    if (e.key === 'Backspace') {
-      const block = page.blocks[selectedUuid]
-      if (block && block.content === '') {
-        e.preventDefault()
-        const newSelection = handleDeleteBlock(selectedUuid)
-        if (newSelection) {
-          setSelectedUuid(newSelection)
-        }
-      }
-      return
+      case 'shift-tab':
+        handleOutdent(uuid)
+        break
+
+      case 'alt-arrow-up':
+        handleMoveUp(uuid)
+        break
+
+      case 'alt-arrow-down':
+        handleMoveDown(uuid)
+        break
     }
   }, [
-    selectedUuid,
-    flatBlockOrder,
-    page.blocks,
+    handleBlockChange,
+    handleCreateBlock,
+    handleMergeWithPrevious,
+    handleMergeWithNext,
     navigateUp,
     navigateDown,
-    handleMoveUp,
-    handleMoveDown,
     handleIndent,
     handleOutdent,
-    handleCreateBlock,
-    handleDeleteBlock,
+    handleMoveUp,
+    handleMoveDown,
+    focusBlock,
   ])
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -481,9 +556,9 @@ export function Plots({ page }: PlotsProps) {
     return (
       <div
         key={block.uuid}
-        className={`block-container bg-base-01/50 ${isSelected ? 'ring-2 ring-base-0D' : ''}`}
+        className={`block-container ${isSelected ? 'ring-2 ring-base-0D' : ''}`}
         data-block-id={block.uuid}
-        onClick={() => setSelectedUuid(block.uuid)}
+        onClick={() => focusBlock(block.uuid, 'end')}
       >
         <div className="block flex items-start py-0.5">
           {/* Bullet */}
@@ -497,9 +572,15 @@ export function Plots({ page }: PlotsProps) {
             }`}
           />
 
-          {/* Placeholder content - static, no editing */}
-          <div className="flex-1 min-h-[1.5em] text-base-05">
-            {block.content || <span className="text-base-03 italic">empty</span>}
+          {/* Seed - editable content */}
+          <div className="flex-1">
+            <Seed
+              block={block}
+              isSelected={isSelected}
+              onChange={(content) => handleBlockChange(block.uuid, content)}
+              onBoundaryEvent={(event) => handleBoundaryEvent(block.uuid, event)}
+              readonly={readonly}
+            />
           </div>
         </div>
 
@@ -545,12 +626,7 @@ export function Plots({ page }: PlotsProps) {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="outliner-editor max-w-3xl focus:outline-none"
-      tabIndex={0}
-      onKeyDown={handleKeyDown}
-    >
+    <div ref={containerRef} className="outliner-editor max-w-3xl">
       {rootBlocks.map((block) => renderBlock(block))}
     </div>
   )
