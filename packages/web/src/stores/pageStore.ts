@@ -43,7 +43,7 @@ interface PageState {
   navigateToJournal: (date: string, pushHistory?: boolean) => Promise<void>
   createPage: (name: string) => Promise<void>
   deletePage: (name: string) => Promise<void>
-  updateCurrentPage: (blocks: Block[]) => Promise<void>
+  updateCurrentPage: (blocks: Block[], rootBlocksHint?: string[]) => Promise<void>
   setError: (error: string | null) => void
   initializeFromUrl: () => Promise<void>
   restoreDraft: () => void
@@ -430,7 +430,7 @@ export const usePageStore = create<PageState>()(
       }
     },
 
-    updateCurrentPage: async (blocks: Block[]) => {
+    updateCurrentPage: async (blocks: Block[], rootBlocksHint?: string[]) => {
       const { currentPage } = get()
       if (!currentPage) return
 
@@ -445,24 +445,37 @@ export const usePageStore = create<PageState>()(
         }
       }
 
-      // Build new rootBlocks list preserving order and inserting new roots smartly
-      const existingRoots = currentPage.rootBlocks.filter(uuid => newRootUuids.has(uuid))
-      const addedRoots = [...newRootUuids].filter(uuid => !currentPage.rootBlocks.includes(uuid))
+      let finalRoots: string[]
 
-      // For each new root, try to insert it after its former parent (if parent is a root)
-      let finalRoots = [...existingRoots]
-      for (const newRootUuid of addedRoots) {
-        // Check the old state to find the former parent
-        const oldBlock = currentPage.blocks[newRootUuid]
-        const formerParentUuid = oldBlock?.parentUuid
+      if (rootBlocksHint) {
+        // Use the hint, but filter to only include valid root UUIDs
+        finalRoots = rootBlocksHint.filter(uuid => newRootUuids.has(uuid))
+        // Add any roots not in the hint at the end
+        for (const uuid of newRootUuids) {
+          if (!finalRoots.includes(uuid)) {
+            finalRoots.push(uuid)
+          }
+        }
+      } else {
+        // Build new rootBlocks list preserving order and inserting new roots smartly
+        const existingRoots = currentPage.rootBlocks.filter(uuid => newRootUuids.has(uuid))
+        const addedRoots = [...newRootUuids].filter(uuid => !currentPage.rootBlocks.includes(uuid))
 
-        if (formerParentUuid && finalRoots.includes(formerParentUuid)) {
-          // Insert after the former parent
-          const parentIndex = finalRoots.indexOf(formerParentUuid)
-          finalRoots.splice(parentIndex + 1, 0, newRootUuid)
-        } else {
-          // Append at the end
-          finalRoots.push(newRootUuid)
+        // For each new root, try to insert it after its former parent (if parent is a root)
+        finalRoots = [...existingRoots]
+        for (const newRootUuid of addedRoots) {
+          // Check the old state to find the former parent
+          const oldBlock = currentPage.blocks[newRootUuid]
+          const formerParentUuid = oldBlock?.parentUuid
+
+          if (formerParentUuid && finalRoots.includes(formerParentUuid)) {
+            // Insert after the former parent
+            const parentIndex = finalRoots.indexOf(formerParentUuid)
+            finalRoots.splice(parentIndex + 1, 0, newRootUuid)
+          } else {
+            // Append at the end
+            finalRoots.push(newRootUuid)
+          }
         }
       }
 

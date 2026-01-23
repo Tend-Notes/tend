@@ -185,12 +185,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
           newBlock.uuid,
           ...page.rootBlocks.slice(afterIndex + 1),
         ]
-        usePageStore.setState((state) => {
-          if (state.currentPage) {
-            state.currentPage.rootBlocks = newRootBlocks
-          }
-        })
-        updateCurrentPage([...blocks, newBlock])
+        updateCurrentPage([...blocks, newBlock], newRootBlocks)
       }
 
       return newBlock.uuid
@@ -221,13 +216,6 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         if (parent) {
           parent.children = parent.children.filter((id) => id !== uuid)
         }
-      } else {
-        const newRootBlocks = page.rootBlocks.filter((id) => id !== uuid)
-        usePageStore.setState((state) => {
-          if (state.currentPage) {
-            state.currentPage.rootBlocks = newRootBlocks
-          }
-        })
       }
 
       // Transfer children
@@ -242,7 +230,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       }
 
       const updatedBlocks = blocks.filter((b) => b.uuid !== uuid)
-      updateCurrentPage(updatedBlocks)
+      // Pass rootBlocks hint with the deleted block removed
+      const newRootBlocks = page.rootBlocks.filter((id) => id !== uuid)
+      updateCurrentPage(updatedBlocks, newRootBlocks)
 
       focusBlock(previousUuid, cursorPos)
     },
@@ -273,13 +263,6 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         if (parent) {
           parent.children = parent.children.filter((id) => id !== nextUuid)
         }
-      } else {
-        const newRootBlocks = page.rootBlocks.filter((id) => id !== nextUuid)
-        usePageStore.setState((state) => {
-          if (state.currentPage) {
-            state.currentPage.rootBlocks = newRootBlocks
-          }
-        })
       }
 
       // Transfer next's children to current
@@ -294,7 +277,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       }
 
       const updatedBlocks = blocks.filter((b) => b.uuid !== nextUuid)
-      updateCurrentPage(updatedBlocks)
+      // Pass rootBlocks hint with the deleted block removed
+      const newRootBlocks = page.rootBlocks.filter((id) => id !== nextUuid)
+      updateCurrentPage(updatedBlocks, newRootBlocks)
 
       focusBlock(uuid, cursorPos)
     },
@@ -327,14 +312,10 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         if (oldParent) {
           oldParent.children = oldParent.children.filter((id) => id !== uuid)
         }
-      } else {
-        const newRootBlocks = page.rootBlocks.filter((id) => id !== uuid)
-        usePageStore.setState((state) => {
-          if (state.currentPage) {
-            state.currentPage.rootBlocks = newRootBlocks
-          }
-        })
       }
+
+      // Track if we need to remove from rootBlocks
+      const wasRoot = !blocks.find((b) => b.uuid === uuid)?.parentUuid
 
       // Add to new parent
       newParent.children = [...newParent.children, uuid]
@@ -355,7 +336,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       }
       updateChildDepths(uuid, block.depth)
 
-      updateCurrentPage(blocks)
+      // Pass rootBlocks hint - block is no longer a root after indent
+      const newRootBlocks = wasRoot ? page.rootBlocks.filter((id) => id !== uuid) : page.rootBlocks
+      updateCurrentPage(blocks, newRootBlocks)
     },
     [getAllBlocks, page.rootBlocks, updateCurrentPage, capturePositions]
   )
@@ -379,6 +362,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       block.parentUuid = newParentUuid
       block.depth = Math.max(0, block.depth - 1)
 
+      // Compute new rootBlocks if becoming a root
+      let newRootBlocks = page.rootBlocks
+
       // Insert after parent
       if (newParentUuid) {
         const grandparent = blocks.find((b) => b.uuid === newParentUuid)
@@ -391,17 +377,13 @@ export function Plots({ page, readonly = false }: PlotsProps) {
           ]
         }
       } else {
+        // Block is becoming a root - insert after parent in rootBlocks
         const parentIndex = page.rootBlocks.indexOf(parent.uuid)
-        const newRootBlocks = [
+        newRootBlocks = [
           ...page.rootBlocks.slice(0, parentIndex + 1),
           uuid,
           ...page.rootBlocks.slice(parentIndex + 1),
         ]
-        usePageStore.setState((state) => {
-          if (state.currentPage) {
-            state.currentPage.rootBlocks = newRootBlocks
-          }
-        })
       }
 
       // Update children depths
@@ -418,7 +400,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       }
       updateChildDepths(uuid, block.depth)
 
-      updateCurrentPage(blocks)
+      updateCurrentPage(blocks, newRootBlocks)
     },
     [getAllBlocks, updateCurrentPage, page.rootBlocks, capturePositions]
   )
@@ -450,25 +432,15 @@ export function Plots({ page, readonly = false }: PlotsProps) {
           }
           updateCurrentPage(blocks)
         } else {
-          // For root blocks, set both at once to avoid race conditions
-          const blockMap: Record<string, Block> = {}
-          for (const b of blocks) {
-            blockMap[b.uuid] = b
-          }
-          usePageStore.setState((state) => {
-            if (state.currentPage) {
-              state.currentPage.blocks = blockMap
-              state.currentPage.rootBlocks = siblings
-              state.hasUnsavedChanges = true
-            }
-          })
+          // Root blocks - pass the reordered siblings as the rootBlocks hint
+          updateCurrentPage(blocks, siblings)
         }
       } else if (block.parentUuid) {
         // At top of siblings - outdent (move before parent)
         handleOutdent(uuid)
       }
     },
-    [getAllBlocks, page.rootBlocks, handleOutdent, capturePositions]
+    [getAllBlocks, page.rootBlocks, handleOutdent, capturePositions, updateCurrentPage]
   )
 
   const handleMoveDown = useCallback(
@@ -498,25 +470,15 @@ export function Plots({ page, readonly = false }: PlotsProps) {
           }
           updateCurrentPage(blocks)
         } else {
-          // For root blocks, set both at once to avoid race conditions
-          const blockMap: Record<string, Block> = {}
-          for (const b of blocks) {
-            blockMap[b.uuid] = b
-          }
-          usePageStore.setState((state) => {
-            if (state.currentPage) {
-              state.currentPage.blocks = blockMap
-              state.currentPage.rootBlocks = siblings
-              state.hasUnsavedChanges = true
-            }
-          })
+          // Root blocks - pass the reordered siblings as the rootBlocks hint
+          updateCurrentPage(blocks, siblings)
         }
       } else if (block.parentUuid) {
         // At bottom of siblings - outdent (move after parent)
         handleOutdent(uuid)
       }
     },
-    [getAllBlocks, page.rootBlocks, handleOutdent, capturePositions]
+    [getAllBlocks, page.rootBlocks, handleOutdent, capturePositions, updateCurrentPage]
   )
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -706,9 +668,12 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     )
   }
 
-  // Create initial empty block if page is empty
+  // Create initial empty block if page is empty (only on initial render)
+  const hasCreatedInitialBlock = useRef(false)
   useEffect(() => {
-    if (rootBlocks.length === 0) {
+    // Only create initial block once per page load, and only if truly empty
+    if (rootBlocks.length === 0 && !hasCreatedInitialBlock.current) {
+      hasCreatedInitialBlock.current = true
       const initialBlock: Block = {
         uuid: uuidv4(),
         content: '',
@@ -719,6 +684,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         depth: 0,
       }
       updateCurrentPage([initialBlock])
+    } else if (rootBlocks.length > 0) {
+      // Reset the flag if blocks exist (page was loaded with content)
+      hasCreatedInitialBlock.current = false
     }
   }, [rootBlocks.length, updateCurrentPage])
 
