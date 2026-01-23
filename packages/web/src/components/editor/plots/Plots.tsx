@@ -11,6 +11,7 @@ import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
 import { Seed, SeedBoundaryEvent } from './Seed'
+import { useBlockFlip } from './useBlockFlip'
 import { v4 as uuidv4 } from 'uuid'
 
 interface PlotsProps {
@@ -35,6 +36,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null)
   const pendingFocusRef = useRef<{ uuid: string; position: 'start' | 'end' | number } | null>(null)
+
+  // FLIP animation for block movements
+  const { capturePositions } = useBlockFlip(containerRef)
 
   // Get root blocks for rendering
   const rootBlocks = useMemo(() => {
@@ -296,6 +300,9 @@ export function Plots({ page, readonly = false }: PlotsProps) {
 
   const handleIndent = useCallback(
     (uuid: string) => {
+      // Capture positions before the move for FLIP animation
+      capturePositions()
+
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
       const block = blocks.find((b) => b.uuid === uuid)
       if (!block) return
@@ -347,11 +354,14 @@ export function Plots({ page, readonly = false }: PlotsProps) {
 
       updateCurrentPage(blocks)
     },
-    [getAllBlocks, page.rootBlocks, updateCurrentPage]
+    [getAllBlocks, page.rootBlocks, updateCurrentPage, capturePositions]
   )
 
   const handleOutdent = useCallback(
     (uuid: string) => {
+      // Capture positions before the move for FLIP animation
+      capturePositions()
+
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
       const block = blocks.find((b) => b.uuid === uuid)
       if (!block || !block.parentUuid) return
@@ -407,11 +417,14 @@ export function Plots({ page, readonly = false }: PlotsProps) {
 
       updateCurrentPage(blocks)
     },
-    [getAllBlocks, updateCurrentPage, page.rootBlocks]
+    [getAllBlocks, updateCurrentPage, page.rootBlocks, capturePositions]
   )
 
   const handleMoveUp = useCallback(
     (uuid: string) => {
+      // Capture positions before the move for FLIP animation
+      capturePositions()
+
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
       const block = blocks.find((b) => b.uuid === uuid)
       if (!block) return
@@ -452,11 +465,14 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         handleOutdent(uuid)
       }
     },
-    [getAllBlocks, page.rootBlocks, handleOutdent]
+    [getAllBlocks, page.rootBlocks, handleOutdent, capturePositions]
   )
 
   const handleMoveDown = useCallback(
     (uuid: string) => {
+      // Capture positions before the move for FLIP animation
+      capturePositions()
+
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
       const block = blocks.find((b) => b.uuid === uuid)
       if (!block) return
@@ -497,7 +513,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         handleOutdent(uuid)
       }
     },
-    [getAllBlocks, page.rootBlocks, handleOutdent]
+    [getAllBlocks, page.rootBlocks, handleOutdent, capturePositions]
   )
 
   // ─────────────────────────────────────────────────────────────────────────
