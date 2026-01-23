@@ -32,6 +32,10 @@ pub struct Config {
     /// CORS configuration
     #[serde(default)]
     pub cors: CorsConfig,
+
+    /// Rate limiting configuration
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
 }
 
 /// CORS configuration
@@ -51,6 +55,54 @@ impl Default for CorsConfig {
                 .ok()
                 .map(|s| s.split(',').map(|s| s.trim().to_string()).collect())
                 .unwrap_or_default(),
+        }
+    }
+}
+
+/// Rate limiting configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    /// Enable rate limiting
+    #[serde(default = "default_rate_limit_enabled")]
+    pub enabled: bool,
+
+    /// Requests per second (sustained rate)
+    #[serde(default = "default_requests_per_second")]
+    pub requests_per_second: u32,
+
+    /// Burst capacity (max requests that can be made in a burst)
+    #[serde(default = "default_burst_size")]
+    pub burst_size: u32,
+}
+
+fn default_rate_limit_enabled() -> bool {
+    // Check env var, default to true for security
+    std::env::var("TEND_RATE_LIMIT_ENABLED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(true)
+}
+
+fn default_requests_per_second() -> u32 {
+    std::env::var("TEND_RATE_LIMIT_RPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50)
+}
+
+fn default_burst_size() -> u32 {
+    std::env::var("TEND_RATE_LIMIT_BURST")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100)
+}
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_rate_limit_enabled(),
+            requests_per_second: default_requests_per_second(),
+            burst_size: default_burst_size(),
         }
     }
 }
@@ -171,6 +223,7 @@ impl Default for Config {
             static_dir: default_static_dir(),
             git: GitConfig::default(),
             cors: CorsConfig::default(),
+            rate_limit: RateLimitConfig::default(),
         }
     }
 }

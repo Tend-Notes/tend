@@ -2,11 +2,14 @@
 //! Tend Server - Web server for the Tend digital garden
 
 use std::net::SocketAddr;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{routing::get, Router};
 use tend_storage::{FileEvent, SimpleFileWatcher};
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 use tower_http::trace::TraceLayer;
@@ -196,10 +199,41 @@ async fn main() -> anyhow::Result<()> {
             .allow_headers(tower_http::cors::Any)
     };
 
-    // Build router
-    let app = Router::new()
+    // Build rate limiting layer if enabled
+    let rate_limit_layer = if config.rate_limit.enabled {
+        let rps = NonZeroU32::new(config.rate_limit.requests_per_second).unwrap_or(NonZeroU32::MIN);
+        let burst = NonZeroU32::new(config.rate_limit.burst_size).unwrap_or(NonZeroU32::MIN);
+
+        info!(
+            "Rate limiting enabled: {} req/s, burst {}",
+            config.rate_limit.requests_per_second, config.rate_limit.burst_size
+        );
+
+        let governor_config = GovernorConfigBuilder::default()
+            .per_second(rps.get() as u64)
+            .burst_size(burst.get())
+            .finish()
+            .expect("Invalid rate limit configuration");
+
+        Some(GovernorLayer::new(Arc::new(governor_config)))
+    } else {
+        info!("Rate limiting disabled");
+        None
+    };
+
+    // Build router with API routes (rate-limited) and static files (not rate-limited)
+    let api_router = Router::new()
         .nest("/api/v1", routes::api_router())
-        .route("/ws", get(ws::ws_handler))
+        .route("/ws", get(ws::ws_handler));
+
+    // Apply rate limiting only to API routes if enabled
+    let api_router = if let Some(layer) = rate_limit_layer {
+        api_router.layer(layer)
+    } else {
+        api_router
+    };
+
+    let app = api_router
         .fallback_service(ServeDir::new(&config.static_dir).append_index_html_on_directories(true))
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
@@ -210,7 +244,11 @@ async fn main() -> anyhow::Result<()> {
     info!("Starting server at http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
