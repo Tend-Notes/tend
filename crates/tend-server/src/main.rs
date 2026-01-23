@@ -28,12 +28,14 @@ use ws::WsEvent;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Initialize logging
+    // Default: info level for tower_http (suppresses per-request logs)
+    // Override with RUST_LOG=tower_http=debug for request tracing
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("tend=debug".parse()?)
-                .add_directive("tower_http=debug".parse()?),
+                .add_directive("tower_http=info".parse()?),
         )
         .init();
 
