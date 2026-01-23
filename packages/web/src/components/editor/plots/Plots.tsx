@@ -61,6 +61,27 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     return result
   }, [page.blocks, page.rootBlocks])
 
+  // Get fresh flat block order directly from store (not memoized, for selection)
+  // This is needed because the memoized flatBlockOrder may be stale after state updates
+  const getFreshFlatBlockOrder = useCallback((): string[] => {
+    const currentPage = usePageStore.getState().currentPage
+    if (!currentPage) return []
+    const result: string[] = []
+    const traverse = (uuids: string[]) => {
+      for (const uuid of uuids) {
+        const block = currentPage.blocks[uuid]
+        if (block) {
+          result.push(uuid)
+          if (!block.collapsed && block.children.length > 0) {
+            traverse(block.children)
+          }
+        }
+      }
+    }
+    traverse(currentPage.rootBlocks)
+    return result
+  }, [])
+
   // Convert blocks object to array for saving
   const getAllBlocks = useCallback((): Block[] => {
     return Object.values(page.blocks)
@@ -567,13 +588,17 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         requestAnimationFrame(() => focusBlock(uuid, 'start'))
         break
 
-      case 'shift-arrow-up':
-        extendSelectionInDirection('up', flatBlockOrder)
+      case 'shift-arrow-up': {
+        const freshOrder = getFreshFlatBlockOrder()
+        extendSelectionInDirection('up', freshOrder)
         break
+      }
 
-      case 'shift-arrow-down':
-        extendSelectionInDirection('down', flatBlockOrder)
+      case 'shift-arrow-down': {
+        const freshOrder = getFreshFlatBlockOrder()
+        extendSelectionInDirection('down', freshOrder)
         break
+      }
     }
   }, [
     handleBlockChange,
@@ -583,7 +608,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     navigateUp,
     navigateDown,
     extendSelectionInDirection,
-    flatBlockOrder,
+    getFreshFlatBlockOrder,
     handleIndent,
     handleOutdent,
     handleMoveUp,
@@ -606,7 +631,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     return (
       <div
         key={block.uuid}
-        className={`block-container ${isInMultiSelection ? 'bg-base-0D/20' : ''}`}
+        className={`block-container ${isInMultiSelection ? 'block-container--selected' : ''}`}
         data-block-id={block.uuid}
         onClick={(e) => {
           // Only handle clicks on the container itself, not on the Seed
