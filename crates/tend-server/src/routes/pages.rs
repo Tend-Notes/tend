@@ -63,11 +63,62 @@ pub async fn create_page(
     Ok(Json(page))
 }
 
+/// System tag pages - these are readonly synthetic pages that explain save status
+const SYSTEM_TAGS: &[(&str, &str)] = &[
+    ("saved", "Your changes have been saved to the local filesystem. The file exists on disk but has not yet been committed to version control."),
+    ("stored", "Your changes have been committed to the local Git repository. The data is version-controlled locally but has not yet been pushed to a remote backup."),
+    ("backed up", "Your changes have been pushed to the remote Git repository. The data is fully backed up and safe."),
+    ("unsaved", "You have changes that have not yet been saved to disk. These exist only in your browser and will be lost if you close the tab."),
+];
+
+/// Create a synthetic readonly page for system tags
+fn create_system_tag_page(tag_name: &str, description: &str) -> Page {
+    let page_name = format!("tags/{}", tag_name);
+    let mut page = Page::new(&page_name);
+
+    // Add description block
+    let mut block = Block::new(description);
+    block.properties.insert("readonly".to_string(), "true".to_string());
+    page.add_block(block);
+
+    // Mark the page as readonly
+    page.properties.insert("readonly".to_string(), "true".to_string());
+
+    page
+}
+
+/// Create a synthetic page for a user tag (shows just the tag name as title)
+fn create_user_tag_page(tag_name: &str) -> Page {
+    let page_name = format!("tags/{}", tag_name);
+    let mut page = Page::new(&page_name);
+
+    // Add a description block
+    let block = Block::new(format!("Pages and blocks tagged with #{}.", tag_name));
+    page.add_block(block);
+
+    page
+}
+
 /// Get a page by name
 pub async fn get_page(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> Result<Json<Page>, AppError> {
+    // Check if this is a tag page
+    if name.starts_with("tags/") {
+        let tag_name = name.strip_prefix("tags/").unwrap();
+
+        // Check for system tags first
+        for (system_tag, description) in SYSTEM_TAGS {
+            if tag_name == *system_tag {
+                return Ok(Json(create_system_tag_page(system_tag, description)));
+            }
+        }
+
+        // For user tags, create a synthetic page (backlinks will show references)
+        return Ok(Json(create_user_tag_page(tag_name)));
+    }
+
     let garden = state.garden.read().await;
     let page = garden.file_manager.read_page(&name).await?;
     Ok(Json(page))
