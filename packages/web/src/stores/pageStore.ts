@@ -122,6 +122,13 @@ let pendingSaveData: {
 
 // Helper to record sheet access in the recent sheets store
 function recordSheetAccess(page: Page) {
+  // Tag pages go to recentTags, not recentSheets
+  if (page.name.startsWith('tags/')) {
+    const tagName = page.name.slice('tags/'.length)
+    useRecentSheetsStore.getState().recordTagAccess(tagName)
+    return
+  }
+
   useRecentSheetsStore.getState().recordAccess(page.contentType, {
     name: page.name,
     title: page.title,

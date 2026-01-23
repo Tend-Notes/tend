@@ -11,14 +11,24 @@ import type { PageMeta } from '../types'
 
 // Maximum number of recent sheets to track per content type
 const MAX_RECENT_PER_TYPE = 10
+const MAX_RECENT_TAGS = 10
+
+// Simplified tag info for sidebar display
+interface RecentTag {
+  name: string  // e.g., "project" (without # or tags/ prefix)
+}
 
 interface RecentSheetsState {
   // Recent sheets keyed by content type ID
   // e.g., { page: [...], journal: [...], meeting: [...] }
   recentSheets: Record<string, PageMeta[]>
 
+  // Recently visited tags (separate from sheets)
+  recentTags: RecentTag[]
+
   // Actions
   recordAccess: (contentTypeId: string, sheet: PageMeta) => void
+  recordTagAccess: (tagName: string) => void
   clearAll: () => void
   clearByType: (contentTypeId: string) => void
 }
@@ -27,6 +37,7 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
   persist(
     (set) => ({
       recentSheets: {},
+      recentTags: [],
 
       recordAccess: (contentTypeId, sheet) => {
         set((state) => {
@@ -47,8 +58,20 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
         })
       },
 
+      recordTagAccess: (tagName) => {
+        set((state) => {
+          // Remove existing entry to avoid duplicates
+          const filtered = state.recentTags.filter((t) => t.name !== tagName)
+
+          // Add to front (most recent first)
+          const updated = [{ name: tagName }, ...filtered].slice(0, MAX_RECENT_TAGS)
+
+          return { recentTags: updated }
+        })
+      },
+
       clearAll: () => {
-        set({ recentSheets: {} })
+        set({ recentSheets: {}, recentTags: [] })
       },
 
       clearByType: (contentTypeId) => {
@@ -60,6 +83,31 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
     }),
     {
       name: 'tend-recent-sheets',
+      // Migration: filter out tag pages from sheets, add recentTags array
+      migrate: (persistedState: unknown, version: number) => {
+        const state = persistedState as {
+          recentSheets?: Record<string, PageMeta[]>
+          recentTags?: RecentTag[]
+        }
+
+        // v0 -> v1: filter tags from sheets
+        // v1 -> v2: add recentTags array
+        if (version < 2) {
+          const cleaned: Record<string, PageMeta[]> = {}
+          if (state.recentSheets) {
+            for (const [key, sheets] of Object.entries(state.recentSheets)) {
+              cleaned[key] = sheets.filter((s) => !s.name.startsWith('tags/'))
+            }
+          }
+          return {
+            ...state,
+            recentSheets: cleaned,
+            recentTags: state.recentTags || [],
+          }
+        }
+        return state
+      },
+      version: 2,
     }
   )
 )
