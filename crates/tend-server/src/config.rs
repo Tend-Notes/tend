@@ -137,8 +137,15 @@ fn default_port() -> u16 {
         .unwrap_or(3000)
 }
 
-/// Get the base directory for all Tend data (gardens.json lives here)
-pub fn base_data_dir() -> PathBuf {
+/// Get the base directory for Tend application data (config.toml, gardens.json)
+///
+/// Resolution order:
+/// 1. TEND_BASE_DIR environment variable (explicit override)
+/// 2. /var/lib/tend if it exists (system service deployment)
+/// 3. XDG data directory (~/.local/share/tend on Linux)
+/// 4. ~/.tend fallback
+/// 5. ./data (development)
+pub fn base_dir() -> PathBuf {
     use directories::ProjectDirs;
 
     // 1. Explicit environment variable override
@@ -147,7 +154,6 @@ pub fn base_data_dir() -> PathBuf {
     }
 
     // 2. Check for system service path (running as tend user or root)
-    // NixOS/systemd uses StateDirectory=tend which creates /var/lib/tend
     let system_path = PathBuf::from("/var/lib/tend");
     if system_path.exists() {
         return system_path;
@@ -156,7 +162,6 @@ pub fn base_data_dir() -> PathBuf {
     // 3. XDG data directory for regular users (~/.local/share/tend on Linux)
     if let Some(proj_dirs) = ProjectDirs::from("", "", "tend") {
         let tend_dir = proj_dirs.data_dir().to_path_buf();
-        // Create if it doesn't exist
         if !tend_dir.exists() {
             let _ = std::fs::create_dir_all(&tend_dir);
         }
@@ -172,16 +177,26 @@ pub fn base_data_dir() -> PathBuf {
     PathBuf::from("./data")
 }
 
-fn default_data_dir() -> PathBuf {
-    // First check environment variable for specific garden path
+/// Get the directory where gardens are stored
+///
+/// If TEND_DATA_DIR is set, gardens live under $TEND_DATA_DIR/Gardens/
+/// Otherwise, gardens live under $TEND_BASE_DIR/Gardens/
+pub fn gardens_root() -> PathBuf {
     if let Ok(path) = std::env::var("TEND_DATA_DIR") {
-        return PathBuf::from(path);
+        return PathBuf::from(path).join("Gardens");
     }
+    base_dir().join("Gardens")
+}
 
-    let base_dir = base_data_dir();
+/// Get the path for the gardens.json registry file
+pub fn gardens_json_path() -> PathBuf {
+    base_dir().join("gardens.json")
+}
 
-    // Then check gardens.json for active garden
-    let gardens_path = base_dir.join("gardens.json");
+fn default_data_dir() -> PathBuf {
+    let gardens_path = gardens_json_path();
+
+    // Check gardens.json for active garden
     if gardens_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&gardens_path) {
             if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -200,8 +215,14 @@ fn default_data_dir() -> PathBuf {
         }
     }
 
-    // Default fallback: Notes garden in base directory
-    base_dir.join("Notes")
+    // Default fallback: Notes garden under gardens root
+    gardens_root().join("Notes")
+}
+
+// Keep old name as alias for backwards compatibility
+#[deprecated(note = "Use base_dir() instead")]
+pub fn base_data_dir() -> PathBuf {
+    base_dir()
 }
 
 fn default_static_dir() -> PathBuf {
@@ -231,13 +252,10 @@ impl Default for Config {
 impl Config {
     /// Load configuration from file and environment
     pub fn load() -> anyhow::Result<Self> {
-        // Try to load from config file
+        // Try to load from config file in base directory
         let config_path = std::env::var("TEND_CONFIG")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| {
-                let data_dir = default_data_dir();
-                data_dir.join(".tend").join("config.toml")
-            });
+            .unwrap_or_else(|_| base_dir().join("config.toml"));
 
         let config = if config_path.exists() {
             let content = std::fs::read_to_string(&config_path)?;
@@ -251,10 +269,10 @@ impl Config {
 
     /// Save configuration to file with restrictive permissions
     pub fn save(&self) -> anyhow::Result<()> {
-        let config_dir = self.data_dir.join(".tend");
-        std::fs::create_dir_all(&config_dir)?;
+        let base = base_dir();
+        std::fs::create_dir_all(&base)?;
 
-        let config_path = config_dir.join("config.toml");
+        let config_path = base.join("config.toml");
         let content = toml::to_string_pretty(self)?;
         std::fs::write(&config_path, content)?;
 

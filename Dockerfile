@@ -2,7 +2,12 @@
 # Multi-stage Dockerfile for Tend
 #
 # Build: docker build -t tend .
-# Run:   docker run -p 3000:3000 -v /path/to/garden:/data tend
+# Run:   docker run -p 3000:3000 -v /path/to/tend-data:/data tend
+#
+# Data structure inside /data:
+#   /data/config.toml         - Server configuration
+#   /data/gardens.json        - Garden registry
+#   /data/Gardens/Notes/      - Default garden (pages/, journals/)
 
 # =============================================================================
 # Stage 1: Build frontend
@@ -84,11 +89,13 @@ RUN addgroup -S tend && adduser -S tend -G tend
 WORKDIR /app
 
 # Copy built artifacts
-COPY --from=backend-builder /app/target/release/tend-server /app/tend-server
+COPY --from=backend-builder /app/target/release/tend /app/tend
 COPY --from=frontend-builder /app/packages/web/dist /app/static
 
-# Create data directory
-RUN mkdir -p /data && chown tend:tend /data
+# Create data directory with proper structure
+# /data is the TEND_BASE_DIR, gardens live under /data/Gardens/
+RUN mkdir -p /data/Gardens/Notes/pages /data/Gardens/Notes/journals && \
+    chown -R tend:tend /data
 
 # Switch to non-root user
 USER tend
@@ -96,7 +103,7 @@ USER tend
 # Environment variables
 ENV TEND_HOST=0.0.0.0
 ENV TEND_PORT=3000
-ENV TEND_GARDEN_PATH=/data
+ENV TEND_BASE_DIR=/data
 ENV TEND_STATIC_DIR=/app/static
 ENV RUST_LOG=info
 
@@ -108,4 +115,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/v1/health || exit 1
 
 # Run the server
-CMD ["/app/tend-server"]
+CMD ["/app/tend"]
