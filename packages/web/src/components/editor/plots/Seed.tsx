@@ -105,6 +105,21 @@ const baseTheme = EditorView.theme({
   },
 })
 
+/**
+ * Extension to configure contenteditable attributes for mobile.
+ * Sets inputmode and autocapitalize to optimize for iOS/Android.
+ */
+const mobileContentEditable = EditorView.contentAttributes.of({
+  // Prevent iOS from showing form accessory bar
+  inputmode: 'text',
+  // Disable auto-capitalization which can interfere with markdown
+  autocapitalize: 'off',
+  // Disable autocorrect for code/markdown
+  autocorrect: 'off',
+  // Disable spellcheck (can be re-enabled in settings if desired)
+  spellcheck: 'false',
+})
+
 export const Seed = forwardRef<SeedHandle, SeedProps>(
   (
     {
@@ -406,6 +421,7 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           createWikilinkListener(),
           createSlashCommandListener(),
           baseTheme,
+          mobileContentEditable,
           EditorView.lineWrapping,
           EditorView.editable.of(!readonly),
           ...actionExtensions,

@@ -672,6 +672,11 @@ code {
    ───────────────────────────────────────────────────────────────────────────── */
 
 .mobile-toolbar {
+  position: fixed !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  z-index: 9999 !important;
   background-color: var(--base01);
   border-top: 1px solid var(--base02);
   padding-bottom: env(safe-area-inset-bottom, 0);
@@ -727,5 +732,237 @@ code {
 @media (min-width: 768px) and (pointer: fine) {
   .mobile-toolbar {
     display: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile Responsive Styles
+   Comprehensive mobile-first design for phones and tablets.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Phone screens (< 768px) */
+@media (max-width: 767px) {
+  /* Increase base font size for readability */
+  body {
+    font-size: 18px;
+    line-height: 1.7;
+  }
+
+  /* Larger page title */
+  .page-title {
+    font-size: 1.5rem;
+  }
+
+  /* Full-width page content with minimal margins */
+  .page-content {
+    padding: 16px;
+    padding-bottom: 80px; /* Space for toolbar */
+  }
+
+  /* Remove max-width constraint on mobile */
+  .page-content.max-w-2xl {
+    max-width: none;
+  }
+
+  /* Larger bullets for touch targets - use padding for larger hit area */
+  .bullet {
+    width: 8px;
+    height: 8px;
+    /* Invisible padding to increase touch target to 44px */
+    padding: 18px;
+    margin: -18px;
+    background-clip: content-box;
+  }
+
+  .bullet--collapsed {
+    /* Adjust border to account for background-clip */
+    border-width: 2px;
+    background-clip: content-box;
+  }
+
+  /* Larger block spacing for touch */
+  .block {
+    gap: 16px;
+    padding: 8px 0;
+    min-height: 44px; /* Minimum touch target */
+  }
+
+  /* Larger block content area */
+  .block-content {
+    min-height: 2em;
+    font-size: 1.1em;
+  }
+
+  /* Increase children indentation slightly */
+  .block-children {
+    margin-left: 20px;
+    padding-left: 16px;
+  }
+
+  /* Larger task status badges */
+  .task-status {
+    font-size: 0.9em;
+    padding: 4px 10px;
+  }
+
+  /* Larger tag pills */
+  .tag-pill {
+    font-size: 1em;
+    padding: 2px 10px;
+  }
+
+  /* Sidebar as full-screen overlay on mobile */
+  .sidebar-mobile-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    background-color: var(--sidebar-bg);
+  }
+
+  /* Activity log - make it more compact on mobile */
+  .activity-log {
+    font-size: 0.85em;
+    padding: 8px 16px;
+  }
+
+  /* Search panel adjustments */
+  .search-panel {
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+  }
+
+  /* Command palette adjustments */
+  .command-palette {
+    width: calc(100% - 32px);
+    max-width: none;
+    margin: 16px;
+  }
+}
+
+/* Tablet screens (768px - 1024px) */
+@media (min-width: 768px) and (max-width: 1024px) {
+  body {
+    font-size: 17px;
+  }
+
+  /* Slightly larger bullets on tablet */
+  .bullet {
+    width: 7px;
+    height: 7px;
+  }
+
+  /* Slightly larger block spacing */
+  .block {
+    gap: 14px;
+    padding: 4px 0;
+  }
+}
+
+/* Touch device optimizations (any screen size with touch) */
+@media (pointer: coarse) {
+  /* Larger touch targets for all interactive elements */
+  button,
+  [role="button"],
+  .clickable {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Remove hover effects that don't work well on touch */
+  .bullet:hover {
+    transform: none;
+  }
+
+  /* Add active state feedback instead */
+  .bullet:active {
+    background-color: var(--base0D);
+    transform: scale(1.3);
+  }
+
+  .bullet--collapsed:active {
+    border-color: var(--base0D);
+    transform: scale(1.3);
+  }
+
+  /* Prevent text selection on UI elements */
+  button,
+  [role="button"],
+  .sidebar nav,
+  .mobile-toolbar {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Disable double-tap zoom on interactive elements */
+  button,
+  [role="button"],
+  .bullet,
+  .mobile-toolbar-btn {
+    touch-action: manipulation;
+  }
+}
+
+/* Landscape phone orientation */
+@media (max-width: 896px) and (max-height: 500px) and (orientation: landscape) {
+  /* Reduce vertical spacing in landscape */
+  .page-content {
+    padding-top: 8px;
+    padding-bottom: 70px;
+  }
+
+  .block {
+    padding: 4px 0;
+  }
+
+  /* Smaller toolbar in landscape */
+  .mobile-toolbar {
+    padding: 4px 0;
+  }
+
+  .mobile-toolbar-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   iOS-specific Optimizations
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Suppress iOS form accessory bar (Done/Cancel bar) */
+@supports (-webkit-touch-callout: none) {
+  /* CodeMirror editor - hide iOS form controls */
+  .cm-content {
+    /* Tell iOS this is not a standard form input */
+    -webkit-user-modify: read-write-plaintext-only;
+  }
+
+  /* Prevent iOS text selection handles from interfering */
+  .cm-editor {
+    -webkit-touch-callout: none;
+  }
+
+  /* Adjust for iOS safe areas */
+  .mobile-toolbar {
+    padding-bottom: max(env(safe-area-inset-bottom), 8px);
+  }
+
+  /* Account for keyboard viewport changes on iOS */
+  body.has-mobile-toolbar {
+    /* iOS Safari viewport height fix */
+    min-height: -webkit-fill-available;
+  }
+}
+
+/* iOS Safari specific - using media query for webkit */
+@media screen and (-webkit-min-device-pixel-ratio: 0) {
+  /* Ensure the viewport doesn't jump when keyboard appears */
+  html {
+    height: -webkit-fill-available;
+  }
+
+  body {
+    min-height: -webkit-fill-available;
   }
 }
