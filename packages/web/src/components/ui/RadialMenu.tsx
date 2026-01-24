@@ -22,9 +22,31 @@ const CORNER_POSITIONS: Record<Corner, { x: string; y: string }> = {
   'top-left': { x: 'left-4', y: 'top-20' },
 }
 
+const STORAGE_KEY = 'tend-radial-menu-corner'
+
+function loadCorner(): Corner {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved && saved in CORNER_POSITIONS) {
+      return saved as Corner
+    }
+  } catch {
+    // localStorage not available
+  }
+  return 'bottom-right'
+}
+
+function saveCorner(corner: Corner) {
+  try {
+    localStorage.setItem(STORAGE_KEY, corner)
+  } catch {
+    // localStorage not available
+  }
+}
+
 export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
   const [isOpen, setIsOpen] = useState(false)
-  const [corner, setCorner] = useState<Corner>('bottom-right')
+  const [corner, setCorner] = useState<Corner>(loadCorner)
   const [rotation, setRotation] = useState(0)
   const [isDragging, setIsDragging] = useState(false)
   const [isRepositioning, setIsRepositioning] = useState(false)
@@ -142,6 +164,7 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
       const touch = e.changedTouches[0]
       const newCorner = determineCorner(touch.clientX, touch.clientY)
       setCorner(newCorner)
+      saveCorner(newCorner)
       setIsRepositioning(false)
       repositionStart.current = null
       return
