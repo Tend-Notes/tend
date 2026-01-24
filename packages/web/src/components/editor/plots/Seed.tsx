@@ -512,6 +512,72 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       return () => container.removeEventListener('seed-insert-text', handleInsertText)
     }, [])
 
+    // Handle formatting via custom event from MobileToolbar
+    useEffect(() => {
+      const container = containerRef.current
+      if (!container) return
+
+      const handleFormat = (e: Event) => {
+        const detail = (e as CustomEvent).detail
+        const delimiter = detail?.delimiter
+        const view = viewRef.current
+
+        if (!view || !delimiter) return
+
+        const { from, to } = view.state.selection.main
+        const hasSelection = from !== to
+
+        if (hasSelection) {
+          // Wrap selection with delimiter
+          const selectedText = view.state.sliceDoc(from, to)
+          view.dispatch({
+            changes: { from, to, insert: `${delimiter}${selectedText}${delimiter}` },
+            selection: { anchor: from + delimiter.length, head: to + delimiter.length },
+          })
+        } else {
+          // No selection - insert delimiters and place cursor between them
+          view.dispatch({
+            changes: { from, to, insert: `${delimiter}${delimiter}` },
+            selection: { anchor: from + delimiter.length },
+          })
+        }
+
+        // Notify onChange
+        const newContent = view.state.doc.toString()
+        contentRef.current = newContent
+        onChangeRef.current(newContent)
+
+        // Focus the editor after formatting
+        view.focus()
+      }
+
+      container.addEventListener('seed-format', handleFormat)
+      return () => container.removeEventListener('seed-format', handleFormat)
+    }, [])
+
+    // Handle boundary events (tab/shift-tab) via custom event from MobileToolbar
+    useEffect(() => {
+      const container = containerRef.current
+      if (!container) return
+
+      const handleBoundary = (e: Event) => {
+        const detail = (e as CustomEvent).detail
+        const eventType = detail?.type
+
+        if (!eventType) return
+
+        // Dispatch the boundary event to Plots via the existing callback
+        if (eventType === 'tab') {
+          onBoundaryEventRef.current({ type: 'tab' })
+        } else if (eventType === 'shift-tab') {
+          onBoundaryEventRef.current({ type: 'shift-tab' })
+        }
+      }
+
+      container.addEventListener('seed-boundary', handleBoundary)
+      return () => container.removeEventListener('seed-boundary', handleBoundary)
+    }, [])
+
 
     return (
       <>

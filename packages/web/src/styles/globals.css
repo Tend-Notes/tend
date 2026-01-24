@@ -665,3 +665,67 @@ code {
 .smooth-caret:not([style*="animation: none"]) {
   /* Animation resets are handled in JS */
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile Toolbar
+   Touch-friendly formatting and navigation controls for phones and tablets.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.mobile-toolbar {
+  background-color: var(--base01);
+  border-top: 1px solid var(--base02);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+.mobile-toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  color: var(--base05);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.mobile-toolbar-btn:hover,
+.mobile-toolbar-btn:active {
+  background-color: var(--base02);
+}
+
+.mobile-toolbar-btn:active {
+  color: var(--base0D);
+}
+
+/* Safe area padding for devices with notches/home indicators */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Prevent body scroll when toolbar is active on mobile */
+@media (max-width: 767px) {
+  body.has-mobile-toolbar {
+    padding-bottom: 60px; /* Space for toolbar */
+  }
+}
+
+/* Tablet-specific adjustments */
+@media (min-width: 768px) and (max-width: 1024px) and (pointer: coarse) {
+  .mobile-toolbar-btn {
+    width: 48px;
+    height: 48px;
+  }
+}
+
+/* Hide mobile toolbar on desktop with mouse */
+@media (min-width: 768px) and (pointer: fine) {
+  .mobile-toolbar {
+    display: none;
+  }
+}
