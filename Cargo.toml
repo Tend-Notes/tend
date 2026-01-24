@@ -76,6 +76,5 @@ tend-search = { path = "crates/tend-search" }
 tend-git = { path = "crates/tend-git" }
 
 [profile.release]
-lto = true
-codegen-units = 1
+lto = "thin"  # "true" requires too much RAM for small servers
 strip = true
