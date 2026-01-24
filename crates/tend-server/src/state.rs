@@ -14,7 +14,7 @@ use tend_storage::{EncryptedFileManager, FileManager, StorageError};
 use tokio::sync::RwLock;
 use tracing::info;
 
-use crate::config::{base_data_dir, Config, GitConfig};
+use crate::config::{gardens_json_path, Config, GitConfig};
 use crate::ws::{EventSender, WsEvent};
 
 /// Status of the search index
@@ -521,7 +521,7 @@ impl AppState {
 
     /// Get garden info from config
     fn get_garden_info(&self, garden_id: &str) -> anyhow::Result<GardenInfo> {
-        let gardens_path = base_data_dir().join("gardens.json");
+        let gardens_path = gardens_json_path();
         let content = std::fs::read_to_string(&gardens_path)
             .map_err(|e| anyhow::anyhow!("Failed to read gardens config: {}", e))?;
         let config: serde_json::Value = serde_json::from_str(&content)

@@ -277,7 +277,7 @@
               wantedBy = [ "multi-user.target" ];
 
               environment = {
-                TEND_GARDEN_PATH = cfg.dataDir;
+                TEND_BASE_DIR = cfg.dataDir;
                 TEND_PORT = toString cfg.port;
                 TEND_HOST = cfg.host;
                 TEND_BACKUP_INTERVAL_MINUTES = toString cfg.gitBackup.intervalMinutes;
@@ -329,21 +329,24 @@
 
               script = ''
                 # Create directory structure
-                mkdir -p "${cfg.dataDir}/pages" "${cfg.dataDir}/journals"
+                # Base dir for config, Gardens/Notes for default garden
+                mkdir -p "${cfg.dataDir}"
+                mkdir -p "${cfg.dataDir}/Gardens/Notes/pages"
+                mkdir -p "${cfg.dataDir}/Gardens/Notes/journals"
 
-                # Initialize git if not already done
-                if [ ! -d "${cfg.dataDir}/.git" ]; then
-                  ${pkgs.git}/bin/git -C "${cfg.dataDir}" init
-                  ${pkgs.git}/bin/git -C "${cfg.dataDir}" config user.name "Tend"
-                  ${pkgs.git}/bin/git -C "${cfg.dataDir}" config user.email "tend@localhost"
+                # Initialize git in default garden if not already done
+                if [ ! -d "${cfg.dataDir}/Gardens/Notes/.git" ]; then
+                  ${pkgs.git}/bin/git -C "${cfg.dataDir}/Gardens/Notes" init
+                  ${pkgs.git}/bin/git -C "${cfg.dataDir}/Gardens/Notes" config user.name "Tend"
+                  ${pkgs.git}/bin/git -C "${cfg.dataDir}/Gardens/Notes" config user.email "tend@localhost"
                 fi
 
                 ${optionalString (cfg.gitBackup.remoteUrl != null) ''
                   # Set up remote if configured
-                  if ! ${pkgs.git}/bin/git -C "${cfg.dataDir}" remote get-url origin >/dev/null 2>&1; then
-                    ${pkgs.git}/bin/git -C "${cfg.dataDir}" remote add origin "${cfg.gitBackup.remoteUrl}"
+                  if ! ${pkgs.git}/bin/git -C "${cfg.dataDir}/Gardens/Notes" remote get-url origin >/dev/null 2>&1; then
+                    ${pkgs.git}/bin/git -C "${cfg.dataDir}/Gardens/Notes" remote add origin "${cfg.gitBackup.remoteUrl}"
                   else
-                    ${pkgs.git}/bin/git -C "${cfg.dataDir}" remote set-url origin "${cfg.gitBackup.remoteUrl}"
+                    ${pkgs.git}/bin/git -C "${cfg.dataDir}/Gardens/Notes" remote set-url origin "${cfg.gitBackup.remoteUrl}"
                   fi
                 ''}
               '';

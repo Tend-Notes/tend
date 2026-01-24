@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 
 use tend_core::ContentType;
 
-use crate::config::base_data_dir;
+use crate::config::{base_dir, gardens_json_path, gardens_root};
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -109,10 +109,9 @@ struct GardensConfig {
     archived: Vec<ArchivedGarden>,
 }
 
-/// Get the gardens config file path (in the base data directory)
+/// Get the gardens config file path (in the base directory)
 fn gardens_config_path() -> PathBuf {
-    // Gardens config lives in the base data directory (e.g., ~/.local/share/tend/gardens.json)
-    base_data_dir().join("gardens.json")
+    gardens_json_path()
 }
 
 /// Load content types for the active garden (used by sheets routes)
@@ -161,7 +160,7 @@ fn load_gardens_config() -> GardensConfig {
 }
 
 fn default_gardens_config() -> GardensConfig {
-    let default_path = base_data_dir().join("Notes");
+    let default_path = gardens_root().join("Notes");
     GardensConfig {
         gardens: vec![Garden {
             id: "default".to_string(),
@@ -460,13 +459,18 @@ fn validate_garden_path_for_deletion(path: &PathBuf) -> Option<String> {
 
     // === ALLOWLIST CHECKS (where gardens CAN live) ===
 
-    // Get the base data directory where Tend stores its data
-    let base_dir = base_data_dir();
-    let base_dir_canonical = base_dir.canonicalize().unwrap_or(base_dir.clone());
+    // Get the base directory and gardens root where Tend stores its data
+    let tend_base_dir = base_dir();
+    let base_dir_canonical = tend_base_dir.canonicalize().unwrap_or(tend_base_dir.clone());
+    let tend_gardens_root = gardens_root();
+    let gardens_root_canonical = tend_gardens_root
+        .canonicalize()
+        .unwrap_or(tend_gardens_root.clone());
 
     // Build list of allowed parent directories (gardens must be inside one of these)
     let mut allowed_roots: Vec<PathBuf> = vec![
-        base_dir_canonical.clone(),           // ~/.local/share/tend (or TEND_BASE_DIR)
+        base_dir_canonical.clone(),           // TEND_BASE_DIR or default
+        gardens_root_canonical.clone(),       // TEND_DATA_DIR/Gardens or TEND_BASE_DIR/Gardens
         PathBuf::from("/var/lib/tend"),       // System service mode
     ];
 
