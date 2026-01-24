@@ -75,7 +75,11 @@
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
 
-          inherit nativeBuildInputs buildInputs;
+          inherit buildInputs;
+          nativeBuildInputs = nativeBuildInputs ++ [
+            # TODO: Remove for production - only needed for tests
+            pkgs.git
+          ];
 
           # Only build the server binary
           cargoBuildFlags = [ "-p" "tend-server" ];
@@ -99,14 +103,11 @@
           installPhase = ''
             mkdir -p $out/bin $out/share/tend/static
 
-            # Copy backend binary
-            cp ${backend}/bin/tend-server $out/bin/tend-server
-
             # Copy frontend static files
             cp -r ${frontend}/* $out/share/tend/static/
 
             # Create wrapper that sets TEND_STATIC_DIR
-            makeWrapper $out/bin/tend-server $out/bin/tend \
+            makeWrapper ${backend}/bin/tend $out/bin/tend \
               --set-default TEND_STATIC_DIR "$out/share/tend/static"
           '';
 

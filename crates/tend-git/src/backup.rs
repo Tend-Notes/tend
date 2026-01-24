@@ -130,6 +130,25 @@ impl BackupManager {
             return Err(GitError::OperationFailed(stderr.to_string()));
         }
 
+        // Configure default user if not set (needed for commits in sandboxed environments)
+        let check_user = Command::new("git")
+            .args(["config", "user.name"])
+            .current_dir(&self.repo_path)
+            .output();
+
+        if check_user.map(|o| o.stdout.is_empty()).unwrap_or(true) {
+            Command::new("git")
+                .args(["config", "user.name", "Tend"])
+                .current_dir(&self.repo_path)
+                .output()
+                .ok();
+            Command::new("git")
+                .args(["config", "user.email", "tend@localhost"])
+                .current_dir(&self.repo_path)
+                .output()
+                .ok();
+        }
+
         // Create .gitignore
         let gitignore_path = self.repo_path.join(".gitignore");
         if !gitignore_path.exists() {
