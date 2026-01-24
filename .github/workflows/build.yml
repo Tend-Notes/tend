@@ -22,8 +22,10 @@ jobs:
           name: tend
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
-      - name: Build
-        run: nix build .#default
+      - name: Build and push to Cachix
+        run: |
+          nix build .#default -o result
+          cachix push tend ./result
 
       - name: Run tests
         run: nix flake check
