@@ -35,43 +35,38 @@
           darwin.apple_sdk.frameworks.SystemConfiguration
         ];
 
-        # Build the frontend using pnpm
-        frontend = pkgs.stdenv.mkDerivation {
+        # Build the frontend using pnpm with fixed-output deps
+        frontend = pkgs.stdenv.mkDerivation (finalAttrs: {
           pname = "tend-frontend";
           version = "0.1.0";
           src = ./.;
 
           nativeBuildInputs = with pkgs; [
             nodejs_22
-            nodePackages.pnpm
+            pnpm_10
+            pnpmConfigHook
           ];
 
-          # pnpm needs a writable home
-          HOME = "/tmp";
+          # Fixed-output derivation for pnpm dependencies
+          pnpmDeps = pkgs.fetchPnpmDeps {
+            inherit (finalAttrs) pname version src;
+            fetcherVersion = 3;
+            hash = "sha256-Lwn0aeDCbF7OrtLppNtCMc51MA6nuBwsv1LtwI2We00=";
+          };
 
           buildPhase = ''
             runHook preBuild
-
-            # Configure pnpm to use a local store
-            export PNPM_HOME="$TMPDIR/pnpm"
-            mkdir -p "$PNPM_HOME"
-
-            # Install dependencies (lockfile is at repo root)
-            pnpm install --frozen-lockfile
-
-            # Build frontend
             cd packages/web
             pnpm run build
-
             runHook postBuild
           '';
 
           installPhase = ''
             runHook preInstall
-            cp -r packages/web/dist $out
+            cp -r dist $out
             runHook postInstall
           '';
-        };
+        });
 
         # Build the Rust backend
         backend = pkgs.rustPlatform.buildRustPackage {
