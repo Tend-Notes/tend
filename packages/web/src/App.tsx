@@ -10,7 +10,6 @@ import { usePageStore } from './stores/pageStore'
 const CommandPalette = lazy(() => import('./components/command-palette/CommandPalette'))
 const SearchPanel = lazy(() => import('./components/search/SearchPanel'))
 const KeyboardHelp = lazy(() => import('./components/ui/KeyboardHelp'))
-import { MobileToolbar } from './components/editor/MobileToolbar'
 import { useUIStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
@@ -174,8 +173,6 @@ function App() {
       {/* Conflict resolution dialog */}
       <ConflictResolutionDialog />
 
-      {/* Mobile toolbar for touch devices */}
-      <MobileToolbar />
     </div>
   )
 }

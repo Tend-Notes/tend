@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
+//
+// Arc Menu - A floating button that expands into an arc of options.
+// Shows a viewport of ~3 items at a time; spin the arc to reveal more.
+// Can be repositioned to any corner by dragging.
+
 import { useState, useRef, useCallback, useEffect } from 'react'
 
 interface RadialMenuItem {
@@ -15,19 +20,12 @@ interface RadialMenuProps {
 
 type Corner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left'
 
-const CORNER_POSITIONS: Record<Corner, { x: string; y: string }> = {
-  'bottom-right': { x: 'right-4', y: 'bottom-20' },
-  'bottom-left': { x: 'left-4', y: 'bottom-20' },
-  'top-right': { x: 'right-4', y: 'top-20' },
-  'top-left': { x: 'left-4', y: 'top-20' },
-}
-
 const STORAGE_KEY = 'tend-radial-menu-corner'
 
 function loadCorner(): Corner {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved && saved in CORNER_POSITIONS) {
+    if (saved && ['bottom-right', 'bottom-left', 'top-right', 'top-left'].includes(saved)) {
       return saved as Corner
     }
   } catch {
@@ -52,32 +50,60 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
   const [isRepositioning, setIsRepositioning] = useState(false)
 
   const containerRef = useRef<HTMLDivElement>(null)
-  const dragStartAngle = useRef(0)
-  const lastAngle = useRef(0)
+  const arcRef = useRef<HTMLDivElement>(null)
+  const dragStartY = useRef(0)
+  const dragStartRotation = useRef(0)
   const velocity = useRef(0)
+  const lastY = useRef(0)
   const lastTime = useRef(0)
   const animationFrame = useRef<number>()
   const repositionStart = useRef<{ x: number; y: number } | null>(null)
 
-  const RADIUS = 80 // Distance from center to items
-  const ITEM_SIZE = 44 // Size of each menu item button
-  const TRIGGER_SIZE = 56 // Size of the trigger button
+  // Larger sizes for mobile touch targets
+  const TRIGGER_SIZE = 64
+  const ITEM_SIZE = 56
+  const RADIUS = 100 // Distance from trigger center to item centers
+  const ARC_SPAN = 120 // Degrees of arc visible (showing ~3 items)
+  const ITEM_SPACING = 40 // Degrees between items
 
-  // Calculate angle from center to a point
-  const getAngle = useCallback((clientX: number, clientY: number) => {
-    if (!containerRef.current) return 0
-    const rect = containerRef.current.getBoundingClientRect()
-    const centerX = rect.left + rect.width / 2
-    const centerY = rect.top + rect.height / 2
-    return Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI)
-  }, [])
+  // Calculate position offsets based on corner
+  const getCornerStyle = useCallback(() => {
+    const margin = 16
+    const safeBottom = 80 // Account for iOS safe area
 
-  // Handle momentum animation
+    switch (corner) {
+      case 'bottom-right':
+        return { right: margin, bottom: safeBottom, transformOrigin: 'bottom right' }
+      case 'bottom-left':
+        return { left: margin, bottom: safeBottom, transformOrigin: 'bottom left' }
+      case 'top-right':
+        return { right: margin, top: margin + 44, transformOrigin: 'top right' } // 44 for status bar
+      case 'top-left':
+        return { left: margin, top: margin + 44, transformOrigin: 'top left' }
+    }
+  }, [corner])
+
+  // Calculate base angle for arc based on corner (arc should extend into screen)
+  const getBaseAngle = useCallback(() => {
+    switch (corner) {
+      case 'bottom-right': return 180 // Arc goes up-left
+      case 'bottom-left': return 0 // Arc goes up-right
+      case 'top-right': return 180 // Arc goes down-left
+      case 'top-left': return 0 // Arc goes down-right
+    }
+  }, [corner])
+
+  // Handle momentum animation after drag release
   useEffect(() => {
     if (!isDragging && Math.abs(velocity.current) > 0.5) {
       const animate = () => {
-        velocity.current *= 0.95 // Friction
-        setRotation((prev) => prev + velocity.current)
+        velocity.current *= 0.92 // Friction
+        setRotation((prev) => {
+          const next = prev + velocity.current
+          // Clamp rotation to valid range
+          const maxRotation = (items.length - 1) * ITEM_SPACING
+          return Math.max(0, Math.min(maxRotation, next))
+        })
 
         if (Math.abs(velocity.current) > 0.5) {
           animationFrame.current = requestAnimationFrame(animate)
@@ -91,7 +117,7 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
         cancelAnimationFrame(animationFrame.current)
       }
     }
-  }, [isDragging])
+  }, [isDragging, items.length])
 
   // Determine which corner based on drag end position
   const determineCorner = useCallback((x: number, y: number): Corner => {
@@ -107,27 +133,29 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0]
-
-    // Check if touch is on the trigger button (for repositioning)
     const target = e.target as HTMLElement
+
+    // Check if touch is on the trigger button (for repositioning or toggle)
     if (target.closest('[data-trigger]')) {
       repositionStart.current = { x: touch.clientX, y: touch.clientY }
       return
     }
 
-    if (!isOpen) return
-
-    dragStartAngle.current = getAngle(touch.clientX, touch.clientY) - rotation
-    lastAngle.current = getAngle(touch.clientX, touch.clientY)
-    lastTime.current = Date.now()
-    velocity.current = 0
-    setIsDragging(true)
-  }, [isOpen, rotation, getAngle])
+    // Touch on arc area - start rotation drag
+    if (isOpen) {
+      dragStartY.current = touch.clientY
+      dragStartRotation.current = rotation
+      lastY.current = touch.clientY
+      lastTime.current = Date.now()
+      velocity.current = 0
+      setIsDragging(true)
+    }
+  }, [isOpen, rotation])
 
   const handleTouchMove = useCallback((e: React.TouchEvent) => {
     const touch = e.touches[0]
 
-    // Handle repositioning
+    // Handle trigger repositioning
     if (repositionStart.current) {
       const dx = Math.abs(touch.clientX - repositionStart.current.x)
       const dy = Math.abs(touch.clientY - repositionStart.current.y)
@@ -137,29 +165,31 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
       return
     }
 
-    if (!isDragging) return
+    // Handle arc rotation
+    if (isDragging) {
+      const deltaY = dragStartY.current - touch.clientY
+      // Invert for bottom corners so dragging up scrolls forward
+      const direction = corner.includes('bottom') ? 1 : -1
+      const newRotation = dragStartRotation.current + (deltaY * direction * 0.5)
 
-    const currentAngle = getAngle(touch.clientX, touch.clientY)
-    const newRotation = currentAngle - dragStartAngle.current
+      // Clamp to valid range
+      const maxRotation = (items.length - 1) * ITEM_SPACING
+      setRotation(Math.max(0, Math.min(maxRotation, newRotation)))
 
-    // Calculate velocity
-    const now = Date.now()
-    const dt = now - lastTime.current
-    if (dt > 0) {
-      let angleDelta = currentAngle - lastAngle.current
-      // Handle wrap-around
-      if (angleDelta > 180) angleDelta -= 360
-      if (angleDelta < -180) angleDelta += 360
-      velocity.current = angleDelta / dt * 16 // Normalize to ~60fps
+      // Calculate velocity for momentum
+      const now = Date.now()
+      const dt = now - lastTime.current
+      if (dt > 0) {
+        const dy = lastY.current - touch.clientY
+        velocity.current = (dy * direction * 0.5) / dt * 16
+      }
+      lastY.current = touch.clientY
+      lastTime.current = now
     }
-
-    lastAngle.current = currentAngle
-    lastTime.current = now
-    setRotation(newRotation)
-  }, [isDragging, getAngle])
+  }, [isDragging, corner, items.length])
 
   const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    // Handle repositioning
+    // Handle repositioning completion
     if (isRepositioning) {
       const touch = e.changedTouches[0]
       const newCorner = determineCorner(touch.clientX, touch.clientY)
@@ -170,8 +200,8 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
       return
     }
 
+    // Handle trigger tap
     if (repositionStart.current) {
-      // Was a tap on trigger, toggle menu
       setIsOpen((prev) => !prev)
       repositionStart.current = null
       return
@@ -180,51 +210,64 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
     setIsDragging(false)
   }, [isRepositioning, determineCorner])
 
-  // Close menu when clicking outside
+  // Close menu when tapping outside
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+    const handleTouchOutside = (e: TouchEvent) => {
+      if (isOpen && containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false)
       }
     }
 
-    if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside)
-    }
-
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
+    document.addEventListener('touchstart', handleTouchOutside)
+    return () => document.removeEventListener('touchstart', handleTouchOutside)
   }, [isOpen])
 
-  const pos = CORNER_POSITIONS[corner]
+  const cornerStyle = getCornerStyle()
+  const baseAngle = getBaseAngle()
 
   return (
     <div
       ref={containerRef}
-      className={`fixed ${pos.x} ${pos.y} z-50`}
-      style={{
-        width: isOpen ? RADIUS * 2 + ITEM_SIZE : TRIGGER_SIZE,
-        height: isOpen ? RADIUS * 2 + ITEM_SIZE : TRIGGER_SIZE,
-        transition: isRepositioning ? 'none' : 'width 0.3s ease-out, height 0.3s ease-out',
-      }}
+      className="fixed z-50"
+      style={cornerStyle}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* Radial items */}
+      {/* Arc of items */}
       {isOpen && (
         <div
-          className="absolute inset-0"
+          ref={arcRef}
+          className="absolute"
           style={{
-            transform: `rotate(${rotation}deg)`,
-            transition: isDragging ? 'none' : 'transform 0.1s ease-out',
+            width: RADIUS * 2 + ITEM_SIZE,
+            height: RADIUS * 2 + ITEM_SIZE,
+            // Position so trigger is at the corner of this container
+            ...(corner === 'bottom-right' && { right: 0, bottom: 0 }),
+            ...(corner === 'bottom-left' && { left: 0, bottom: 0 }),
+            ...(corner === 'top-right' && { right: 0, top: 0 }),
+            ...(corner === 'top-left' && { left: 0, top: 0 }),
           }}
         >
           {items.map((item, index) => {
-            const angle = (360 / items.length) * index - 90 // Start from top
-            const x = Math.cos((angle * Math.PI) / 180) * RADIUS
-            const y = Math.sin((angle * Math.PI) / 180) * RADIUS
+            // Calculate angle for this item, offset by current rotation
+            const itemAngle = baseAngle + (index * ITEM_SPACING) - rotation - (ARC_SPAN / 2) + ITEM_SPACING
+            const angleRad = (itemAngle * Math.PI) / 180
+
+            // Position relative to the corner (trigger position)
+            const triggerX = corner.includes('right') ? RADIUS + ITEM_SIZE / 2 : RADIUS + ITEM_SIZE / 2
+            const triggerY = corner.includes('bottom') ? RADIUS + ITEM_SIZE / 2 : RADIUS + ITEM_SIZE / 2
+
+            const x = triggerX + Math.cos(angleRad) * RADIUS
+            const y = triggerY + Math.sin(angleRad) * RADIUS
+
+            // Calculate opacity based on distance from center of viewport
+            const normalizedAngle = (index * ITEM_SPACING) - rotation
+            const distFromCenter = Math.abs(normalizedAngle)
+            const opacity = Math.max(0, 1 - (distFromCenter / (ARC_SPAN / 1.5)))
+            const scale = 0.7 + (opacity * 0.3)
+
+            if (opacity <= 0) return null
 
             return (
               <button
@@ -234,15 +277,17 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
                   setIsOpen(false)
                 }}
                 className="absolute flex items-center justify-center rounded-full
-                  bg-base-01/90 backdrop-blur-sm border border-base-02
-                  text-base-05 hover:text-base-06 hover:bg-base-02/90
-                  active:scale-95 transition-all duration-150"
+                  bg-base-01 border-2 border-base-02
+                  text-base-05 active:bg-base-02 active:scale-95
+                  transition-colors duration-100"
                 style={{
                   width: ITEM_SIZE,
                   height: ITEM_SIZE,
-                  left: '50%',
-                  top: '50%',
-                  transform: `translate(-50%, -50%) translate(${x}px, ${y}px) rotate(${-rotation}deg)`,
+                  left: x - ITEM_SIZE / 2,
+                  top: y - ITEM_SIZE / 2,
+                  opacity,
+                  transform: `scale(${scale})`,
+                  fontSize: '1.25rem',
                 }}
                 title={item.label}
               >
@@ -253,16 +298,14 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
         </div>
       )}
 
-      {/* Center trigger button */}
+      {/* Trigger button */}
       <button
         data-trigger
-        onClick={() => !isRepositioning && setIsOpen((prev) => !prev)}
-        className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2
-          flex items-center justify-center rounded-full
-          bg-base-01/80 backdrop-blur-md border border-base-02/50
-          shadow-lg shadow-black/20
-          text-base-05 hover:text-base-06 hover:bg-base-02/80
-          active:scale-95 transition-all duration-200
+        className={`flex items-center justify-center rounded-full
+          bg-base-01 border-2 border-base-02
+          shadow-lg shadow-black/30
+          text-base-05 active:bg-base-02 active:scale-95
+          transition-all duration-200
           ${isOpen ? 'rotate-45' : ''}`}
         style={{
           width: TRIGGER_SIZE,
@@ -270,7 +313,7 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
         }}
       >
         {triggerIcon || (
-          <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
           </svg>
         )}
@@ -279,7 +322,7 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
       {/* Reposition indicator */}
       {isRepositioning && (
         <div className="fixed inset-0 bg-black/20 pointer-events-none flex items-center justify-center">
-          <div className="text-base-06 text-sm bg-base-01/90 backdrop-blur-sm px-4 py-2 rounded-lg">
+          <div className="text-base-06 text-lg bg-base-01 px-6 py-3 rounded-xl border border-base-02">
             Drag to corner
           </div>
         </div>

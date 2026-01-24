@@ -742,24 +742,37 @@ code {
 
 /* Phone screens (< 768px) */
 @media (max-width: 767px) {
-  /* Increase base font size for readability */
+  /* Scale up root for high-DPI mobile displays */
+  html {
+    font-size: 20px;
+  }
+
+  /* Increase base font size for readability on mobile */
   body {
-    font-size: 18px;
-    line-height: 1.7;
+    font-size: 1.1rem;
+    line-height: 1.8;
   }
 
   /* Larger page title */
-  .page-title {
+  .page-title,
+  h1 {
     font-size: 1.5rem;
+  }
+
+  /* Editor content needs to be readable */
+  .cm-editor,
+  .cm-content {
+    font-size: 1.1rem;
+    line-height: 1.8;
   }
 
   /* Larger bullets for touch targets - use padding for larger hit area */
   .bullet {
-    width: 8px;
-    height: 8px;
-    /* Invisible padding to increase touch target to 44px */
-    padding: 18px;
-    margin: -18px;
+    width: 10px;
+    height: 10px;
+    /* Invisible padding to increase touch target to 48px */
+    padding: 19px;
+    margin: -19px;
     background-clip: content-box;
   }
 
@@ -771,33 +784,33 @@ code {
 
   /* Larger block spacing for touch */
   .block {
-    gap: 16px;
-    padding: 8px 0;
-    min-height: 44px; /* Minimum touch target */
+    gap: 20px;
+    padding: 12px 0;
+    min-height: 48px; /* Minimum touch target */
   }
 
   /* Larger block content area */
   .block-content {
-    min-height: 2em;
-    font-size: 1.1em;
+    min-height: 2.5em;
+    font-size: 1.1rem;
   }
 
   /* Increase children indentation slightly */
   .block-children {
-    margin-left: 20px;
-    padding-left: 16px;
+    margin-left: 24px;
+    padding-left: 20px;
   }
 
   /* Larger task status badges */
   .task-status {
-    font-size: 0.9em;
-    padding: 4px 10px;
+    font-size: 1rem;
+    padding: 6px 14px;
   }
 
   /* Larger tag pills */
   .tag-pill {
-    font-size: 1em;
-    padding: 2px 10px;
+    font-size: 1rem;
+    padding: 4px 12px;
   }
 
   /* Sidebar as full-screen overlay on mobile */
@@ -808,10 +821,10 @@ code {
     background-color: var(--sidebar-bg);
   }
 
-  /* Activity log - make it more compact on mobile */
+  /* Activity log - keep readable on mobile */
   .activity-log {
-    font-size: 0.85em;
-    padding: 8px 16px;
+    font-size: 0.9rem;
+    padding: 12px 20px;
   }
 
   /* Search panel adjustments */
@@ -826,6 +839,11 @@ code {
     width: calc(100% - 32px);
     max-width: none;
     margin: 16px;
+  }
+
+  /* Wikilinks should be tappable */
+  .cm-wikilink {
+    padding: 4px 2px;
   }
 }
 
