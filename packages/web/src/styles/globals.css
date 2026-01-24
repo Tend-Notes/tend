@@ -753,17 +753,6 @@ code {
     font-size: 1.5rem;
   }
 
-  /* Full-width page content with minimal margins */
-  .page-content {
-    padding: 16px;
-    padding-bottom: 80px; /* Space for toolbar */
-  }
-
-  /* Remove max-width constraint on mobile */
-  .page-content.max-w-2xl {
-    max-width: none;
-  }
-
   /* Larger bullets for touch targets - use padding for larger hit area */
   .bullet {
     width: 8px;

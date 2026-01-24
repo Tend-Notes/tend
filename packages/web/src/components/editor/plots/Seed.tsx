@@ -108,9 +108,13 @@ const baseTheme = EditorView.theme({
 /**
  * Extension to configure contenteditable attributes for mobile.
  * Sets inputmode and autocapitalize to optimize for iOS/Android.
+ *
+ * Note: iOS form accessory bar (prev/next/done) cannot be reliably hidden
+ * for contenteditable elements. Apple keeps it visible for accessibility.
+ * We optimize other aspects of mobile input instead.
  */
 const mobileContentEditable = EditorView.contentAttributes.of({
-  // Prevent iOS from showing form accessory bar
+  // Standard text input mode
   inputmode: 'text',
   // Disable auto-capitalization which can interfere with markdown
   autocapitalize: 'off',
