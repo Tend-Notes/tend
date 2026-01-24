@@ -135,7 +135,29 @@ function SidebarHistory({ onBack, pageName, isJournal }: SidebarHistoryProps) {
         )}
 
         {error && (
-          <div className="p-4 text-sm text-base-08">{error}</div>
+          <div className="p-4">
+            {error.includes('No such file or directory') || error.includes('Not a git repository') ? (
+              <div className="space-y-3">
+                <p className="text-sm text-base-05">Version History</p>
+                <p className="text-xs text-base-04">
+                  Track changes to your documents with git-based versioning.
+                </p>
+                <div className="p-2 bg-base-01 border border-base-02 rounded text-xs text-base-04">
+                  <p className="font-medium text-base-05 mb-1">To enable:</p>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>Open Settings (Alt+Shift+O)</li>
+                    <li>Go to Backup section</li>
+                    <li>Toggle "Enable versions"</li>
+                  </ol>
+                </div>
+                <p className="text-xs text-base-03">
+                  This creates automatic snapshots of your work that you can browse and restore.
+                </p>
+              </div>
+            ) : (
+              <div className="text-sm text-base-08">{error}</div>
+            )}
+          </div>
         )}
 
         {!isLoading && !error && commits.length === 0 && (

@@ -276,6 +276,8 @@
               after = [ "network.target" ];
               wantedBy = [ "multi-user.target" ];
 
+              path = [ pkgs.git ];
+
               environment = {
                 TEND_BASE_DIR = cfg.dataDir;
                 TEND_PORT = toString cfg.port;
