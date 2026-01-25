@@ -94,15 +94,71 @@ interface ThemeCache {
   error: string | null
 }
 
-const themeCache: ThemeCache = {
-  themes: [...BUILTIN_THEMES],
-  lastFetched: 0,
-  isLoading: false,
-  error: null,
+// LocalStorage key for persistent cache
+const THEME_CACHE_KEY = 'tend-theme-cache'
+
+// Cache duration: 24 hours (reduced network requests significantly)
+const CACHE_DURATION = 24 * 60 * 60 * 1000
+
+// Stored cache format (subset of ThemeCache that we persist)
+interface StoredCache {
+  themes: Base16Theme[]
+  lastFetched: number
 }
 
-// Cache duration: 1 hour
-const CACHE_DURATION = 60 * 60 * 1000
+// Try to restore cache from localStorage
+function restoreCache(): ThemeCache {
+  try {
+    const stored = localStorage.getItem(THEME_CACHE_KEY)
+    if (stored) {
+      const parsed: StoredCache = JSON.parse(stored)
+      // Validate the stored data has expected shape
+      if (
+        Array.isArray(parsed.themes) &&
+        typeof parsed.lastFetched === 'number' &&
+        parsed.themes.length > 0
+      ) {
+        // Merge with built-in themes (in case builtins were updated)
+        const builtinNames = new Set(BUILTIN_THEMES.map((t) => t.name))
+        const restoredThemes = [
+          ...BUILTIN_THEMES,
+          ...parsed.themes.filter((t) => !builtinNames.has(t.name)),
+        ]
+        return {
+          themes: restoredThemes,
+          lastFetched: parsed.lastFetched,
+          isLoading: false,
+          error: null,
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to restore theme cache from localStorage:', e)
+  }
+  // Return fresh cache if restore fails
+  return {
+    themes: [...BUILTIN_THEMES],
+    lastFetched: 0,
+    isLoading: false,
+    error: null,
+  }
+}
+
+// Persist cache to localStorage
+function persistCache(cache: ThemeCache): void {
+  try {
+    const toStore: StoredCache = {
+      themes: cache.themes,
+      lastFetched: cache.lastFetched,
+    }
+    localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(toStore))
+  } catch (e) {
+    console.warn('Failed to persist theme cache to localStorage:', e)
+  }
+}
+
+// Initialize cache from localStorage
+const themeCache: ThemeCache = restoreCache()
 
 // GitHub API URL for tinted-theming base16 schemes
 const SCHEMES_API_URL = 'https://api.github.com/repos/tinted-theming/schemes/contents/base16'
@@ -197,6 +253,7 @@ export async function loadThemesFromTintedTheming(): Promise<void> {
 
     themeCache.themes = newThemes
     themeCache.lastFetched = Date.now()
+    persistCache(themeCache)
     notifyListeners()
   } catch (error) {
     themeCache.error = error instanceof Error ? error.message : 'Failed to load themes'
