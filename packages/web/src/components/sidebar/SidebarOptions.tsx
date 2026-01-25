@@ -701,6 +701,8 @@ function BackupSection() {
   const [remoteStatus, setRemoteStatus] = useState<RemoteStatus>('unknown')
   const [remoteMessage, setRemoteMessage] = useState<string | undefined>()
   const [saving, setSaving] = useState(false)
+  const [remoteHasGarden, setRemoteHasGarden] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   // Fetch git status to get remote URL and repo status
   useEffect(() => {
@@ -730,12 +732,20 @@ function BackupSection() {
   const testRemoteConnection = async () => {
     setRemoteStatus('testing')
     setRemoteMessage(undefined)
+    setRemoteHasGarden(false)
     try {
       const { git } = await import('../../lib/api')
       const result = await git.testRemote()
       if (result.verified) {
         setRemoteStatus('verified')
         setRemoteMessage(result.message)
+        // Check if remote has an existing garden
+        try {
+          const hasGarden = await git.checkRemoteGarden()
+          setRemoteHasGarden(hasGarden)
+        } catch {
+          // Ignore errors checking for garden
+        }
       } else {
         setRemoteStatus('failed')
         setRemoteMessage(result.message)
@@ -743,6 +753,26 @@ function BackupSection() {
     } catch (err) {
       setRemoteStatus('failed')
       setRemoteMessage(err instanceof Error ? err.message : 'Connection test failed')
+    }
+  }
+
+  const handleImportGarden = async () => {
+    setImporting(true)
+    setError(null)
+    try {
+      const { git } = await import('../../lib/api')
+      const result = await git.importRemoteGarden()
+      if (result.success) {
+        setRemoteHasGarden(false)
+        // Reload the page to show imported content
+        window.location.reload()
+      } else {
+        setError(result.message)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to import garden')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -884,6 +914,21 @@ function BackupSection() {
               {error && <p className="text-xs text-base-08">{error}</p>}
               {remoteStatus === 'failed' && remoteMessage && (
                 <p className="text-xs text-base-08">{remoteMessage}</p>
+              )}
+              {/* Offer to import if remote has existing garden */}
+              {remoteStatus === 'verified' && remoteHasGarden && (
+                <div className="mt-2 p-2 bg-base-01 border border-base-02 rounded">
+                  <p className="text-xs text-base-04 mb-2">
+                    This remote contains an existing garden. Import it?
+                  </p>
+                  <button
+                    onClick={handleImportGarden}
+                    disabled={importing}
+                    className="px-2 py-1 text-xs text-base-06 bg-base-02 rounded hover:bg-base-03 transition-colors disabled:opacity-50"
+                  >
+                    {importing ? 'Importing...' : 'Import Garden'}
+                  </button>
+                </div>
               )}
             </div>
 

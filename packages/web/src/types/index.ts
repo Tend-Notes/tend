@@ -157,3 +157,10 @@ export interface RemoteResult {
   message: string
   verified: boolean
 }
+
+// Result of importing a remote garden via git
+export interface GitImportResult {
+  success: boolean
+  message: string
+  filesChanged: number
+}

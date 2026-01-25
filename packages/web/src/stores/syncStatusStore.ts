@@ -53,12 +53,26 @@ export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
       const gitStatus = await api.git.status()
       const backupEnabled = useSettingsStore.getState().backupEnabled
 
-      // Check if this file has uncommitted changes
-      const hasUncommitted = gitStatus.changedFiles?.some(
-        (f) => f.path === filePath && (f.status === 'modified' || f.status === 'added')
-      )
+      // Check if this file has uncommitted changes (modified, added, or untracked)
+      const fileInfo = gitStatus.changedFiles?.find((f) => f.path === filePath)
+      const hasUncommitted = fileInfo && ['modified', 'added', 'untracked'].includes(fileInfo.status)
 
       if (hasUncommitted) {
+        // File exists but isn't committed yet - it's just "saved"
+        set({ status: 'saved', isChecking: false, lastCheck: Date.now() })
+        return
+      }
+
+      // If the file isn't in changedFiles, it could be:
+      // 1. Already committed and unchanged (in version history)
+      // 2. A new file that git doesn't know about yet (untracked but not listed)
+      //
+      // Git status only shows untracked files if they exist on disk.
+      // Since we're checking a page that should exist, if it's not in changedFiles
+      // and there are no changes, it must be committed.
+
+      // However, if the repo has no commits at all, nothing is "stored" yet
+      if (!gitStatus.isRepo) {
         set({ status: 'saved', isChecking: false, lastCheck: Date.now() })
         return
       }

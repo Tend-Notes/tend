@@ -56,6 +56,8 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/git/remote", post(git::set_remote))
         .route("/git/remote", delete(git::remove_remote))
         .route("/git/remote/test", post(git::test_remote))
+        .route("/git/remote/check-garden", get(git::check_remote_garden))
+        .route("/git/remote/import", post(git::import_remote_garden))
         // Gardens
         .route("/gardens", get(gardens::list_gardens))
         .route("/gardens", post(gardens::create_garden))

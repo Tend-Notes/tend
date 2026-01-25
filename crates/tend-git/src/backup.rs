@@ -953,6 +953,174 @@ impl BackupManager {
             })
         }
     }
+
+    /// Check if the remote repository contains a Tend garden
+    /// Returns true if remote has content (non-empty) that looks like a garden
+    pub fn check_remote_has_garden(&self) -> Result<bool, GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        let status = self.status()?;
+        if status.remote.is_none() {
+            return Err(GitError::NoRemote);
+        }
+
+        // Fetch remote refs to see what's there
+        let output = Command::new("git")
+            .args(["ls-remote", "--heads", "origin"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !output.status.success() {
+            return Ok(false);
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // If there are any branches, the remote has content
+        // We'll do a more thorough check when importing
+        Ok(!stdout.trim().is_empty())
+    }
+
+    /// Import a garden from the remote repository
+    /// This fetches and merges/resets to match the remote
+    pub fn import_remote_garden(&self) -> Result<ImportResult, GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        let status = self.status()?;
+        let remote_url = status.remote.clone().ok_or(GitError::NoRemote)?;
+
+        info!("Importing garden from remote: {}", remote_url);
+
+        // Fetch from remote
+        let fetch_output = Command::new("git")
+            .args(["fetch", "origin"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !fetch_output.status.success() {
+            let stderr = String::from_utf8_lossy(&fetch_output.stderr);
+            return Err(GitError::OperationFailed(format!("Fetch failed: {}", stderr)));
+        }
+
+        // Check if we have a local branch
+        let branch_output = Command::new("git")
+            .args(["branch", "--show-current"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        let current_branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+
+        // Determine the remote's default branch
+        let remote_head = Command::new("git")
+            .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+            .current_dir(&self.repo_path)
+            .output();
+
+        let remote_branch = if let Ok(output) = remote_head {
+            if output.status.success() {
+                String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .strip_prefix("refs/remotes/origin/")
+                    .unwrap_or("main")
+                    .to_string()
+            } else {
+                // Try to detect main vs master
+                let check_main = Command::new("git")
+                    .args(["rev-parse", "--verify", "origin/main"])
+                    .current_dir(&self.repo_path)
+                    .output();
+                if check_main.map(|o| o.status.success()).unwrap_or(false) {
+                    "main".to_string()
+                } else {
+                    "master".to_string()
+                }
+            }
+        } else {
+            "main".to_string()
+        };
+
+        info!("Remote branch: {}, local branch: {:?}", remote_branch, current_branch);
+
+        // If local repo is empty (no commits), we can just checkout the remote branch
+        let has_commits = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+        if !has_commits {
+            // No local commits, checkout remote branch directly
+            let checkout_output = Command::new("git")
+                .args(["checkout", "-B", &remote_branch, &format!("origin/{}", remote_branch)])
+                .current_dir(&self.repo_path)
+                .output()
+                .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+            if !checkout_output.status.success() {
+                let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+                return Err(GitError::OperationFailed(format!("Checkout failed: {}", stderr)));
+            }
+
+            // Set up tracking
+            let _ = Command::new("git")
+                .args(["branch", "--set-upstream-to", &format!("origin/{}", remote_branch)])
+                .current_dir(&self.repo_path)
+                .output();
+
+            info!("Imported garden from remote (fresh checkout)");
+            return Ok(ImportResult {
+                success: true,
+                message: format!("Imported garden from {}", remote_url),
+                files_changed: 0, // We don't count on fresh checkout
+            });
+        }
+
+        // Local has commits - try to merge or warn about conflicts
+        // For safety, we'll do a pull with rebase
+        let pull_output = Command::new("git")
+            .args(["pull", "--rebase", "origin", &remote_branch])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if pull_output.status.success() {
+            let stdout = String::from_utf8_lossy(&pull_output.stdout);
+            info!("Imported garden from remote (merged): {}", stdout);
+            Ok(ImportResult {
+                success: true,
+                message: "Garden imported and merged with local changes".to_string(),
+                files_changed: 0,
+            })
+        } else {
+            let stderr = String::from_utf8_lossy(&pull_output.stderr);
+            // Abort rebase if it failed
+            let _ = Command::new("git")
+                .args(["rebase", "--abort"])
+                .current_dir(&self.repo_path)
+                .output();
+
+            Err(GitError::OperationFailed(format!(
+                "Could not merge remote garden with local changes: {}. Consider backing up local changes first.",
+                stderr.lines().next().unwrap_or("merge conflict")
+            )))
+        }
+    }
+}
+
+/// Result of importing a remote garden
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportResult {
+    pub success: bool,
+    pub message: String,
+    pub files_changed: usize,
 }
 
 /// Result of setting or testing a remote

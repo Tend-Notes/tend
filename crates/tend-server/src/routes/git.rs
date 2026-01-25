@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
-use tend_git::{BackupResult, CommitDiff, CommitInfo, GitStatus, PushResult, RemoteResult};
+use tend_git::{BackupResult, CommitDiff, CommitInfo, GitStatus, ImportResult, PushResult, RemoteResult};
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -210,4 +210,22 @@ pub async fn remove_remote(State(state): State<Arc<AppState>>) -> Result<(), App
     let garden = state.garden.read().await;
     garden.backup_manager.remove_remote()?;
     Ok(())
+}
+
+/// Check if the remote repository contains a garden
+pub async fn check_remote_garden(State(state): State<Arc<AppState>>) -> Result<Json<bool>, AppError> {
+    let garden = state.garden.read().await;
+    let has_garden = garden.backup_manager.check_remote_has_garden()?;
+    Ok(Json(has_garden))
+}
+
+/// Import a garden from the remote repository
+pub async fn import_remote_garden(State(state): State<Arc<AppState>>) -> Result<Json<ImportResult>, AppError> {
+    let garden = state.garden.read().await;
+
+    // Acquire exclusive lock since this modifies files
+    let _lock = garden.file_manager.acquire_exclusive_lock().await;
+
+    let result = garden.backup_manager.import_remote_garden()?;
+    Ok(Json(result))
 }
