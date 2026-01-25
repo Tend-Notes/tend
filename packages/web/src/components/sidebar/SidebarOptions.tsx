@@ -704,6 +704,8 @@ function BackupSection() {
   const [remoteHasGarden, setRemoteHasGarden] = useState(false)
   const [remoteGardenName, setRemoteGardenName] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
+  const [showRenamePrompt, setShowRenamePrompt] = useState(false)
+  const [pendingRename, setPendingRename] = useState<string | null>(null)
 
   // Fetch git status to get remote URL and repo status
   useEffect(() => {
@@ -763,10 +765,28 @@ function BackupSection() {
     setImporting(true)
     setError(null)
     try {
-      const { git } = await import('../../lib/api')
+      const { git, gardens } = await import('../../lib/api')
       const result = await git.importRemoteGarden()
       if (result.success) {
         setRemoteHasGarden(false)
+
+        // Check if we should prompt for rename
+        if (remoteGardenName) {
+          // Get current garden name
+          const gardensResponse = await gardens.list()
+          const currentGarden = gardensResponse.gardens.find(
+            (g) => g.id === gardensResponse.active
+          )
+
+          if (currentGarden && currentGarden.name !== remoteGardenName) {
+            // Names differ - prompt for rename
+            setPendingRename(remoteGardenName)
+            setShowRenamePrompt(true)
+            setImporting(false)
+            return
+          }
+        }
+
         // Reload the page to show imported content
         window.location.reload()
       } else {
@@ -777,6 +797,21 @@ function BackupSection() {
     } finally {
       setImporting(false)
     }
+  }
+
+  const handleRename = async (rename: boolean) => {
+    if (rename && pendingRename) {
+      try {
+        const { gardens } = await import('../../lib/api')
+        await gardens.rename(pendingRename)
+      } catch (err) {
+        console.error('Failed to rename garden:', err)
+      }
+    }
+    setShowRenamePrompt(false)
+    setPendingRename(null)
+    // Reload regardless of rename decision
+    window.location.reload()
   }
 
   const handleSaveRemote = async () => {
@@ -919,7 +954,7 @@ function BackupSection() {
                 <p className="text-xs text-base-08">{remoteMessage}</p>
               )}
               {/* Offer to import if remote has existing garden */}
-              {remoteStatus === 'verified' && remoteHasGarden && (
+              {remoteStatus === 'verified' && remoteHasGarden && !showRenamePrompt && (
                 <div className="mt-2 p-2 bg-base-01 border border-base-02 rounded">
                   <p className="text-xs text-base-04 mb-2">
                     This remote contains an existing garden
@@ -932,6 +967,29 @@ function BackupSection() {
                   >
                     {importing ? 'Importing...' : 'Import Garden'}
                   </button>
+                </div>
+              )}
+              {/* Rename prompt after import */}
+              {showRenamePrompt && pendingRename && (
+                <div className="mt-2 p-2 bg-base-01 border border-base-02 rounded">
+                  <p className="text-xs text-base-04 mb-2">
+                    Garden imported. Rename this garden to <strong>"{pendingRename}"</strong> to
+                    match the imported data?
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleRename(true)}
+                      className="px-2 py-1 text-xs text-base-06 bg-base-02 rounded hover:bg-base-03 transition-colors"
+                    >
+                      Yes, rename
+                    </button>
+                    <button
+                      onClick={() => handleRename(false)}
+                      className="px-2 py-1 text-xs text-base-04 bg-base-01 rounded hover:bg-base-02 transition-colors"
+                    >
+                      No, keep current name
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

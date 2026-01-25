@@ -312,6 +312,12 @@ export const gardens = {
       method: 'POST',
       body: JSON.stringify({ id, passphrase }),
     }),
+
+  rename: (name: string) =>
+    fetchJson<Garden>(`${API_BASE}/gardens/rename`, {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
 }
 
 // Import types

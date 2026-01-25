@@ -66,6 +66,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/gardens/{id}/permanent", delete(gardens::delete_archived_garden))
         .route("/gardens/switch", post(gardens::switch_garden))
         .route("/gardens/unlock", post(gardens::unlock_garden))
+        .route("/gardens/rename", post(gardens::rename_garden))
         // Content Types
         .route("/content-types", get(gardens::get_content_types))
         .route("/content-types", put(gardens::update_content_types))

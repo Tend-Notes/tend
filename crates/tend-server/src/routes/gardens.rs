@@ -100,6 +100,12 @@ pub struct UnlockGardenRequest {
     pub passphrase: String,
 }
 
+/// Request to rename a garden
+#[derive(Debug, Deserialize)]
+pub struct RenameGardenRequest {
+    pub name: String,
+}
+
 /// Gardens config file structure
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct GardensConfig {
@@ -666,6 +672,44 @@ pub async fn unlock_garden(
             }
         }
     }
+}
+
+/// Rename the active garden
+pub async fn rename_garden(
+    State(_state): State<Arc<AppState>>,
+    Json(req): Json<RenameGardenRequest>,
+) -> Result<Json<Garden>, AppError> {
+    let mut config = load_gardens_config();
+
+    // Find the active garden
+    let active_id = config.active.clone();
+    let garden = config
+        .gardens
+        .iter_mut()
+        .find(|g| g.id == active_id)
+        .ok_or_else(|| AppError::NotFound("Active garden not found".to_string()))?;
+
+    // Update the name
+    garden.name = req.name.clone();
+    let updated_garden = garden.clone();
+
+    // Also update the .garden-meta file
+    let garden_path = std::path::PathBuf::from(&garden.path);
+    let garden_meta = serde_json::json!({
+        "version": 1,
+        "type": "tend-garden",
+        "name": &req.name
+    });
+    std::fs::write(
+        garden_path.join(".garden-meta"),
+        serde_json::to_string_pretty(&garden_meta).unwrap(),
+    )
+    .map_err(|e| AppError::Internal(format!("Failed to update .garden-meta: {}", e)))?;
+
+    save_gardens_config(&config)
+        .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
+
+    Ok(Json(updated_garden))
 }
 
 /// Get content types for the active garden
