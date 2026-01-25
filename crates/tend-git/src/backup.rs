@@ -1151,7 +1151,8 @@ impl BackupManager {
             });
         }
 
-        // Local has commits - check if local is basically empty (just .garden-meta)
+        // Local has commits - check if local is basically empty (just .garden-meta or
+        // only has empty pages/journals directories)
         // In that case, we can safely reset to remote
         let local_files_output = Command::new("git")
             .args(["ls-tree", "-r", "--name-only", "HEAD"])
@@ -1165,23 +1166,34 @@ impl BackupManager {
             .filter(|f| !f.is_empty())
             .collect();
 
-        // If local only has .garden-meta (or is empty), safe to hard reset to remote
-        let can_reset = local_files.is_empty()
-            || (local_files.len() == 1 && local_files[0] == ".garden-meta");
+        // Check if local only has meta files (no actual content)
+        let has_real_content = local_files.iter().any(|f| {
+            // Real content is in pages/, journals/, or other content directories
+            // Exclude meta files and .gitkeep
+            let is_meta = *f == ".garden-meta" || f.ends_with(".gitkeep") || f.starts_with(".tend/");
+            !is_meta && (f.starts_with("pages/") || f.starts_with("journals/") || f.ends_with(".md"))
+        });
 
-        if can_reset {
-            info!("Local garden is empty or only has .garden-meta, resetting to remote");
+        if !has_real_content {
+            info!(
+                "Local garden has no real content (files: {:?}), resetting to remote",
+                local_files
+            );
 
-            // Hard reset to remote branch
-            let reset_output = Command::new("git")
-                .args(["reset", "--hard", &format!("origin/{}", remote_branch)])
+            // Need to checkout the remote branch first if we're on a different branch
+            // This handles the case where local is on 'main' but remote uses 'trunk'
+            let checkout_output = Command::new("git")
+                .args(["checkout", "-B", &remote_branch, &format!("origin/{}", remote_branch)])
                 .current_dir(&self.repo_path)
                 .output()
                 .map_err(|e| GitError::OperationFailed(e.to_string()))?;
 
-            if !reset_output.status.success() {
-                let stderr = String::from_utf8_lossy(&reset_output.stderr);
-                return Err(GitError::OperationFailed(format!("Reset failed: {}", stderr)));
+            if !checkout_output.status.success() {
+                let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+                return Err(GitError::OperationFailed(format!(
+                    "Checkout failed: {}",
+                    stderr
+                )));
             }
 
             // Set up tracking
@@ -1194,7 +1206,7 @@ impl BackupManager {
                 .current_dir(&self.repo_path)
                 .output();
 
-            info!("Imported garden from remote (reset to remote)");
+            info!("Imported garden from remote (reset to remote branch)");
             return Ok(ImportResult {
                 success: true,
                 message: format!("Imported garden from {}", remote_url),
