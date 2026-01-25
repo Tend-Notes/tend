@@ -744,7 +744,6 @@ function BackupSection() {
         setRemoteStatus('verified')
         setRemoteMessage(result.message)
         // Check if remote has an existing garden that we should offer to import
-        // Only show import prompt if we're behind the remote (have commits to pull)
         try {
           const gardenInfo = await git.checkRemoteGarden()
           if (gardenInfo.found) {
@@ -752,9 +751,9 @@ function BackupSection() {
             const status = await git.status()
             // Show import prompt if:
             // - We're behind the remote (behind > 0), OR
-            // - We have a different branch locally (local content differs from remote)
-            // After a successful import, behind should be 0, so prompt won't show
-            const needsImport = (status.behind && status.behind > 0)
+            // - We don't have an upstream tracking branch yet (fresh garden, just set remote)
+            // After a successful import, hasUpstream will be true and behind will be 0
+            const needsImport = (status.behind && status.behind > 0) || !status.hasUpstream
             if (needsImport) {
               setRemoteHasGarden(true)
               setRemoteGardenName(gardenInfo.name)

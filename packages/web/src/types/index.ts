@@ -96,6 +96,8 @@ export interface GitStatus {
   hasChanges: boolean
   branch: string | null
   remote: string | null
+  /** Whether the local branch has an upstream tracking branch configured */
+  hasUpstream: boolean
   ahead: number
   behind: number
   changedFiles: ChangedFile[]

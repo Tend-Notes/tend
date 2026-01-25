@@ -31,6 +31,8 @@ pub struct GitStatus {
     pub has_changes: bool,
     pub branch: Option<String>,
     pub remote: Option<String>,
+    /// Whether the local branch has an upstream tracking branch configured
+    pub has_upstream: bool,
     pub ahead: u32,
     pub behind: u32,
     /// List of changed files (path and status)
@@ -169,6 +171,7 @@ impl BackupManager {
                 has_changes: false,
                 branch: None,
                 remote: None,
+                has_upstream: false,
                 ahead: 0,
                 behind: 0,
                 changed_files: vec![],
@@ -214,10 +217,13 @@ impl BackupManager {
         });
 
         // Calculate ahead/behind if we have a remote and upstream tracking
-        let (ahead, behind) = if remote.is_some() {
-            self.get_ahead_behind(&branch).unwrap_or((0, 0))
+        let (has_upstream, ahead, behind) = if remote.is_some() {
+            match self.get_ahead_behind(&branch) {
+                Some((a, b)) => (true, a, b),
+                None => (false, 0, 0),
+            }
         } else {
-            (0, 0)
+            (false, 0, 0)
         };
 
         Ok(GitStatus {
@@ -225,6 +231,7 @@ impl BackupManager {
             has_changes,
             branch,
             remote,
+            has_upstream,
             ahead,
             behind,
             changed_files,
