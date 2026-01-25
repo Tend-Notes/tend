@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { usePageStore } from '../stores/pageStore'
+import { useSyncStatusStore } from '../stores/syncStatusStore'
 
 // WebSocket event types (must match server-side WsEvent enum)
 interface WsEventBase {
@@ -43,6 +44,20 @@ interface GardenSwitchedEvent extends WsEventBase {
   garden_id: string
 }
 
+interface PushStartedEvent extends WsEventBase {
+  type: 'push_started'
+}
+
+interface PushCompletedEvent extends WsEventBase {
+  type: 'push_completed'
+  message: string
+}
+
+interface PushFailedEvent extends WsEventBase {
+  type: 'push_failed'
+  error: string
+}
+
 type WsEvent =
   | FileChangedEvent
   | PageUpdatedEvent
@@ -51,6 +66,9 @@ type WsEvent =
   | BackupFailedEvent
   | ConnectedEvent
   | GardenSwitchedEvent
+  | PushStartedEvent
+  | PushCompletedEvent
+  | PushFailedEvent
 
 /**
  * Hook that maintains a WebSocket connection to the server for real-time updates.
@@ -127,9 +145,20 @@ export function useWebSocket() {
           case 'backup_started':
           case 'backup_completed':
           case 'backup_failed':
-            // These are handled by the git store if needed
-            // For now, just log them
             console.log('Backup event:', data.type)
+            break
+
+          case 'push_started':
+            console.log('Push started')
+            break
+
+          case 'push_completed':
+            console.log('Push completed:', data.message)
+            useSyncStatusStore.getState().recordPush()
+            break
+
+          case 'push_failed':
+            console.log('Push failed:', data.error)
             break
 
           case 'garden_switched':
