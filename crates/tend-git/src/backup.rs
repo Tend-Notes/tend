@@ -1151,103 +1151,61 @@ impl BackupManager {
             });
         }
 
-        // Local has commits - check if local is basically empty (just .garden-meta or
-        // only has empty pages/journals directories)
-        // In that case, we can safely reset to remote
-        let local_files_output = Command::new("git")
-            .args(["ls-tree", "-r", "--name-only", "HEAD"])
+        // User explicitly requested import - reset to remote branch
+        // This discards any local commits and replaces with remote content
+        //
+        // The user clicked "Import Garden" after seeing the remote has a garden,
+        // so they want the remote content to replace local content.
+        info!("Importing garden: resetting to remote branch {}", remote_branch);
+
+        // First, stash any uncommitted changes (in case there are working tree changes)
+        let _ = Command::new("git")
+            .args(["stash", "--include-untracked"])
+            .current_dir(&self.repo_path)
+            .output();
+
+        // Checkout the remote branch, creating it if needed, discarding local commits
+        let checkout_output = Command::new("git")
+            .args([
+                "checkout",
+                "-B",
+                &remote_branch,
+                &format!("origin/{}", remote_branch),
+            ])
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
 
-        let local_files_str = String::from_utf8_lossy(&local_files_output.stdout);
-        let local_files: Vec<&str> = local_files_str
-            .lines()
-            .filter(|f| !f.is_empty())
-            .collect();
-
-        // Check if local only has meta files (no actual content)
-        let has_real_content = local_files.iter().any(|f| {
-            // Real content is in pages/, journals/, or other content directories
-            // Exclude meta files and .gitkeep
-            let is_meta = *f == ".garden-meta" || f.ends_with(".gitkeep") || f.starts_with(".tend/");
-            !is_meta && (f.starts_with("pages/") || f.starts_with("journals/") || f.ends_with(".md"))
-        });
-
-        if !has_real_content {
-            info!(
-                "Local garden has no real content (files: {:?}), resetting to remote",
-                local_files
-            );
-
-            // Need to checkout the remote branch first if we're on a different branch
-            // This handles the case where local is on 'main' but remote uses 'trunk'
-            let checkout_output = Command::new("git")
-                .args(["checkout", "-B", &remote_branch, &format!("origin/{}", remote_branch)])
-                .current_dir(&self.repo_path)
-                .output()
-                .map_err(|e| GitError::OperationFailed(e.to_string()))?;
-
-            if !checkout_output.status.success() {
-                let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-                return Err(GitError::OperationFailed(format!(
-                    "Checkout failed: {}",
-                    stderr
-                )));
-            }
-
-            // Set up tracking
-            let _ = Command::new("git")
-                .args([
-                    "branch",
-                    "--set-upstream-to",
-                    &format!("origin/{}", remote_branch),
-                ])
-                .current_dir(&self.repo_path)
-                .output();
-
-            info!("Imported garden from remote (reset to remote branch)");
-            return Ok(ImportResult {
-                success: true,
-                message: format!("Imported garden from {}", remote_url),
-                files_changed: 0,
-            });
+        if !checkout_output.status.success() {
+            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+            return Err(GitError::OperationFailed(format!(
+                "Failed to checkout remote branch: {}",
+                stderr
+            )));
         }
 
-        // Local has real content - try to merge
-        let pull_output = Command::new("git")
-            .args(["pull", "--rebase", "origin", &remote_branch])
+        // Set up tracking
+        let _ = Command::new("git")
+            .args([
+                "branch",
+                "--set-upstream-to",
+                &format!("origin/{}", remote_branch),
+            ])
             .current_dir(&self.repo_path)
-            .output()
-            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+            .output();
 
-        if pull_output.status.success() {
-            let stdout = String::from_utf8_lossy(&pull_output.stdout);
-            info!("Imported garden from remote (merged): {}", stdout);
-            Ok(ImportResult {
-                success: true,
-                message: "Garden imported and merged with local changes".to_string(),
-                files_changed: 0,
-            })
-        } else {
-            let stderr = String::from_utf8_lossy(&pull_output.stderr);
-            // Abort rebase if it failed
-            let _ = Command::new("git")
-                .args(["rebase", "--abort"])
-                .current_dir(&self.repo_path)
-                .output();
+        // Drop the stash (we don't need the old uncommitted changes)
+        let _ = Command::new("git")
+            .args(["stash", "drop"])
+            .current_dir(&self.repo_path)
+            .output();
 
-            // Get a more useful error message - skip the "From github.com" line
-            let error_msg = stderr
-                .lines()
-                .find(|l| !l.starts_with("From ") && !l.trim().is_empty())
-                .unwrap_or("merge conflict");
-
-            Err(GitError::OperationFailed(format!(
-                "Could not merge remote garden with local changes: {}. Consider backing up local changes first.",
-                error_msg
-            )))
-        }
+        info!("Imported garden from remote");
+        Ok(ImportResult {
+            success: true,
+            message: format!("Imported garden from {}", remote_url),
+            files_changed: 0,
+        })
     }
 }
 
