@@ -1314,8 +1314,9 @@ function GardensSection() {
       const data = await response.json()
       setGardens(data.gardens)
       setArchivedGardens(data.archived || [])
-      // Update currentGraphId if not set or not found
-      if (!currentGraphId || !data.gardens.find((g: { id: string }) => g.id === currentGraphId)) {
+      // Always sync currentGraphId to server's active garden
+      // This ensures UI matches server state after garden switches
+      if (currentGraphId !== data.active) {
         setCurrentGraphId(data.active)
       }
     } catch (err) {
@@ -1417,9 +1418,9 @@ function GardensSection() {
       window.location.reload()
     } catch (err) {
       // Ignore network errors - they often happen because WebSocket triggered a reload
-      // before this fetch completed. If the switch actually failed, the page will show
-      // the old garden after reload anyway.
-      if (err instanceof TypeError && err.message.includes('network')) {
+      // before this fetch completed, or during the reload process itself.
+      // The fetchGardens() call on mount will sync the UI to server state.
+      if (err instanceof TypeError && err.message.toLowerCase().includes('network')) {
         return
       }
       setError(err instanceof Error ? err.message : 'Failed to switch garden')
