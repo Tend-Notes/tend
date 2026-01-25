@@ -791,6 +791,106 @@ impl BackupManager {
             Err(GitError::OperationFailed(format!("Pull failed: {}", stderr)))
         }
     }
+
+    /// Set or update the remote repository URL
+    pub fn set_remote(&self, url: &str) -> Result<RemoteResult, GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        info!("Setting remote to: {}", url);
+
+        // Check if origin remote already exists
+        let check_output = Command::new("git")
+            .args(["remote", "get-url", "origin"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        let args = if check_output.status.success() {
+            // Remote exists, update it
+            vec!["remote", "set-url", "origin", url]
+        } else {
+            // Remote doesn't exist, add it
+            vec!["remote", "add", "origin", url]
+        };
+
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if output.status.success() {
+            info!("Remote set successfully");
+            Ok(RemoteResult {
+                success: true,
+                url: url.to_string(),
+                message: "Remote configured".to_string(),
+                verified: false,
+            })
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(GitError::OperationFailed(format!("Failed to set remote: {}", stderr)))
+        }
+    }
+
+    /// Test connection to the remote repository
+    pub fn test_remote(&self) -> Result<RemoteResult, GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        let status = self.status()?;
+        let url = status.remote.ok_or(GitError::NoRemote)?;
+
+        info!("Testing remote connection: {}", url);
+
+        // Use git ls-remote to test connection without fetching
+        let output = Command::new("git")
+            .args(["ls-remote", "--exit-code", "origin"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if output.status.success() {
+            info!("Remote connection verified");
+            Ok(RemoteResult {
+                success: true,
+                url,
+                message: "Connection verified".to_string(),
+                verified: true,
+            })
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let message = if stderr.contains("Permission denied") || stderr.contains("publickey") {
+                "Authentication failed - check SSH keys or credentials".to_string()
+            } else if stderr.contains("Could not resolve host") || stderr.contains("Connection refused") {
+                "Cannot reach remote server - check URL".to_string()
+            } else if stderr.contains("Repository not found") || stderr.contains("does not exist") {
+                "Repository not found - check URL".to_string()
+            } else {
+                format!("Connection failed: {}", stderr.lines().next().unwrap_or("unknown error"))
+            };
+
+            Ok(RemoteResult {
+                success: false,
+                url,
+                message,
+                verified: false,
+            })
+        }
+    }
+}
+
+/// Result of setting or testing a remote
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteResult {
+    pub success: bool,
+    pub url: String,
+    pub message: String,
+    pub verified: bool,
 }
 
 /// Result of a push/pull operation

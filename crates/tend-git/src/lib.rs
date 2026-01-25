@@ -9,6 +9,6 @@ pub mod error;
 
 pub use backup::{
     BackupManager, BackupResult, ChangedFile, CommitDiff, CommitInfo, FileDiff, FileStatus,
-    GitStatus, PushResult,
+    GitStatus, PushResult, RemoteResult,
 };
 pub use error::GitError;

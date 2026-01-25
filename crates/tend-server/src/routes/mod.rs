@@ -53,6 +53,8 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/git/restore", post(git::restore))
         .route("/git/push", post(git::push))
         .route("/git/pull", post(git::pull))
+        .route("/git/remote", post(git::set_remote))
+        .route("/git/remote/test", post(git::test_remote))
         // Gardens
         .route("/gardens", get(gardens::list_gardens))
         .route("/gardens", post(gardens::create_garden))
