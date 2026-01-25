@@ -6,7 +6,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
-use tend_git::{BackupResult, CommitDiff, CommitInfo, GitStatus, PushResult};
+use tend_git::{BackupResult, CommitDiff, CommitInfo, GitStatus, PushResult, RemoteResult};
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -38,6 +38,12 @@ pub struct RestoreRequest {
 pub struct DiffQuery {
     /// Filter by file path (e.g., "pages/foo.md")
     pub path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRemoteRequest {
+    /// The remote URL (e.g., "git@github.com:user/repo.git")
+    pub url: String,
 }
 
 /// Get git status
@@ -180,4 +186,28 @@ pub async fn pull(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>
 
     let result = garden.backup_manager.pull()?;
     Ok(Json(result))
+}
+
+/// Set the remote repository URL
+pub async fn set_remote(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<SetRemoteRequest>,
+) -> Result<Json<RemoteResult>, AppError> {
+    let garden = state.garden.read().await;
+    let result = garden.backup_manager.set_remote(&request.url)?;
+    Ok(Json(result))
+}
+
+/// Test connection to the remote repository
+pub async fn test_remote(State(state): State<Arc<AppState>>) -> Result<Json<RemoteResult>, AppError> {
+    let garden = state.garden.read().await;
+    let result = garden.backup_manager.test_remote()?;
+    Ok(Json(result))
+}
+
+/// Remove the remote repository
+pub async fn remove_remote(State(state): State<Arc<AppState>>) -> Result<(), AppError> {
+    let garden = state.garden.read().await;
+    garden.backup_manager.remove_remote()?;
+    Ok(())
 }

@@ -4,8 +4,18 @@ name: Build and Cache
 on:
   push:
     branches: [trunk]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'SECURITY-REVIEW.md'
+      - 'DIRECTIVES.md'
+      - 'docs/**/*.md'
   pull_request:
     branches: [trunk]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'SECURITY-REVIEW.md'
+      - 'DIRECTIVES.md'
+      - 'docs/**/*.md'
 
 jobs:
   build:

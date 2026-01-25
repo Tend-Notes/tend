@@ -13,6 +13,7 @@ import type {
   CommitDiff,
   Block,
   PushResult,
+  RemoteResult,
 } from '../types'
 
 const API_BASE = '/api/v1'
@@ -192,6 +193,22 @@ export const git = {
 
   pull: () =>
     fetchJson<PushResult>(`${API_BASE}/git/pull`, {
+      method: 'POST',
+    }),
+
+  setRemote: (url: string) =>
+    fetchJson<RemoteResult>(`${API_BASE}/git/remote`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+
+  removeRemote: () =>
+    fetch(`${API_BASE}/git/remote`, { method: 'DELETE' }).then((res) => {
+      if (!res.ok) throw new Error('Failed to remove remote')
+    }),
+
+  testRemote: () =>
+    fetchJson<RemoteResult>(`${API_BASE}/git/remote/test`, {
       method: 'POST',
     }),
 }

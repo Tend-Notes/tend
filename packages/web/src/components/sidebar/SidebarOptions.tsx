@@ -657,6 +657,31 @@ function TasksSection() {
   )
 }
 
+// Remote status indicator
+type RemoteStatus = 'unknown' | 'testing' | 'verified' | 'failed'
+
+function RemoteStatusIcon({ status, message }: { status: RemoteStatus; message?: string }) {
+  if (status === 'testing') {
+    return (
+      <span className="inline-block w-2 h-2 rounded-full bg-base-03 animate-pulse" title="Testing connection..." />
+    )
+  }
+  if (status === 'verified') {
+    return (
+      <span className="inline-block w-2 h-2 rounded-full bg-base-0B" title={message || 'Connection verified'} />
+    )
+  }
+  if (status === 'failed') {
+    return (
+      <span
+        className="inline-block w-0 h-0 border-l-[4px] border-r-[4px] border-b-[7px] border-l-transparent border-r-transparent border-b-base-08"
+        title={message || 'Connection failed'}
+      />
+    )
+  }
+  return null
+}
+
 // Backup section
 function BackupSection() {
   const {
@@ -673,6 +698,9 @@ function BackupSection() {
   const [error, setError] = useState<string | null>(null)
   const [isGitRepo, setIsGitRepo] = useState(false)
   const [initializingGit, setInitializingGit] = useState(false)
+  const [remoteStatus, setRemoteStatus] = useState<RemoteStatus>('unknown')
+  const [remoteMessage, setRemoteMessage] = useState<string | undefined>()
+  const [saving, setSaving] = useState(false)
 
   // Fetch git status to get remote URL and repo status
   useEffect(() => {
@@ -684,6 +712,11 @@ function BackupSection() {
         setRemoteUrl(status.remote)
         setRemoteInput(status.remote || '')
         setError(null)
+
+        // If remote exists, test connection
+        if (status.remote) {
+          testRemoteConnection()
+        }
       } catch (err) {
         setError('Failed to fetch git status')
         console.error('Failed to fetch git status:', err)
@@ -694,18 +727,60 @@ function BackupSection() {
     fetchGitStatus()
   }, [])
 
+  const testRemoteConnection = async () => {
+    setRemoteStatus('testing')
+    setRemoteMessage(undefined)
+    try {
+      const { git } = await import('../../lib/api')
+      const result = await git.testRemote()
+      if (result.verified) {
+        setRemoteStatus('verified')
+        setRemoteMessage(result.message)
+      } else {
+        setRemoteStatus('failed')
+        setRemoteMessage(result.message)
+      }
+    } catch (err) {
+      setRemoteStatus('failed')
+      setRemoteMessage(err instanceof Error ? err.message : 'Connection test failed')
+    }
+  }
+
   const handleSaveRemote = async () => {
-    // TODO: Implement API to set remote
-    // For now, just close the editor
-    setEditingRemote(false)
-    setRemoteUrl(remoteInput || null)
+    setSaving(true)
+    setError(null)
+    try {
+      const { git } = await import('../../lib/api')
+
+      if (!remoteInput.trim()) {
+        // Empty input = remove remote
+        await git.removeRemote()
+        setRemoteUrl(null)
+        setRemoteStatus('unknown')
+        setRemoteMessage(undefined)
+        setEditingRemote(false)
+      } else {
+        // Set new remote
+        const result = await git.setRemote(remoteInput.trim())
+        if (result.success) {
+          setRemoteUrl(result.url)
+          setEditingRemote(false)
+          // Test the new remote
+          testRemoteConnection()
+        } else {
+          setError(result.message)
+        }
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update remote')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleEnableVersions = async () => {
     setInitializingGit(true)
     try {
-      // TODO: Implement API to initialize git repo
-      // For now, we'll call backup which will init if needed
       const { git } = await import('../../lib/api')
       await git.backup()
       setIsGitRepo(true)
@@ -754,7 +829,7 @@ function BackupSection() {
               Push changes to a remote git repository for off-site backup.
             </p>
 
-            {/* Remote URL - read from git repo */}
+            {/* Remote URL with status indicator */}
             <div className="space-y-1">
               <SettingsRow label="Remote">
                 {loading ? (
@@ -768,12 +843,20 @@ function BackupSection() {
                       placeholder="git@github.com:..."
                       className="w-28 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04"
                       autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveRemote()
+                        if (e.key === 'Escape') {
+                          setEditingRemote(false)
+                          setRemoteInput(remoteUrl || '')
+                        }
+                      }}
                     />
                     <button
                       onClick={handleSaveRemote}
-                      className="px-1.5 py-0.5 text-xs text-base-06 bg-base-02 rounded hover:bg-base-03 transition-colors"
+                      disabled={saving}
+                      className="px-1.5 py-0.5 text-xs text-base-06 bg-base-02 rounded hover:bg-base-03 transition-colors disabled:opacity-50"
                     >
-                      Save
+                      {saving ? '...' : 'Save'}
                     </button>
                     <button
                       onClick={() => {
@@ -786,16 +869,22 @@ function BackupSection() {
                     </button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => setEditingRemote(true)}
-                    className="text-xs text-base-05 hover:text-base-06 transition-colors text-right max-w-[140px] truncate"
-                    title={remoteUrl || 'Not configured'}
-                  >
-                    {remoteUrl ? remoteUrl.replace(/^(git@|https:\/\/)/, '').replace(/\.git$/, '') : 'Not configured'}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <RemoteStatusIcon status={remoteStatus} message={remoteMessage} />
+                    <button
+                      onClick={() => setEditingRemote(true)}
+                      className="text-xs text-base-05 hover:text-base-06 transition-colors text-right max-w-[130px] truncate"
+                      title={remoteUrl || 'Not configured'}
+                    >
+                      {remoteUrl ? remoteUrl.replace(/^(git@|https:\/\/)/, '').replace(/\.git$/, '') : 'Not configured'}
+                    </button>
+                  </div>
                 )}
               </SettingsRow>
               {error && <p className="text-xs text-base-08">{error}</p>}
+              {remoteStatus === 'failed' && remoteMessage && (
+                <p className="text-xs text-base-08">{remoteMessage}</p>
+              )}
             </div>
 
             {/* Backup interval - shown when remote backup is enabled */}

@@ -149,3 +149,11 @@ export interface PushResult {
   message: string
   details: string
 }
+
+// Result of setting or testing a remote
+export interface RemoteResult {
+  success: boolean
+  url: string
+  message: string
+  verified: boolean
+}

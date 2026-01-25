@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore, type ContentType } from '../../stores/settingsStore'
+import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import * as api from '../../lib/api'
 
 interface CommandPaletteProps {
@@ -212,6 +213,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setGitStatus('Pushing...')
       const result = await api.git.push()
       setGitStatus(result.message)
+      useSyncStatusStore.getState().recordPush()
       setTimeout(() => onOpenChange(false), 1500)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to push'
