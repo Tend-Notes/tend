@@ -742,78 +742,100 @@ code {
 
 /* Phone screens (< 768px) */
 @media (max-width: 767px) {
-  /* Scale up root for high-DPI mobile displays */
+  /*
+   * Mobile typography: iOS Dynamic Type "Large" default is ~17pt.
+   * We use 17px CSS pixels as the base. On a 3x Retina display (iPhone Pro Max),
+   * this renders at 51 physical pixels - clearly readable.
+   *
+   * The issue was CSS pixels vs rendered size. 17-19px CSS is standard.
+   */
   html {
-    font-size: 20px;
+    font-size: 17px;
   }
 
-  /* Increase base font size for readability on mobile */
   body {
-    font-size: 1.1rem;
-    line-height: 1.8;
+    font-size: 17px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
   }
 
-  /* Larger page title */
+  /* Page title */
   .page-title,
   h1 {
-    font-size: 1.5rem;
+    font-size: 24px;
+    font-weight: 600;
   }
 
-  /* Editor content needs to be readable */
-  .cm-editor,
+  /*
+   * CodeMirror - must override with !important.
+   * 17px is the iOS standard for body text.
+   */
+  .cm-editor {
+    font-size: 17px !important;
+  }
+
   .cm-content {
-    font-size: 1.1rem;
-    line-height: 1.8;
+    font-size: 17px !important;
+    line-height: 1.5 !important;
   }
 
-  /* Larger bullets for touch targets - use padding for larger hit area */
+  .cm-line {
+    font-size: 17px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* Page content - use full width, minimal padding */
+  .page-content {
+    padding: 12px 10px 100px 10px !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* Bullets */
   .bullet {
-    width: 10px;
-    height: 10px;
-    /* Invisible padding to increase touch target to 48px */
-    padding: 19px;
-    margin: -19px;
+    width: 6px;
+    height: 6px;
+    padding: 20px;
+    margin: -20px;
     background-clip: content-box;
   }
 
   .bullet--collapsed {
-    /* Adjust border to account for background-clip */
     border-width: 2px;
     background-clip: content-box;
   }
 
-  /* Larger block spacing for touch */
+  /* Block layout */
   .block {
-    gap: 20px;
-    padding: 12px 0;
-    min-height: 48px; /* Minimum touch target */
+    gap: 8px;
+    padding: 4px 0;
+    min-height: 44px;
   }
 
-  /* Larger block content area */
   .block-content {
-    min-height: 2.5em;
-    font-size: 1.1rem;
+    min-height: 1.4em;
+    font-size: 17px;
   }
 
-  /* Increase children indentation slightly */
+  /* Indentation */
   .block-children {
-    margin-left: 24px;
-    padding-left: 20px;
+    margin-left: 12px;
+    padding-left: 8px;
   }
 
-  /* Larger task status badges */
+  /* Task badges */
   .task-status {
-    font-size: 1rem;
-    padding: 6px 14px;
+    font-size: 15px;
+    padding: 4px 8px;
   }
 
-  /* Larger tag pills */
+  /* Tags */
   .tag-pill {
-    font-size: 1rem;
-    padding: 4px 12px;
+    font-size: 15px;
+    padding: 2px 6px;
   }
 
-  /* Sidebar as full-screen overlay on mobile */
+  /* Sidebar overlay */
   .sidebar-mobile-overlay {
     position: fixed;
     inset: 0;
@@ -821,29 +843,28 @@ code {
     background-color: var(--sidebar-bg);
   }
 
-  /* Activity log - keep readable on mobile */
+  /* Activity log */
   .activity-log {
-    font-size: 0.9rem;
-    padding: 12px 20px;
+    font-size: 14px;
+    padding: 6px 10px;
   }
 
-  /* Search panel adjustments */
+  /* Full-width dialogs */
   .search-panel {
     width: 100%;
     max-width: none;
     border-radius: 0;
   }
 
-  /* Command palette adjustments */
   .command-palette {
-    width: calc(100% - 32px);
+    width: calc(100% - 16px);
     max-width: none;
-    margin: 16px;
+    margin: 8px;
   }
 
-  /* Wikilinks should be tappable */
+  /* Wikilinks */
   .cm-wikilink {
-    padding: 4px 2px;
+    padding: 2px 0;
   }
 }
 
