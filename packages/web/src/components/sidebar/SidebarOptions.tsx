@@ -1411,10 +1411,17 @@ function GardensSection() {
         return
       }
 
+      // Update state immediately - the WebSocket may trigger reload before we get here
       setCurrentGraphId(id)
       // Reload the page to refresh all data for the new garden
       window.location.reload()
     } catch (err) {
+      // Ignore network errors - they often happen because WebSocket triggered a reload
+      // before this fetch completed. If the switch actually failed, the page will show
+      // the old garden after reload anyway.
+      if (err instanceof TypeError && err.message.includes('network')) {
+        return
+      }
       setError(err instanceof Error ? err.message : 'Failed to switch garden')
     }
   }

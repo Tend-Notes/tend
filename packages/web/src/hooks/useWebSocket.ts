@@ -4,6 +4,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { usePageStore } from '../stores/pageStore'
 import { useSyncStatusStore } from '../stores/syncStatusStore'
+import { useSettingsStore } from '../stores/settingsStore'
 
 // WebSocket event types (must match server-side WsEvent enum)
 interface WsEventBase {
@@ -163,8 +164,9 @@ export function useWebSocket() {
 
           case 'garden_switched':
             // Garden was switched (by another client or this client)
-            // Reload the page to reflect the new garden
+            // Update the current garden ID before reloading so UI shows correct active state
             console.log('Garden switched to:', data.garden_id)
+            useSettingsStore.getState().setCurrentGraphId(data.garden_id)
             window.location.reload()
             break
 
