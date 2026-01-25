@@ -875,12 +875,14 @@ impl BackupManager {
         info!("Testing remote connection: {}", url);
 
         // Use git ls-remote to test connection without fetching
+        // Note: Don't use --exit-code as it returns 2 for empty repos (which is still a valid connection)
         let output = Command::new("git")
-            .args(["ls-remote", "--exit-code", "origin"])
+            .args(["ls-remote", "origin"])
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
 
+        // Exit code 0 means connection succeeded (even if repo is empty)
         if output.status.success() {
             info!("Remote connection verified");
             Ok(RemoteResult {
@@ -891,35 +893,56 @@ impl BackupManager {
             })
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr_trimmed = stderr.trim();
+            let stdout_trimmed = stdout.trim();
 
-            // Log the full error for debugging
-            info!("Remote test failed. stderr: {}", stderr_trimmed);
+            // Log full output for debugging
+            info!(
+                "Remote test failed. exit={:?} stderr='{}' stdout='{}'",
+                output.status.code(),
+                stderr_trimmed,
+                stdout_trimmed
+            );
 
-            let message = if stderr.contains("Permission denied") || stderr.contains("publickey") {
+            // Check both stderr and stdout for error messages
+            let combined = format!("{} {}", stderr, stdout);
+
+            let message = if combined.contains("Permission denied") || combined.contains("publickey") {
                 "Authentication failed - check SSH keys or credentials".to_string()
-            } else if stderr.contains("Could not resolve host") || stderr.contains("Connection refused") {
+            } else if combined.contains("Could not resolve host") || combined.contains("Connection refused") {
                 "Cannot reach remote server - check URL".to_string()
-            } else if stderr.contains("Repository not found") || stderr.contains("does not exist") {
+            } else if combined.contains("Repository not found") || combined.contains("does not exist") {
                 "Repository not found - check URL".to_string()
-            } else if stderr.contains("Host key verification failed") {
+            } else if combined.contains("Host key verification failed") {
                 "Host key verification failed - add host to known_hosts".to_string()
-            } else if stderr.contains("fatal:") {
-                // Extract the fatal error message
-                stderr_trimmed
+            } else if combined.contains("fatal:") {
+                // Extract the fatal error message from either stream
+                combined
                     .lines()
                     .find(|l| l.contains("fatal:"))
                     .map(|l| l.trim_start_matches("fatal:").trim().to_string())
                     .unwrap_or_else(|| "Connection failed".to_string())
-            } else if stderr_trimmed.is_empty() {
-                "Connection failed (no error details)".to_string()
-            } else {
-                // Return first non-empty line
+            } else if !stderr_trimmed.is_empty() {
+                // Return first non-empty line from stderr
                 stderr_trimmed
                     .lines()
                     .find(|l| !l.trim().is_empty())
                     .unwrap_or("Connection failed")
                     .to_string()
+            } else if !stdout_trimmed.is_empty() {
+                // Try stdout if stderr was empty
+                stdout_trimmed
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("Connection failed")
+                    .to_string()
+            } else {
+                // Both empty - check exit code
+                format!(
+                    "Connection failed (exit code {})",
+                    output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".to_string())
+                )
             };
 
             Ok(RemoteResult {
