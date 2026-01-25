@@ -5,10 +5,11 @@
 // - unsaved: changes in browser, not yet sent to server
 // - saved: written to disk on server
 // - stored: in version history (git committed locally)
-// - backed up: pushed to remote
+// - backed up: pushed to remote (only when remote backup is enabled)
 
 import { create } from 'zustand'
 import * as api from '../lib/api'
+import { useSettingsStore } from './settingsStore'
 
 export type SyncStatus = 'unsaved' | 'saved' | 'stored' | 'backed up'
 
@@ -50,6 +51,7 @@ export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
     set({ isChecking: true })
     try {
       const gitStatus = await api.git.status()
+      const backupEnabled = useSettingsStore.getState().backupEnabled
 
       // Check if this file has uncommitted changes
       const hasUncommitted = gitStatus.changedFiles?.some(
@@ -62,15 +64,15 @@ export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
       }
 
       // File is in version history. Check if we're synced with remote.
-      // "backed up" requires: a remote exists AND we're not ahead of it
-      if (!gitStatus.remote) {
-        // No remote configured - best we can say is "stored" (in local version history)
+      // "backed up" requires: remote backup enabled AND remote exists AND not ahead
+      if (!backupEnabled || !gitStatus.remote) {
+        // Remote backup disabled or no remote - best we can say is "stored"
         set({ status: 'stored', isChecking: false, lastCheck: Date.now() })
       } else if (gitStatus.ahead && gitStatus.ahead > 0) {
         // Have remote but ahead of it - stored but not yet backed up
         set({ status: 'stored', isChecking: false, lastCheck: Date.now() })
       } else {
-        // Have remote and not ahead - fully backed up
+        // Remote backup enabled, have remote, and not ahead - fully backed up
         set({ status: 'backed up', isChecking: false, lastCheck: Date.now() })
       }
     } catch (err) {
@@ -84,6 +86,10 @@ export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
   },
 
   recordPush: () => {
-    set({ status: 'backed up' })
+    // Only show "backed up" if remote backup is enabled
+    const backupEnabled = useSettingsStore.getState().backupEnabled
+    if (backupEnabled) {
+      set({ status: 'backed up' })
+    }
   },
 }))

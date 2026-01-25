@@ -204,3 +204,10 @@ pub async fn test_remote(State(state): State<Arc<AppState>>) -> Result<Json<Remo
     let result = garden.backup_manager.test_remote()?;
     Ok(Json(result))
 }
+
+/// Remove the remote repository
+pub async fn remove_remote(State(state): State<Arc<AppState>>) -> Result<(), AppError> {
+    let garden = state.garden.read().await;
+    garden.backup_manager.remove_remote()?;
+    Ok(())
+}

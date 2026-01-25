@@ -202,6 +202,11 @@ export const git = {
       body: JSON.stringify({ url }),
     }),
 
+  removeRemote: () =>
+    fetch(`${API_BASE}/git/remote`, { method: 'DELETE' }).then((res) => {
+      if (!res.ok) throw new Error('Failed to remove remote')
+    }),
+
   testRemote: () =>
     fetchJson<RemoteResult>(`${API_BASE}/git/remote/test`, {
       method: 'POST',

@@ -747,26 +747,32 @@ function BackupSection() {
   }
 
   const handleSaveRemote = async () => {
-    if (!remoteInput.trim()) {
-      setEditingRemote(false)
-      return
-    }
-
     setSaving(true)
     setError(null)
     try {
       const { git } = await import('../../lib/api')
-      const result = await git.setRemote(remoteInput.trim())
-      if (result.success) {
-        setRemoteUrl(result.url)
+
+      if (!remoteInput.trim()) {
+        // Empty input = remove remote
+        await git.removeRemote()
+        setRemoteUrl(null)
+        setRemoteStatus('unknown')
+        setRemoteMessage(undefined)
         setEditingRemote(false)
-        // Test the new remote
-        testRemoteConnection()
       } else {
-        setError(result.message)
+        // Set new remote
+        const result = await git.setRemote(remoteInput.trim())
+        if (result.success) {
+          setRemoteUrl(result.url)
+          setEditingRemote(false)
+          // Test the new remote
+          testRemoteConnection()
+        } else {
+          setError(result.message)
+        }
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to set remote')
+      setError(err instanceof Error ? err.message : 'Failed to update remote')
     } finally {
       setSaving(false)
     }

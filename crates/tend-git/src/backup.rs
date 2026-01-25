@@ -835,6 +835,34 @@ impl BackupManager {
         }
     }
 
+    /// Remove the remote repository
+    pub fn remove_remote(&self) -> Result<(), GitError> {
+        if !self.is_git_repo() {
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
+        }
+
+        info!("Removing remote origin");
+
+        let output = Command::new("git")
+            .args(["remote", "remove", "origin"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if output.status.success() {
+            info!("Remote removed successfully");
+            Ok(())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // If remote doesn't exist, that's fine
+            if stderr.contains("No such remote") {
+                Ok(())
+            } else {
+                Err(GitError::OperationFailed(format!("Failed to remove remote: {}", stderr)))
+            }
+        }
+    }
+
     /// Test connection to the remote repository
     pub fn test_remote(&self) -> Result<RemoteResult, GitError> {
         if !self.is_git_repo() {
