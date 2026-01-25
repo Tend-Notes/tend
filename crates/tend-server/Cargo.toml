@@ -52,3 +52,6 @@ urlencoding = "2.1"
 
 # Scope guard for cleanup
 scopeguard = "1.2"
+
+# HTTP client (for auth verification)
+reqwest = { workspace = true }

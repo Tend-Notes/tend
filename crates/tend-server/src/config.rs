@@ -36,6 +36,28 @@ pub struct Config {
     /// Rate limiting configuration
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
+
+    /// Authentication configuration
+    #[serde(default)]
+    pub auth: AuthConfig,
+}
+
+/// Authentication configuration (for WebSocket and future auth needs)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// URL to verify authentication (e.g., "http://localhost:9091/api/verify")
+    /// Used for WebSocket connections which can't go through reverse proxy auth.
+    /// If not set, WebSocket connections are not authenticated (local dev mode).
+    #[serde(default)]
+    pub verify_url: Option<String>,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            verify_url: std::env::var("TEND_AUTH_VERIFY_URL").ok(),
+        }
+    }
 }
 
 /// CORS configuration
@@ -245,6 +267,7 @@ impl Default for Config {
             git: GitConfig::default(),
             cors: CorsConfig::default(),
             rate_limit: RateLimitConfig::default(),
+            auth: AuthConfig::default(),
         }
     }
 }

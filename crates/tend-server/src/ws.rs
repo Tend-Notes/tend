@@ -9,13 +9,13 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::state::{AppState, MAX_WS_CONNECTIONS};
 
@@ -65,11 +65,69 @@ pub fn create_event_channel() -> (EventSender, broadcast::Receiver<WsEvent>) {
     broadcast::channel(100)
 }
 
+/// Verify authentication by forwarding cookies to the auth service
+async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
+    // Extract cookie header to forward
+    let cookie_header = headers
+        .get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    // Also forward X-Forwarded-* headers that might be relevant
+    let forwarded_for = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("Failed to create HTTP client for auth verification: {}", e);
+            return false;
+        }
+    };
+
+    let mut request = client.get(verify_url).header("Cookie", cookie_header);
+
+    if !forwarded_for.is_empty() {
+        request = request.header("X-Forwarded-For", forwarded_for);
+    }
+
+    match request.send().await {
+        Ok(response) => {
+            let status = response.status();
+            if status.is_success() {
+                debug!("WebSocket auth verification succeeded");
+                true
+            } else {
+                info!("WebSocket auth verification failed: status {}", status);
+                false
+            }
+        }
+        Err(e) => {
+            warn!("WebSocket auth verification request failed: {}", e);
+            false
+        }
+    }
+}
+
 /// WebSocket upgrade handler
 pub async fn ws_handler(
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    // Check authentication if verify_url is configured
+    if let Some(verify_url) = &state.config.auth.verify_url {
+        if !verify_auth(verify_url, &headers).await {
+            info!("WebSocket connection rejected: authentication failed");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    }
+
     // Check connection limit before upgrading
     let current = state.ws_connection_count.load(Ordering::Relaxed);
     if current >= MAX_WS_CONNECTIONS {

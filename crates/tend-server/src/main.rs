@@ -223,6 +223,13 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    // Log WebSocket auth configuration
+    if let Some(ref verify_url) = config.auth.verify_url {
+        info!("WebSocket auth enabled: verifying against {}", verify_url);
+    } else {
+        info!("WebSocket auth disabled (no TEND_AUTH_VERIFY_URL configured)");
+    }
+
     // Build router with API routes (rate-limited) and static files (not rate-limited)
     let api_router = Router::new()
         .nest("/api/v1", routes::api_router())
