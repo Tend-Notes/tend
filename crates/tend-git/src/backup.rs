@@ -863,14 +863,35 @@ impl BackupManager {
             })
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
+            let stderr_trimmed = stderr.trim();
+
+            // Log the full error for debugging
+            info!("Remote test failed. stderr: {}", stderr_trimmed);
+
             let message = if stderr.contains("Permission denied") || stderr.contains("publickey") {
                 "Authentication failed - check SSH keys or credentials".to_string()
             } else if stderr.contains("Could not resolve host") || stderr.contains("Connection refused") {
                 "Cannot reach remote server - check URL".to_string()
             } else if stderr.contains("Repository not found") || stderr.contains("does not exist") {
                 "Repository not found - check URL".to_string()
+            } else if stderr.contains("Host key verification failed") {
+                "Host key verification failed - add host to known_hosts".to_string()
+            } else if stderr.contains("fatal:") {
+                // Extract the fatal error message
+                stderr_trimmed
+                    .lines()
+                    .find(|l| l.contains("fatal:"))
+                    .map(|l| l.trim_start_matches("fatal:").trim().to_string())
+                    .unwrap_or_else(|| "Connection failed".to_string())
+            } else if stderr_trimmed.is_empty() {
+                "Connection failed (no error details)".to_string()
             } else {
-                format!("Connection failed: {}", stderr.lines().next().unwrap_or("unknown error"))
+                // Return first non-empty line
+                stderr_trimmed
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("Connection failed")
+                    .to_string()
             };
 
             Ok(RemoteResult {
