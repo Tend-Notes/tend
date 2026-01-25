@@ -247,6 +247,20 @@
               };
             };
 
+            auth = {
+              verifyUrl = mkOption {
+                type = types.nullOr types.str;
+                default = null;
+                description = ''
+                  URL to verify authentication for WebSocket connections.
+                  Required when using a reverse proxy with forward auth (e.g., Caddy + Authelia).
+                  WebSocket connections will forward cookies to this URL for verification.
+                  Example: "http://localhost:9091/api/verify" for Authelia.
+                '';
+                example = "http://localhost:9091/api/verify";
+              };
+            };
+
             extraEnvironment = mkOption {
               type = types.attrsOf types.str;
               default = {};
@@ -285,6 +299,8 @@
                 TEND_BACKUP_INTERVAL_MINUTES = toString cfg.gitBackup.intervalMinutes;
                 TEND_AUTO_PUSH = if cfg.gitBackup.autoPush then "true" else "false";
                 RUST_LOG = "info";
+              } // optionalAttrs (cfg.auth.verifyUrl != null) {
+                TEND_AUTH_VERIFY_URL = cfg.auth.verifyUrl;
               } // cfg.extraEnvironment;
 
               serviceConfig = {
