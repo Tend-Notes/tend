@@ -1151,8 +1151,58 @@ impl BackupManager {
             });
         }
 
-        // Local has commits - try to merge or warn about conflicts
-        // For safety, we'll do a pull with rebase
+        // Local has commits - check if local is basically empty (just .garden-meta)
+        // In that case, we can safely reset to remote
+        let local_files_output = Command::new("git")
+            .args(["ls-tree", "-r", "--name-only", "HEAD"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        let local_files_str = String::from_utf8_lossy(&local_files_output.stdout);
+        let local_files: Vec<&str> = local_files_str
+            .lines()
+            .filter(|f| !f.is_empty())
+            .collect();
+
+        // If local only has .garden-meta (or is empty), safe to hard reset to remote
+        let can_reset = local_files.is_empty()
+            || (local_files.len() == 1 && local_files[0] == ".garden-meta");
+
+        if can_reset {
+            info!("Local garden is empty or only has .garden-meta, resetting to remote");
+
+            // Hard reset to remote branch
+            let reset_output = Command::new("git")
+                .args(["reset", "--hard", &format!("origin/{}", remote_branch)])
+                .current_dir(&self.repo_path)
+                .output()
+                .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+            if !reset_output.status.success() {
+                let stderr = String::from_utf8_lossy(&reset_output.stderr);
+                return Err(GitError::OperationFailed(format!("Reset failed: {}", stderr)));
+            }
+
+            // Set up tracking
+            let _ = Command::new("git")
+                .args([
+                    "branch",
+                    "--set-upstream-to",
+                    &format!("origin/{}", remote_branch),
+                ])
+                .current_dir(&self.repo_path)
+                .output();
+
+            info!("Imported garden from remote (reset to remote)");
+            return Ok(ImportResult {
+                success: true,
+                message: format!("Imported garden from {}", remote_url),
+                files_changed: 0,
+            });
+        }
+
+        // Local has real content - try to merge
         let pull_output = Command::new("git")
             .args(["pull", "--rebase", "origin", &remote_branch])
             .current_dir(&self.repo_path)
@@ -1175,9 +1225,15 @@ impl BackupManager {
                 .current_dir(&self.repo_path)
                 .output();
 
+            // Get a more useful error message - skip the "From github.com" line
+            let error_msg = stderr
+                .lines()
+                .find(|l| !l.starts_with("From ") && !l.trim().is_empty())
+                .unwrap_or("merge conflict");
+
             Err(GitError::OperationFailed(format!(
                 "Could not merge remote garden with local changes: {}. Consider backing up local changes first.",
-                stderr.lines().next().unwrap_or("merge conflict")
+                error_msg
             )))
         }
     }
