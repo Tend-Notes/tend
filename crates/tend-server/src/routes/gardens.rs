@@ -258,6 +258,18 @@ pub async fn create_garden(
             .map_err(|e| AppError::Internal(format!("Failed to create journals directory: {}", e)))?;
     }
 
+    // Create .garden-meta marker file for garden detection
+    let garden_meta = serde_json::json!({
+        "version": 1,
+        "type": "tend-garden",
+        "name": &req.name
+    });
+    std::fs::write(
+        garden_path.join(".garden-meta"),
+        serde_json::to_string_pretty(&garden_meta).unwrap(),
+    )
+    .map_err(|e| AppError::Internal(format!("Failed to create .garden-meta: {}", e)))?;
+
     // Store the expanded absolute path
     let encrypted = req.passphrase.is_some();
 

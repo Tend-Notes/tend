@@ -702,6 +702,7 @@ function BackupSection() {
   const [remoteMessage, setRemoteMessage] = useState<string | undefined>()
   const [saving, setSaving] = useState(false)
   const [remoteHasGarden, setRemoteHasGarden] = useState(false)
+  const [remoteGardenName, setRemoteGardenName] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
 
   // Fetch git status to get remote URL and repo status
@@ -733,6 +734,7 @@ function BackupSection() {
     setRemoteStatus('testing')
     setRemoteMessage(undefined)
     setRemoteHasGarden(false)
+    setRemoteGardenName(null)
     try {
       const { git } = await import('../../lib/api')
       const result = await git.testRemote()
@@ -741,8 +743,9 @@ function BackupSection() {
         setRemoteMessage(result.message)
         // Check if remote has an existing garden
         try {
-          const hasGarden = await git.checkRemoteGarden()
-          setRemoteHasGarden(hasGarden)
+          const gardenInfo = await git.checkRemoteGarden()
+          setRemoteHasGarden(gardenInfo.found)
+          setRemoteGardenName(gardenInfo.name)
         } catch {
           // Ignore errors checking for garden
         }
@@ -919,7 +922,8 @@ function BackupSection() {
               {remoteStatus === 'verified' && remoteHasGarden && (
                 <div className="mt-2 p-2 bg-base-01 border border-base-02 rounded">
                   <p className="text-xs text-base-04 mb-2">
-                    This remote contains an existing garden. Import it?
+                    This remote contains an existing garden
+                    {remoteGardenName && <strong> "{remoteGardenName}"</strong>}. Import it?
                   </p>
                   <button
                     onClick={handleImportGarden}

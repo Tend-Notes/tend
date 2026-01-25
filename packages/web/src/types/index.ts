@@ -164,3 +164,9 @@ export interface GitImportResult {
   message: string
   filesChanged: number
 }
+
+// Information about a garden detected in a remote repository
+export interface RemoteGardenInfo {
+  found: boolean
+  name: string | null
+}

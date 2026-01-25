@@ -955,8 +955,8 @@ impl BackupManager {
     }
 
     /// Check if the remote repository contains a Tend garden
-    /// Returns true if remote has content (non-empty) that looks like a garden
-    pub fn check_remote_has_garden(&self) -> Result<bool, GitError> {
+    /// Returns garden info if found, including the garden name from .garden-meta
+    pub fn check_remote_has_garden(&self) -> Result<RemoteGardenInfo, GitError> {
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -966,21 +966,90 @@ impl BackupManager {
             return Err(GitError::NoRemote);
         }
 
-        // Fetch remote refs to see what's there
-        let output = Command::new("git")
-            .args(["ls-remote", "--heads", "origin"])
+        // Fetch from remote first to get latest refs
+        let fetch_output = Command::new("git")
+            .args(["fetch", "origin"])
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
 
-        if !output.status.success() {
-            return Ok(false);
+        if !fetch_output.status.success() {
+            // Can't fetch, so can't check
+            return Ok(RemoteGardenInfo {
+                found: false,
+                name: None,
+            });
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        // If there are any branches, the remote has content
-        // We'll do a more thorough check when importing
-        Ok(!stdout.trim().is_empty())
+        // Determine the remote's default branch
+        let remote_branch = self.detect_remote_branch()?;
+
+        // Try to read .garden-meta from the remote branch
+        let show_output = Command::new("git")
+            .args(["show", &format!("origin/{}:.garden-meta", remote_branch)])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| GitError::OperationFailed(e.to_string()))?;
+
+        if !show_output.status.success() {
+            // No .garden-meta file found
+            return Ok(RemoteGardenInfo {
+                found: false,
+                name: None,
+            });
+        }
+
+        // Parse the garden meta file
+        let content = String::from_utf8_lossy(&show_output.stdout);
+        if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&content) {
+            // Verify it's a tend-garden
+            if meta.get("type").and_then(|t| t.as_str()) == Some("tend-garden") {
+                let name = meta.get("name").and_then(|n| n.as_str()).map(String::from);
+                return Ok(RemoteGardenInfo { found: true, name });
+            }
+        }
+
+        // File exists but isn't valid garden meta
+        Ok(RemoteGardenInfo {
+            found: false,
+            name: None,
+        })
+    }
+
+    /// Detect the remote's default branch (main, master, or trunk)
+    fn detect_remote_branch(&self) -> Result<String, GitError> {
+        // Try symbolic-ref first
+        let remote_head = Command::new("git")
+            .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+            .current_dir(&self.repo_path)
+            .output();
+
+        if let Ok(output) = remote_head {
+            if output.status.success() {
+                let branch = String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .strip_prefix("refs/remotes/origin/")
+                    .unwrap_or("main")
+                    .to_string();
+                return Ok(branch);
+            }
+        }
+
+        // Try common branch names
+        for branch in &["main", "master", "trunk"] {
+            let check = Command::new("git")
+                .args(["rev-parse", "--verify", &format!("origin/{}", branch)])
+                .current_dir(&self.repo_path)
+                .output();
+
+            if let Ok(output) = check {
+                if output.status.success() {
+                    return Ok(branch.to_string());
+                }
+            }
+        }
+
+        Ok("main".to_string())
     }
 
     /// Import a garden from the remote repository
@@ -1121,6 +1190,14 @@ pub struct ImportResult {
     pub success: bool,
     pub message: String,
     pub files_changed: usize,
+}
+
+/// Information about a garden detected in a remote repository
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteGardenInfo {
+    pub found: bool,
+    pub name: Option<String>,
 }
 
 /// Result of setting or testing a remote

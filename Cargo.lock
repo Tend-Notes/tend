@@ -3840,6 +3840,7 @@ dependencies = [
  "chrono",
  "gix",
  "serde",
+ "serde_json",
  "tempfile",
  "tend-core",
  "thiserror 2.0.18",

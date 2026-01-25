@@ -15,6 +15,7 @@ import type {
   PushResult,
   RemoteResult,
   GitImportResult,
+  RemoteGardenInfo,
 } from '../types'
 
 const API_BASE = '/api/v1'
@@ -213,7 +214,7 @@ export const git = {
       method: 'POST',
     }),
 
-  checkRemoteGarden: () => fetchJson<boolean>(`${API_BASE}/git/remote/check-garden`),
+  checkRemoteGarden: () => fetchJson<RemoteGardenInfo>(`${API_BASE}/git/remote/check-garden`),
 
   importRemoteGarden: () =>
     fetchJson<GitImportResult>(`${API_BASE}/git/remote/import`, {
