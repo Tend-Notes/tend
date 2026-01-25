@@ -196,7 +196,7 @@ export function MainContent() {
       <div className="flex-1 overflow-y-auto">
         {/* Key changes with page name to trigger crossfade animation */}
         {/* Mobile-first: minimal padding on mobile, constrained width on md+ */}
-        <div key={currentPage.name} className="page-content px-3 py-4 pb-20 md:max-w-2xl md:mx-auto md:px-6 md:py-12 md:pb-12">
+        <div key={currentPage.name} className="page-content px-2 py-3 pb-24 md:max-w-2xl md:mx-auto md:px-6 md:py-12 md:pb-12">
           {/* Page title with save status */}
           <div className="flex items-center gap-3 mb-8">
             <div className="relative flex items-center gap-2">
