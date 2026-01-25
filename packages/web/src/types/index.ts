@@ -67,7 +67,8 @@ export interface BacklinkRef {
 export interface GraphNode {
   id: string
   label: string
-  isJournal: boolean
+  /** Content type ID (e.g., "page", "journal", "meetings") */
+  contentType: string
   blockCount: number
 }
 
@@ -77,9 +78,16 @@ export interface GraphEdge {
   weight: number
 }
 
+export interface GraphContentType {
+  id: string
+  name: string
+}
+
 export interface Graph {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /** Content types present in the graph (for legend) */
+  contentTypes: GraphContentType[]
 }
 
 // Git status

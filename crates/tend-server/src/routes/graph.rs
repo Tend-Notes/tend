@@ -9,6 +9,7 @@ use axum::Json;
 use serde::Serialize;
 
 use crate::error::AppError;
+use crate::routes::gardens::load_content_types;
 use crate::state::AppState;
 
 /// A node in the knowledge graph
@@ -17,7 +18,8 @@ use crate::state::AppState;
 pub struct GraphNode {
     pub id: String,
     pub label: String,
-    pub is_journal: bool,
+    /// Content type ID (e.g., "page", "journal", "meetings")
+    pub content_type: String,
     pub block_count: usize,
 }
 
@@ -29,11 +31,22 @@ pub struct GraphEdge {
     pub weight: usize,
 }
 
+/// Content type info for the graph legend
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GraphContentType {
+    pub id: String,
+    pub name: String,
+}
+
 /// The full knowledge graph
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Graph {
     pub nodes: Vec<GraphNode>,
     pub edges: Vec<GraphEdge>,
+    /// Content types present in the graph (for legend)
+    pub content_types: Vec<GraphContentType>,
 }
 
 /// Get the full knowledge graph
@@ -45,53 +58,44 @@ pub async fn get_graph(
     let mut nodes = Vec::new();
     let mut edges_map: HashMap<(String, String), usize> = HashMap::new();
     let mut existing_pages: HashSet<String> = HashSet::new();
+    let mut content_types_used: HashSet<String> = HashSet::new();
 
-    // Collect all pages
-    let pages = garden.file_manager.list_pages().await?;
-    for page_meta in &pages {
-        existing_pages.insert(page_meta.name.clone());
-        nodes.push(GraphNode {
-            id: page_meta.name.clone(),
-            label: page_meta.title.clone(),
-            is_journal: false,
-            block_count: page_meta.block_count,
-        });
-    }
+    // Get all content types for this garden
+    let content_types = load_content_types().unwrap_or_default();
 
-    // Collect all journals
-    let journals = garden.file_manager.list_journals().await?;
-    for journal_meta in &journals {
-        existing_pages.insert(journal_meta.name.clone());
-        nodes.push(GraphNode {
-            id: journal_meta.name.clone(),
-            label: journal_meta.title.clone(),
-            is_journal: true,
-            block_count: journal_meta.block_count,
-        });
-    }
-
-    // Build edges from wiki-links
-    for page_meta in &pages {
-        if let Ok(page) = garden.file_manager.read_page(&page_meta.name).await {
-            let links = page.all_wiki_links();
-            for link in links {
-                // Only create edge if target exists
-                if existing_pages.contains(&link) {
-                    let key = (page_meta.name.clone(), link.clone());
-                    *edges_map.entry(key).or_insert(0) += 1;
-                }
-            }
+    // Collect sheets from all content types
+    for ct in &content_types {
+        let sheets = garden.file_manager.list_sheets(ct).await?;
+        for sheet_meta in &sheets {
+            existing_pages.insert(sheet_meta.name.clone());
+            content_types_used.insert(ct.id.clone());
+            nodes.push(GraphNode {
+                id: sheet_meta.name.clone(),
+                label: sheet_meta.title.clone(),
+                content_type: ct.id.clone(),
+                block_count: sheet_meta.block_count,
+            });
         }
-    }
 
-    // Also check journals for links
-    for journal_meta in &journals {
-        if let Some(date) = journal_meta.journal_date {
-            if let Ok(page) = garden.file_manager.read_journal(date).await {
+        // Build edges from wiki-links in this content type's sheets
+        for sheet_meta in &sheets {
+            let page = if ct.id == "journal" {
+                // Journals use date-based reading
+                if let Some(date) = sheet_meta.journal_date {
+                    garden.file_manager.read_journal(date).await.ok()
+                } else {
+                    None
+                }
+            } else {
+                garden.file_manager.read_sheet(ct, &sheet_meta.name, None).await.ok()
+            };
+
+            if let Some(page) = page {
                 let links = page.all_wiki_links();
                 for link in links {
+                    // Only create edge if target exists
                     if existing_pages.contains(&link) {
-                        let key = (journal_meta.name.clone(), link.clone());
+                        let key = (sheet_meta.name.clone(), link.clone());
                         *edges_map.entry(key).or_insert(0) += 1;
                     }
                 }
@@ -109,5 +113,19 @@ pub async fn get_graph(
         })
         .collect();
 
-    Ok(Json(Graph { nodes, edges }))
+    // Build content types list for legend (only those actually used)
+    let graph_content_types: Vec<GraphContentType> = content_types
+        .into_iter()
+        .filter(|ct| content_types_used.contains(&ct.id))
+        .map(|ct| GraphContentType {
+            id: ct.id,
+            name: ct.name,
+        })
+        .collect();
+
+    Ok(Json(Graph {
+        nodes,
+        edges,
+        content_types: graph_content_types,
+    }))
 }

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Knowledge graph visualization using d3-force
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
 import { select } from 'd3-selection'
 import { zoom, zoomIdentity, type ZoomBehavior } from 'd3-zoom'
 import { drag, type D3DragEvent } from 'd3-drag'
 import 'd3-transition' // Import for transition support on selections
 import { graph as graphApi } from '../../lib/api'
-import type { GraphNode } from '../../types'
+import type { GraphNode, GraphContentType } from '../../types'
 import { usePageStore } from '../../stores/pageStore'
 
 interface SidebarGraphProps {
@@ -30,6 +30,21 @@ interface SimLink extends SimulationLinkDatum<SimNode> {
   weight: number
 }
 
+// Color palette for content types (base16 colors)
+const CONTENT_TYPE_COLORS: Record<string, string> = {
+  page: 'var(--base05)',
+  journal: 'var(--base0C)',
+  // Additional content types get colors from this palette
+}
+
+const EXTRA_COLORS = [
+  'var(--base0E)', // purple
+  'var(--base09)', // orange
+  'var(--base0B)', // green
+  'var(--base0A)', // yellow
+  'var(--base08)', // red
+]
+
 function SidebarGraph({ onBack }: SidebarGraphProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const svgRef = useRef<SVGSVGElement>(null)
@@ -39,11 +54,25 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
 
   const [nodes, setNodes] = useState<SimNode[]>([])
   const [links, setLinks] = useState<SimLink[]>([])
+  const [contentTypes, setContentTypes] = useState<GraphContentType[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
 
   const { navigateToPage, navigateToJournal, currentPageName } = usePageStore()
+
+  // Build color map for content types
+  const contentTypeColors = useMemo(() => {
+    const colors = { ...CONTENT_TYPE_COLORS }
+    let extraColorIndex = 0
+    for (const ct of contentTypes) {
+      if (!colors[ct.id]) {
+        colors[ct.id] = EXTRA_COLORS[extraColorIndex % EXTRA_COLORS.length]
+        extraColorIndex++
+      }
+    }
+    return colors
+  }, [contentTypes])
 
   // Fetch graph data
   useEffect(() => {
@@ -71,6 +100,7 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
 
         setNodes(simNodes)
         setLinks(simLinks)
+        setContentTypes(data.contentTypes || [])
         setLoading(false)
       } catch (err) {
         if (!cancelled) {
@@ -122,7 +152,7 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
 
   // Handle node click - defined before useEffect that uses it
   const handleNodeClick = useCallback((node: SimNode) => {
-    if (node.isJournal) {
+    if (node.contentType === 'journal') {
       // Journal IDs can be "YYYY-MM-DD" or "journal/YYYY-MM-DD"
       const match = node.id.match(/(?:journal\/)?(\d{4}-\d{2}-\d{2})/)
       if (match) {
@@ -141,16 +171,13 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
     return minRadius + (maxRadius - minRadius) * scale
   }, [])
 
-  // Get node color
+  // Get node color based on content type
   const getNodeColor = useCallback((node: SimNode): string => {
     if (node.id === currentPageName) {
       return 'var(--base0D)' // Highlight current page
     }
-    if (node.isJournal) {
-      return 'var(--base0C)' // Cyan for journals
-    }
-    return 'var(--base05)' // Default
-  }, [currentPageName])
+    return contentTypeColors[node.contentType] || 'var(--base05)'
+  }, [currentPageName, contentTypeColors])
 
   // Run force simulation with d3 rendering for zoom/pan/drag support
   useEffect(() => {
@@ -382,16 +409,17 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
           <g ref={gRef} />
         </svg>
 
-        {/* Legend */}
-        <div className="absolute bottom-2 left-2 flex gap-3 text-xs text-base-04 pointer-events-none">
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--base05)' }} />
-            <span>Pages</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--base0C)' }} />
-            <span>Journals</span>
-          </div>
+        {/* Dynamic legend based on content types in graph */}
+        <div className="absolute bottom-2 left-2 flex flex-wrap gap-3 text-xs text-base-04 pointer-events-none">
+          {contentTypes.map((ct) => (
+            <div key={ct.id} className="flex items-center gap-1">
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: contentTypeColors[ct.id] || 'var(--base05)' }}
+              />
+              <span>{ct.name}</span>
+            </div>
+          ))}
         </div>
 
         {/* Zoom controls */}
