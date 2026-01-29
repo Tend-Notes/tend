@@ -125,7 +125,7 @@ function CollapsibleSection({
             transition={{ duration: 0.2, ease: 'easeInOut' }}
             className="overflow-hidden"
           >
-            <div className="px-3 pb-3">
+            <div className="px-3 pt-2 pb-3">
               {children}
             </div>
           </motion.div>
@@ -1391,12 +1391,22 @@ function GardensSection() {
   }
 
   const handleSwitchGarden = async (id: string) => {
+    // Track if we initiated a reload - network errors after reload are expected
+    let reloadInitiated = false
+
     try {
+      // Use AbortController with timeout to detect backend hangs
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+
       const response = await fetch('/api/v1/gardens/switch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id }),
+        signal: controller.signal,
       })
+
+      clearTimeout(timeoutId)
 
       if (!response.ok) {
         const data = await response.json()
@@ -1415,11 +1425,16 @@ function GardensSection() {
       // Update state immediately - the WebSocket may trigger reload before we get here
       setCurrentGraphId(id)
       // Reload the page to refresh all data for the new garden
+      reloadInitiated = true
       window.location.reload()
     } catch (err) {
-      // Ignore network errors - they often happen because WebSocket triggered a reload
-      // before this fetch completed, or during the reload process itself.
-      // The fetchGardens() call on mount will sync the UI to server state.
+      // Ignore AbortError - either our timeout or page reload aborted the request.
+      // If it's a real timeout, the page won't reload and user can retry.
+      // If it's a reload, the error doesn't matter.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return
+      }
+      // Ignore network errors - usually means page is reloading
       if (err instanceof TypeError && err.message.toLowerCase().includes('network')) {
         return
       }
@@ -1534,25 +1549,23 @@ function GardensSection() {
           {gardens.map((garden) => (
             <div
               key={garden.id}
-              className={`flex items-center justify-between px-2 py-1.5 rounded border transition-colors ${
+              className={`flex items-center justify-between rounded border transition-colors cursor-pointer clickable ${
                 currentGraphId === garden.id
                   ? 'border-base-0D bg-base-01'
                   : 'border-base-02 hover:border-base-03'
               }`}
+              onClick={() => handleSwitchGarden(garden.id)}
             >
-              <button
-                onClick={() => handleSwitchGarden(garden.id)}
-                className="flex-1 text-left flex items-center gap-1.5"
-              >
+              <div className="flex-1 flex items-center gap-1.5 px-2 py-1.5">
                 {garden.encrypted && (
                   <svg className="w-3 h-3 text-base-0A flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                   </svg>
                 )}
                 <span className="text-xs text-base-05">{garden.name}</span>
-              </button>
+              </div>
               {currentGraphId === garden.id ? (
-                <span className="text-xs text-base-0D">Active</span>
+                <span className="text-xs text-base-0D px-2">Active</span>
               ) : confirmArchive === garden.id ? (
                 <div className="flex items-center gap-1">
                   <button
@@ -1645,25 +1658,18 @@ function GardensSection() {
       )}
 
       {/* Unlock dialog for encrypted gardens */}
-      <AnimatePresence>
-        {unlockGardenId && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-base-00/80 flex items-center justify-center z-50"
-            onClick={() => {
-              setUnlockGardenId(null)
-              setUnlockPassphrase('')
-            }}
+      {unlockGardenId && (
+        <div
+          className="fixed inset-0 bg-base-00/80 flex items-center justify-center z-50"
+          onClick={() => {
+            setUnlockGardenId(null)
+            setUnlockPassphrase('')
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-base-01 border border-base-02 rounded-lg p-4 max-w-sm w-full mx-4 space-y-3"
           >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              onClick={(e) => e.stopPropagation()}
-              className="bg-base-01 border border-base-02 rounded-lg p-4 max-w-sm w-full mx-4 space-y-3"
-            >
               <div className="flex items-center gap-2">
                 <svg className="w-5 h-5 text-base-0A" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
@@ -1706,10 +1712,9 @@ function GardensSection() {
                   {unlocking ? 'Unlocking...' : 'Unlock'}
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
+            </div>
+          </div>
         )}
-      </AnimatePresence>
 
       <AnimatePresence>
         {showNewForm && (

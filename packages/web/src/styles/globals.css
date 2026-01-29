@@ -78,6 +78,24 @@ body {
   outline-offset: 2px;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Button Press Effect
+   Universal tactile feedback for all clickable elements.
+   ───────────────────────────────────────────────────────────────────────────── */
+button,
+[role="button"],
+.clickable {
+  transition: transform var(--duration-instant) var(--ease-out),
+              opacity var(--duration-instant) var(--ease-out);
+}
+
+button:active:not(:disabled),
+[role="button"]:active:not([aria-disabled="true"]),
+.clickable:active {
+  transform: scale(0.97);
+  opacity: 0.9;
+}
+
 /* Selection */
 ::selection {
   background-color: var(--color-bg-selection);

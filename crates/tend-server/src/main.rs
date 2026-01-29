@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use axum::{routing::get, Router};
 use tend_storage::{FileEvent, SimpleFileWatcher};
+use tokio::sync::broadcast;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
@@ -113,67 +114,99 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Start file watcher for real-time updates
-    // Note: The file watcher watches the initial garden. When switching gardens,
-    // file change notifications from the old garden will be ignored since paths won't match.
-    // A proper solution would restart the watcher on garden switch.
+    // The watcher automatically restarts when gardens are switched by subscribing
+    // to GardenSwitched events.
     {
         let watcher_state = Arc::clone(&state);
-        let garden = state.garden.read().await;
-        let pending_writes = garden.file_manager.pending_writes();
-        let root = garden.data_dir.clone();
-        drop(garden); // Release lock before spawning
 
-        match SimpleFileWatcher::new(&root, pending_writes) {
-            Ok(watcher) => {
-                let mut rx = watcher.subscribe();
+        tokio::spawn(async move {
+            // Subscribe to events so we know when to restart
+            let mut event_rx = watcher_state.event_sender.subscribe();
 
-                tokio::spawn(async move {
-                    // Keep watcher alive
-                    let _watcher = watcher;
+            loop {
+                // Get current garden info
+                let (root, pending_writes) = {
+                    let garden = watcher_state.garden.read().await;
+                    (garden.data_dir.clone(), garden.file_manager.pending_writes())
+                };
 
-                    info!("File watcher started for: {}", root.display());
-
-                    while let Ok(event) = rx.recv().await {
-                        // Check if this is still the active garden
-                        let current_root = {
-                            let garden = watcher_state.garden.read().await;
-                            garden.data_dir.clone()
-                        };
-
-                        // Skip events if garden has changed
-                        if current_root != root {
-                            continue;
-                        }
-
-                        // Convert file path to page name
-                        let (path, event_type) = match &event {
-                            FileEvent::Created(p) | FileEvent::Modified(p) => {
-                                (p.clone(), "modified")
-                            }
-                            FileEvent::Deleted(p) => (p.clone(), "deleted"),
-                            FileEvent::Renamed { to, .. } => (to.clone(), "renamed"),
-                        };
-
-                        // Extract relative path from root
-                        let relative = path
-                            .strip_prefix(&root)
-                            .unwrap_or(&path)
-                            .to_string_lossy()
-                            .to_string();
-
-                        info!("File {} externally: {}", event_type, relative);
-
-                        // Broadcast the event
-                        watcher_state.broadcast(WsEvent::FileChanged {
-                            path: relative,
-                        });
+                // Create watcher for current garden
+                let watcher_result = SimpleFileWatcher::new(&root, pending_writes);
+                let (watcher, mut file_rx) = match watcher_result {
+                    Ok(w) => {
+                        let rx = w.subscribe();
+                        info!("File watcher started for: {}", root.display());
+                        (Some(w), rx)
                     }
-                });
+                    Err(e) => {
+                        error!("Failed to start file watcher for {}: {}", root.display(), e);
+                        // Wait a bit before retrying or for garden switch
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        continue;
+                    }
+                };
+
+                // Process events until garden switches
+                loop {
+                    tokio::select! {
+                        // Handle file events
+                        file_event = file_rx.recv() => {
+                            match file_event {
+                                Ok(event) => {
+                                    let (path, event_type) = match &event {
+                                        FileEvent::Created(p) | FileEvent::Modified(p) => {
+                                            (p.clone(), "modified")
+                                        }
+                                        FileEvent::Deleted(p) => (p.clone(), "deleted"),
+                                        FileEvent::Renamed { to, .. } => (to.clone(), "renamed"),
+                                    };
+
+                                    let relative = path
+                                        .strip_prefix(&root)
+                                        .unwrap_or(&path)
+                                        .to_string_lossy()
+                                        .to_string();
+
+                                    info!("File {} externally: {}", event_type, relative);
+
+                                    watcher_state.broadcast(WsEvent::FileChanged {
+                                        path: relative,
+                                    });
+                                }
+                                Err(broadcast::error::RecvError::Closed) => {
+                                    warn!("File watcher channel closed, restarting...");
+                                    break;
+                                }
+                                Err(broadcast::error::RecvError::Lagged(n)) => {
+                                    warn!("File watcher missed {} events", n);
+                                }
+                            }
+                        }
+                        // Handle garden switch events
+                        ws_event = event_rx.recv() => {
+                            match ws_event {
+                                Ok(WsEvent::GardenSwitched { garden_id }) => {
+                                    info!("Garden switched to {}, restarting file watcher", garden_id);
+                                    // Drop current watcher by breaking inner loop
+                                    drop(watcher);
+                                    break;
+                                }
+                                Ok(_) => {
+                                    // Ignore other events
+                                }
+                                Err(broadcast::error::RecvError::Closed) => {
+                                    error!("Event channel closed, stopping file watcher");
+                                    return;
+                                }
+                                Err(broadcast::error::RecvError::Lagged(n)) => {
+                                    warn!("File watcher missed {} WS events", n);
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Err(e) => {
-                error!("Failed to start file watcher: {}", e);
-            }
-        }
+        });
     }
 
     // Build CORS layer based on configuration
