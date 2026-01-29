@@ -1391,9 +1391,6 @@ function GardensSection() {
   }
 
   const handleSwitchGarden = async (id: string) => {
-    // Track if we initiated a reload - network errors after reload are expected
-    let reloadInitiated = false
-
     try {
       // Use AbortController with timeout to detect backend hangs
       const controller = new AbortController()
@@ -1425,7 +1422,6 @@ function GardensSection() {
       // Update state immediately - the WebSocket may trigger reload before we get here
       setCurrentGraphId(id)
       // Reload the page to refresh all data for the new garden
-      reloadInitiated = true
       window.location.reload()
     } catch (err) {
       // Ignore AbortError - either our timeout or page reload aborted the request.

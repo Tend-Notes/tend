@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // WebSocket hook for real-time updates from the server
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef } from 'react'
 import { usePageStore } from '../stores/pageStore'
 import { useSyncStatusStore } from '../stores/syncStatusStore'
 import { useSettingsStore } from '../stores/settingsStore'
