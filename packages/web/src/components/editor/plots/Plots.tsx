@@ -601,6 +601,12 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
 
+  // Detect markdown header and extract level (1-6)
+  const getHeaderLevel = (content: string): number | null => {
+    const match = content.match(/^(#{1,6})\s/)
+    return match ? match[1].length : null
+  }
+
   const renderBlock = (block: Block) => {
     const blockChildren = block.children
       .map((childUuid) => page.blocks[childUuid])
@@ -609,10 +615,22 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     const isSelected = block.uuid === selectedUuid
     const isInMultiSelection = isInSelection(block.uuid, flatBlockOrder)
 
+    // Check if block is a header
+    const headerLevel = getHeaderLevel(block.content)
+    const isHeader = headerLevel !== null
+
+    // Build class names for the block container
+    const containerClasses = [
+      'block-container',
+      isInMultiSelection ? 'block-container--selected' : '',
+      isHeader ? 'block-container--header' : '',
+      isHeader ? `block-container--header-${headerLevel}` : '',
+    ].filter(Boolean).join(' ')
+
     return (
       <div
         key={block.uuid}
-        className={`block-container ${isInMultiSelection ? 'block-container--selected' : ''}`}
+        className={containerClasses}
         data-block-id={block.uuid}
         onClick={(e) => {
           // Let CodeMirror handle clicks inside the editor completely
@@ -628,16 +646,18 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         }}
       >
         <div className="block flex items-start py-0.5">
-          {/* Bullet */}
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              if (hasChildren) handleToggleCollapse(block.uuid)
-            }}
-            className={`bullet mt-[0.55rem] ${
-              hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
-            }`}
-          />
+          {/* Bullet - hidden for header blocks */}
+          {!isHeader && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (hasChildren) handleToggleCollapse(block.uuid)
+              }}
+              className={`bullet mt-[0.55rem] ${
+                hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
+              }`}
+            />
+          )}
 
           {/* Seed - editable content */}
           <div className="flex-1">
