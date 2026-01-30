@@ -53,19 +53,28 @@ function dispatchBoundaryEvent(eventType: 'tab' | 'shift-tab') {
   editor.dispatchEvent(event)
 }
 
-// Check if device is mobile/touch
+// Check if device is mobile/touch (also respects force-mobile CSS class for dev testing)
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
     const check = () => {
+      const isForcedMobile = document.documentElement.classList.contains('force-mobile')
       const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
       const isNarrowScreen = window.innerWidth < 768
-      setIsMobile(isTouchDevice || isNarrowScreen)
+      setIsMobile(isForcedMobile || isTouchDevice || isNarrowScreen)
     }
     check()
     window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
+
+    // Watch for force-mobile class changes (dev toggle)
+    const observer = new MutationObserver(check)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
+    return () => {
+      window.removeEventListener('resize', check)
+      observer.disconnect()
+    }
   }, [])
 
   return isMobile
@@ -76,7 +85,6 @@ export function MainContent() {
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
   const isMobile = useIsMobile()
-  const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const openSearch = useUIStore((state) => state.openSearch)
 
   // Radial menu items for mobile
@@ -128,16 +136,6 @@ export function MainContent() {
         </svg>
       ),
       onClick: () => dispatchBoundaryEvent('shift-tab'),
-    },
-    {
-      id: 'sidebar',
-      label: 'Sidebar',
-      icon: (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-        </svg>
-      ),
-      onClick: toggleSidebar,
     },
     {
       id: 'search',
@@ -246,8 +244,8 @@ export function MainContent() {
         </div>
       </div>
 
-      {/* Activity log at the bottom */}
-      <ActivityLog />
+      {/* Activity log at the bottom - desktop only */}
+      {!isMobile && <ActivityLog />}
 
       {/* Radial menu for mobile - experimental alternative to bottom toolbar */}
       {isMobile && <RadialMenu items={radialMenuItems} />}

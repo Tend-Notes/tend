@@ -959,18 +959,25 @@ code {
 @media (max-width: 767px) {
   /*
    * Mobile typography best practices (2025):
-   * - Body text: 16-18px minimum (we use 18px for comfortable reading)
+   * - Body text: 20px for comfortable reading on mobile
    * - Touch targets: 44x44px minimum
    * - Line height: 1.5x font size
    * - Adequate spacing between elements
    * Reference: Apple HIG, Material Design, WCAG 2.1
    */
+
+  /* Viewport containment - lock app shell to viewport, only content scrolls */
+  html, body, #root {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
   html {
-    font-size: 18px;
+    font-size: 20px;
   }
 
   body {
-    font-size: 18px;
+    font-size: 20px;
     line-height: 1.6;
     -webkit-text-size-adjust: 100%;
   }
@@ -978,17 +985,17 @@ code {
   /* Page title - prominent, clear hierarchy */
   .page-title,
   h1 {
-    font-size: 28px;
+    font-size: 32px;
     font-weight: 600;
     margin-bottom: 16px;
   }
 
   h2 {
-    font-size: 22px;
+    font-size: 26px;
   }
 
   h3 {
-    font-size: 19px;
+    font-size: 22px;
   }
 
   /*
@@ -996,22 +1003,22 @@ code {
    * Must use !important to override CodeMirror defaults
    */
   .cm-editor {
-    font-size: 18px !important;
+    font-size: 20px !important;
   }
 
   .cm-content {
-    font-size: 18px !important;
+    font-size: 20px !important;
     line-height: 1.6 !important;
   }
 
   .cm-line {
-    font-size: 18px !important;
+    font-size: 20px !important;
     line-height: 1.6 !important;
   }
 
-  /* Page content - generous padding for touch */
+  /* Page content - generous padding for touch, extra bottom for radial menu */
   .page-content {
-    padding: 16px 16px 120px 16px !important;
+    padding: 16px 16px 80px 16px !important;
     max-width: 100% !important;
     margin: 0 !important;
   }
@@ -1039,7 +1046,7 @@ code {
 
   .block-content {
     min-height: 1.5em;
-    font-size: 18px;
+    font-size: 20px;
   }
 
   /* Indentation - slightly more visible hierarchy */
@@ -1063,10 +1070,11 @@ code {
     border-radius: 14px;
   }
 
-  /* Sidebar items - comfortable touch targets */
+  /* Sidebar items - comfortable touch targets (44px minimum per Apple HIG) */
   .sidebar-item {
     padding: 12px 16px;
-    min-height: 48px;
+    min-height: 44px;
+    font-size: 18px;
   }
 
   /* Sidebar overlay - full screen on mobile */
@@ -1111,7 +1119,7 @@ code {
 
   /* Input fields - prevent iOS zoom (must be 16px+) */
   input, textarea, select {
-    font-size: 18px;
+    font-size: 20px;
   }
 
   /* ─────────────────────────────────────────────────────────────────────────────
@@ -1123,19 +1131,21 @@ code {
     font-size: 13px !important;
   }
 
-  /* Sidebar list items - ensure touch targets */
+  /* Sidebar list items - ensure 44px touch targets */
   .sidebar button,
   .sidebar a,
   .sidebar [role="button"] {
     min-height: 44px;
-    padding-top: 10px !important;
-    padding-bottom: 10px !important;
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+    font-size: 18px;
   }
 
-  /* Sidebar navigation tabs */
+  /* Sidebar navigation tabs - 44px touch targets */
   .sidebar nav > div > button {
-    padding: 12px 8px !important;
-    font-size: 15px !important;
+    padding: 12px 10px !important;
+    font-size: 16px !important;
+    min-height: 44px;
   }
 
   /* Settings option buttons (appearance, tasks, etc.) */
@@ -1370,28 +1380,36 @@ code {
 
 /* Force mobile styles regardless of viewport */
 html.force-mobile {
-  font-size: 18px !important;
+  font-size: 20px !important;
 }
 
 html.force-mobile body {
-  font-size: 18px !important;
+  font-size: 20px !important;
   line-height: 1.6 !important;
 }
 
 html.force-mobile .page-title,
 html.force-mobile h1 {
-  font-size: 28px !important;
+  font-size: 32px !important;
+}
+
+html.force-mobile h2 {
+  font-size: 26px !important;
+}
+
+html.force-mobile h3 {
+  font-size: 22px !important;
 }
 
 html.force-mobile .cm-editor,
 html.force-mobile .cm-content,
 html.force-mobile .cm-line {
-  font-size: 18px !important;
+  font-size: 20px !important;
   line-height: 1.6 !important;
 }
 
 html.force-mobile .page-content {
-  padding: 16px 16px 120px 16px !important;
+  padding: 16px 16px 80px 16px !important;
   max-width: 100% !important;
 }
 

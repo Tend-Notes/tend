@@ -59,9 +59,9 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
   const repositionStart = useRef<{ x: number; y: number } | null>(null)
 
   // Sizing - comfortably tappable
-  const TRIGGER_SIZE = 60
-  const ITEM_SIZE = 52
-  const RADIUS = 100
+  const TRIGGER_SIZE = 68
+  const ITEM_SIZE = 64
+  const RADIUS = 110
   const ITEM_SPACING = 32 // Degrees between items
   const VISIBLE_ITEMS = 3
 
@@ -132,11 +132,18 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
     const touch = e.touches[0]
     const target = e.target as HTMLElement
 
+    // Trigger button: track for reposition or toggle
     if (target.closest('[data-trigger]')) {
       repositionStart.current = { x: touch.clientX, y: touch.clientY }
       return
     }
 
+    // Don't start drag on menu item buttons - let them handle taps
+    if (target.closest('button')) {
+      return
+    }
+
+    // Start drag for arc scrolling on non-button areas
     if (isOpen) {
       e.preventDefault() // Prevent scroll
       dragStartY.current = touch.clientY
@@ -163,18 +170,21 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
     if (isDragging) {
       e.preventDefault() // Prevent scroll
       // Drag up = positive delta = scroll forward to later items
+      // Convert pixel movement to degree offset (0.5 degrees per pixel)
       const deltaY = dragStartY.current - touch.clientY
       const newOffset = dragStartOffset.current + deltaY * 0.5
 
       const maxOffset = (items.length - 1) * ITEM_SPACING
       setScrollOffset(Math.max(0, Math.min(maxOffset, newOffset)))
 
-      // Velocity
+      // Calculate velocity in degrees per frame (targeting 60fps = ~16ms)
       const now = Date.now()
       const dt = now - lastTime.current
-      if (dt > 0) {
+      if (dt > 0 && dt < 100) { // Ignore stale samples
         const dy = lastY.current - touch.clientY
-        velocity.current = (dy * 0.5) / dt * 16
+        // Convert pixel velocity to degree velocity
+        // dy pixels in dt ms -> degrees per 16ms frame
+        velocity.current = (dy * 0.5 * 16) / dt
       }
       lastY.current = touch.clientY
       lastTime.current = now
