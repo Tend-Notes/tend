@@ -139,7 +139,7 @@ function App() {
   }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode])
 
   return (
-    <div className="flex h-screen bg-base-00 text-base-05">
+    <div className="flex h-screen w-full max-w-full overflow-hidden bg-base-00 text-base-05">
       {/* Sidebar */}
       <Sidebar
         mode={sidebarMode}
