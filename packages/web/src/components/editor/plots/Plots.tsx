@@ -43,7 +43,9 @@ function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): M
     if (!block) continue
 
     const content = block.content.trim()
-    const openMatch = content.match(/^```(\w*)$/)
+    // Match opening fence: ``` optionally followed by language identifier
+    // Language can include letters, numbers, hyphens, plus signs (e.g., c++, vue-template)
+    const openMatch = content.match(/^```([\w+#-]*)$/)
     const closeMatch = content === '```'
 
     if (!inCodeBlock && openMatch) {

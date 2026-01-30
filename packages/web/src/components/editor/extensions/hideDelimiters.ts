@@ -61,12 +61,18 @@ function findContainingFormats(state: EditorState, pos: number): FormatSpan[] {
 }
 
 /**
- * Check if a node is a delimiter mark.
+ * Check if a node is a delimiter mark that should be hidden.
+ * Excludes CodeMark inside FencedCode blocks (we only hide inline code delimiters).
  */
-function isDelimiterNode(name: string): boolean {
+function isHideableDelimiter(name: string, parentName: string | undefined): boolean {
+  // CodeMark inside FencedCode should NOT be hidden (those are the ``` fence lines)
+  // Only hide CodeMark when it's part of InlineCode
+  if (name === 'CodeMark') {
+    return parentName === 'InlineCode'
+  }
+
   return (
     name === 'EmphasisMark' ||
-    name === 'CodeMark' ||
     name === 'StrikethroughMark' ||
     name === 'HighlightMark'
   )
@@ -86,11 +92,19 @@ function buildDecorations(view: EditorView): DecorationSet {
   const tree = syntaxTree(state)
 
   // Iterate through all delimiter marks
+  // Track the parent node to distinguish inline code from fenced code
+  let parentStack: string[] = []
+
   tree.iterate({
     from: 0,
     to: state.doc.length,
     enter: (node) => {
-      if (isDelimiterNode(node.name)) {
+      parentStack.push(node.name)
+
+      // Get the immediate parent (second to last in stack)
+      const parentName = parentStack.length >= 2 ? parentStack[parentStack.length - 2] : undefined
+
+      if (isHideableDelimiter(node.name, parentName)) {
         // Check if this delimiter is inside any of the cursor's format spans
         const isInCursorSpan = cursorFormats.some(
           (format) => node.from >= format.from && node.to <= format.to
@@ -104,6 +118,9 @@ function buildDecorations(view: EditorView): DecorationSet {
           decorations.push(hiddenDelimiter.range(node.from, node.to))
         }
       }
+    },
+    leave: () => {
+      parentStack.pop()
     },
   })
 
