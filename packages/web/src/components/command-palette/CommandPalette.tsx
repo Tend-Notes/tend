@@ -38,6 +38,35 @@ function CommandItem({
   )
 }
 
+// DEV: Forced viewport mode for testing responsive styles
+type ForcedViewport = 'none' | 'mobile' | 'tablet' | 'desktop'
+
+function getForcedViewport(): ForcedViewport {
+  if (typeof window === 'undefined') return 'none'
+  return (localStorage.getItem('dev-forced-viewport') as ForcedViewport) || 'none'
+}
+
+function setForcedViewport(mode: ForcedViewport) {
+  const html = document.documentElement
+  // Remove all forced classes
+  html.classList.remove('force-mobile', 'force-tablet', 'force-desktop')
+
+  if (mode === 'none') {
+    localStorage.removeItem('dev-forced-viewport')
+  } else {
+    localStorage.setItem('dev-forced-viewport', mode)
+    html.classList.add(`force-${mode}`)
+  }
+}
+
+// Apply forced viewport on load
+if (typeof window !== 'undefined') {
+  const saved = getForcedViewport()
+  if (saved !== 'none') {
+    document.documentElement.classList.add(`force-${saved}`)
+  }
+}
+
 function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [search, setSearch] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -50,6 +79,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [sheetDate, setSheetDate] = useState('')
   const [sheetError, setSheetError] = useState<string | null>(null)
   const [existingSheets, setExistingSheets] = useState<string[]>([])
+  const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles } = usePageStore()
   const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor } = useUIStore()
   const { contentTypes } = useSettingsStore()
@@ -548,6 +578,55 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               >
                 Options
               </CommandItem>
+            </Command.Group>
+
+            {/* Dev Tools */}
+            <Command.Group heading="Dev" className="mb-2">
+              <CommandItem
+                onSelect={() => {
+                  const next = forcedViewport === 'mobile' ? 'none' : 'mobile'
+                  setForcedViewport(next)
+                  setForcedViewportState(next)
+                  onOpenChange(false)
+                }}
+                value="dev switch mobile ui"
+              >
+                DEV: {forcedViewport === 'mobile' ? 'Exit mobile UI' : 'Switch to mobile UI'}
+              </CommandItem>
+              <CommandItem
+                onSelect={() => {
+                  const next = forcedViewport === 'tablet' ? 'none' : 'tablet'
+                  setForcedViewport(next)
+                  setForcedViewportState(next)
+                  onOpenChange(false)
+                }}
+                value="dev switch tablet ui"
+              >
+                DEV: {forcedViewport === 'tablet' ? 'Exit tablet UI' : 'Switch to tablet UI'}
+              </CommandItem>
+              <CommandItem
+                onSelect={() => {
+                  const next = forcedViewport === 'desktop' ? 'none' : 'desktop'
+                  setForcedViewport(next)
+                  setForcedViewportState(next)
+                  onOpenChange(false)
+                }}
+                value="dev switch desktop ui"
+              >
+                DEV: {forcedViewport === 'desktop' ? 'Exit desktop UI' : 'Switch to desktop UI'}
+              </CommandItem>
+              {forcedViewport !== 'none' && (
+                <CommandItem
+                  onSelect={() => {
+                    setForcedViewport('none')
+                    setForcedViewportState('none')
+                    onOpenChange(false)
+                  }}
+                  value="dev reset viewport"
+                >
+                  DEV: Reset to auto viewport
+                </CommandItem>
+              )}
             </Command.Group>
           </Command.List>
         )}

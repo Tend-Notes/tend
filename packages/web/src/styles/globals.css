@@ -1164,3 +1164,190 @@ code {
     min-height: -webkit-fill-available;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   DEV: Forced Viewport Modes
+   Use command palette "DEV: Switch to mobile/tablet/desktop UI" to test
+   responsive styles without resizing the browser window.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Force mobile styles regardless of viewport */
+html.force-mobile {
+  font-size: 18px !important;
+}
+
+html.force-mobile body {
+  font-size: 18px !important;
+  line-height: 1.6 !important;
+}
+
+html.force-mobile .page-title,
+html.force-mobile h1 {
+  font-size: 28px !important;
+}
+
+html.force-mobile .cm-editor,
+html.force-mobile .cm-content,
+html.force-mobile .cm-line {
+  font-size: 18px !important;
+  line-height: 1.6 !important;
+}
+
+html.force-mobile .page-content {
+  padding: 16px 16px 120px 16px !important;
+  max-width: 100% !important;
+}
+
+html.force-mobile .block {
+  gap: 10px !important;
+  padding: 6px 0 !important;
+  min-height: 48px !important;
+}
+
+html.force-mobile .tag-pill {
+  font-size: 14px !important;
+  padding: 3px 12px !important;
+}
+
+html.force-mobile .task-status {
+  font-size: 14px !important;
+  padding: 4px 12px !important;
+}
+
+html.force-mobile .block-children {
+  margin-left: 16px !important;
+  padding-left: 10px !important;
+}
+
+html.force-mobile::after {
+  content: "MOBILE";
+  position: fixed;
+  top: 4px;
+  right: 4px;
+  background: var(--base08);
+  color: var(--base00);
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 4px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+/* Force tablet styles regardless of viewport */
+html.force-tablet {
+  font-size: 17px !important;
+}
+
+html.force-tablet body {
+  font-size: 17px !important;
+  line-height: 1.55 !important;
+}
+
+html.force-tablet .page-title,
+html.force-tablet h1 {
+  font-size: 26px !important;
+}
+
+html.force-tablet .cm-editor,
+html.force-tablet .cm-content,
+html.force-tablet .cm-line {
+  font-size: 17px !important;
+  line-height: 1.55 !important;
+}
+
+html.force-tablet .page-content {
+  padding: 24px 32px 60px 32px !important;
+  max-width: 800px !important;
+  margin: 0 auto !important;
+}
+
+html.force-tablet .block {
+  gap: 12px !important;
+  padding: 5px 0 !important;
+  min-height: 44px !important;
+}
+
+html.force-tablet .tag-pill {
+  font-size: 14px !important;
+  padding: 3px 10px !important;
+}
+
+html.force-tablet .block-children {
+  margin-left: 20px !important;
+  padding-left: 12px !important;
+}
+
+html.force-tablet::after {
+  content: "TABLET";
+  position: fixed;
+  top: 4px;
+  right: 4px;
+  background: var(--base0A);
+  color: var(--base00);
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 4px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+/* Force desktop styles regardless of viewport */
+html.force-desktop {
+  font-size: 16px !important;
+}
+
+html.force-desktop body {
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+}
+
+html.force-desktop .page-title,
+html.force-desktop h1 {
+  font-size: 24px !important;
+}
+
+html.force-desktop .cm-editor,
+html.force-desktop .cm-content,
+html.force-desktop .cm-line {
+  font-size: 16px !important;
+  line-height: 1.5 !important;
+}
+
+html.force-desktop .page-content {
+  padding: 32px 48px !important;
+  max-width: 720px !important;
+  margin: 0 auto !important;
+}
+
+html.force-desktop .block {
+  gap: 12px !important;
+  padding: 2px 0 !important;
+  min-height: auto !important;
+}
+
+html.force-desktop .tag-pill {
+  font-size: 13px !important;
+  padding: 2px 8px !important;
+}
+
+html.force-desktop .block-children {
+  margin-left: 24px !important;
+  padding-left: 12px !important;
+}
+
+html.force-desktop::after {
+  content: "DESKTOP";
+  position: fixed;
+  top: 4px;
+  right: 4px;
+  background: var(--base0B);
+  color: var(--base00);
+  font-size: 10px;
+  font-weight: bold;
+  padding: 2px 6px;
+  border-radius: 4px;
+  z-index: 9999;
+  pointer-events: none;
+}
