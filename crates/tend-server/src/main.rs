@@ -244,8 +244,11 @@ async fn main() -> anyhow::Result<()> {
             config.rate_limit.requests_per_second, config.rate_limit.burst_size
         );
 
+        // Calculate replenishment period: for N requests/second, replenish every 1000/N ms
+        let period_ms = 1000 / rps.get() as u64;
+
         let governor_config = GovernorConfigBuilder::default()
-            .per_second(rps.get() as u64)
+            .per_millisecond(period_ms)
             .burst_size(burst.get())
             .finish()
             .expect("Invalid rate limit configuration");
