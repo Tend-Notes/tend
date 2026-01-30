@@ -252,17 +252,19 @@ pub struct BacklinkRef {
 
 /// Check if a block contains a reference to the given page name
 fn block_contains_reference(content: &str, page_name: &str, tag_name: Option<&str>) -> bool {
-    // Check for wiki-link reference [[page_name]]
-    let wiki_link = format!("[[{}]]", page_name);
-    if content.contains(&wiki_link) {
+    let content_lower = content.to_lowercase();
+
+    // Check for wiki-link reference [[page_name]] (case-insensitive)
+    let wiki_link = format!("[[{}]]", page_name.to_lowercase());
+    if content_lower.contains(&wiki_link) {
         return true;
     }
 
     // If this is a tag page (tags/tagname), also check for #tagname references
     if let Some(tag) = tag_name {
-        // Use regex to match #tagname with word boundaries
+        // Use regex to match #tagname with word boundaries (case-insensitive)
         // Match at start of string or after whitespace, followed by # and the tag name
-        let tag_pattern = format!(r"(?:^|\s)#{}(?:\s|$|[^\w-])", regex::escape(tag));
+        let tag_pattern = format!(r"(?i)(?:^|\s)#{}(?:\s|$|[^\w-])", regex::escape(tag));
         if let Ok(re) = regex::Regex::new(&tag_pattern) {
             if re.is_match(content) {
                 return true;
