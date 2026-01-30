@@ -1018,7 +1018,7 @@ code {
 
   /* Page content - generous padding for touch, extra bottom for radial menu */
   .page-content {
-    padding: 16px 16px 80px 16px !important;
+    padding: 16px 24px 80px 24px !important;
     max-width: 100% !important;
     margin: 0 !important;
   }
@@ -1066,8 +1066,8 @@ code {
   /* Tags - horizontal pill shape (not circular) */
   .tag-pill {
     font-size: 14px;
-    padding: 3px 12px;
-    border-radius: 14px;
+    padding: 4px 14px;
+    border-radius: 8px;
   }
 
   /* Sidebar items - comfortable touch targets (44px minimum per Apple HIG) */
@@ -1409,7 +1409,7 @@ html.force-mobile .cm-line {
 }
 
 html.force-mobile .page-content {
-  padding: 16px 16px 80px 16px !important;
+  padding: 16px 24px 80px 24px !important;
   max-width: 100% !important;
 }
 
@@ -1421,7 +1421,8 @@ html.force-mobile .block {
 
 html.force-mobile .tag-pill {
   font-size: 14px !important;
-  padding: 3px 12px !important;
+  padding: 4px 14px !important;
+  border-radius: 8px !important;
 }
 
 html.force-mobile .task-status {
