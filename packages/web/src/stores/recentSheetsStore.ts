@@ -29,6 +29,7 @@ interface RecentSheetsState {
   // Actions
   recordAccess: (contentTypeId: string, sheet: PageMeta) => void
   recordTagAccess: (tagName: string) => void
+  removeSheet: (name: string) => void
   clearAll: () => void
   clearByType: (contentTypeId: string) => void
 }
@@ -67,6 +68,19 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
           const updated = [{ name: tagName }, ...filtered].slice(0, MAX_RECENT_TAGS)
 
           return { recentTags: updated }
+        })
+      },
+
+      removeSheet: (name) => {
+        set((state) => {
+          const updated: Record<string, PageMeta[]> = {}
+          for (const [contentTypeId, sheets] of Object.entries(state.recentSheets)) {
+            const filtered = sheets.filter((s) => s.name !== name)
+            if (filtered.length > 0) {
+              updated[contentTypeId] = filtered
+            }
+          }
+          return { recentSheets: updated }
         })
       },
 

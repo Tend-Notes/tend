@@ -421,8 +421,8 @@ export const usePageStore = create<PageState>()(
             state.currentPageName = null
           }
         })
-        // Note: The deleted page will naturally fall out of recent sheets
-        // as the user navigates to other pages. No need to explicitly remove.
+        // Remove from recent sheets so it doesn't appear in sidebar history
+        useRecentSheetsStore.getState().removeSheet(name)
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to delete page'
