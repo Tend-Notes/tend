@@ -53,19 +53,28 @@ function dispatchBoundaryEvent(eventType: 'tab' | 'shift-tab') {
   editor.dispatchEvent(event)
 }
 
-// Check if device is mobile/touch
+// Check if device is mobile/touch (also respects force-mobile CSS class for dev testing)
 function useIsMobile() {
   const [isMobile, setIsMobile] = useState(false)
 
   useEffect(() => {
     const check = () => {
+      const isForcedMobile = document.documentElement.classList.contains('force-mobile')
       const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
       const isNarrowScreen = window.innerWidth < 768
-      setIsMobile(isTouchDevice || isNarrowScreen)
+      setIsMobile(isForcedMobile || isTouchDevice || isNarrowScreen)
     }
     check()
     window.addEventListener('resize', check)
-    return () => window.removeEventListener('resize', check)
+
+    // Watch for force-mobile class changes (dev toggle)
+    const observer = new MutationObserver(check)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
+    return () => {
+      window.removeEventListener('resize', check)
+      observer.disconnect()
+    }
   }, [])
 
   return isMobile

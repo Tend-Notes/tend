@@ -50,14 +50,23 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const [isResizing, setIsResizing] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
 
-  // Detect mobile viewport
+  // Detect mobile viewport (also respects force-mobile CSS class for dev testing)
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+      const isForcedMobile = document.documentElement.classList.contains('force-mobile')
+      setIsMobile(isForcedMobile || window.innerWidth < MOBILE_BREAKPOINT)
     }
     checkMobile()
     window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
+
+    // Watch for force-mobile class changes (dev toggle)
+    const observer = new MutationObserver(checkMobile)
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+
+    return () => {
+      window.removeEventListener('resize', checkMobile)
+      observer.disconnect()
+    }
   }, [])
 
   // Sync visual width with store when not resizing
