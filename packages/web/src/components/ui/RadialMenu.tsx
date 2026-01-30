@@ -141,6 +141,8 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
 
     // Start drag for arc scrolling (including on item buttons - we'll distinguish tap vs drag later)
     if (isOpen) {
+      e.preventDefault() // Prevent page scroll immediately
+      e.stopPropagation()
       dragStartY.current = touch.clientY
       dragStartOffset.current = scrollOffset
       lastY.current = touch.clientY
@@ -165,9 +167,10 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
 
     if (isDragging) {
       e.preventDefault() // Prevent scroll
-      // Drag up = positive delta = scroll forward to later items
+      e.stopPropagation()
+      // Drag DOWN = scroll forward (natural scroll direction)
       // Convert pixel movement to degree offset (0.5 degrees per pixel)
-      const deltaY = dragStartY.current - touch.clientY
+      const deltaY = touch.clientY - dragStartY.current // Inverted for natural scroll
 
       // Mark as dragged if moved more than 10px (distinguish tap from drag)
       if (Math.abs(deltaY) > 10) {
@@ -183,7 +186,7 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
       const now = Date.now()
       const dt = now - lastTime.current
       if (dt > 0 && dt < 100) { // Ignore stale samples
-        const dy = lastY.current - touch.clientY
+        const dy = touch.clientY - lastY.current // Inverted for natural scroll
         // Convert pixel velocity to degree velocity
         // dy pixels in dt ms -> degrees per 16ms frame
         velocity.current = (dy * 0.5 * 16) / dt
@@ -232,7 +235,7 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
     <div
       ref={containerRef}
       className="fixed z-50"
-      style={cornerStyle}
+      style={{ ...cornerStyle, touchAction: isOpen ? 'none' : 'auto' }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
