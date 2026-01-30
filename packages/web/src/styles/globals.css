@@ -1016,19 +1016,25 @@ code {
     line-height: 1.6 !important;
   }
 
-  /* Page content - generous padding for touch, extra bottom for radial menu */
+  /* Prevent iOS auto-zoom on focus */
+  input, textarea, select, .cm-content {
+    font-size: 16px !important; /* iOS minimum to prevent zoom */
+  }
+
+  /* Page content - extra left padding for pull tab (44px + gap) */
   .page-content {
-    padding: 16px 24px 80px 24px !important;
+    padding: 16px 24px 80px 52px !important;
     max-width: 100% !important;
     margin: 0 !important;
   }
 
-  /* Bullets - larger touch target with visual padding */
+  /* Bullets - larger touch target, vertically centered with text */
   .bullet {
     width: 7px;
     height: 7px;
     padding: 20px;
     margin: -20px;
+    margin-top: -16px; /* Adjust vertical position to align with text */
     background-clip: content-box;
   }
 
@@ -1042,6 +1048,7 @@ code {
     gap: 10px;
     padding: 6px 0;
     min-height: 48px;
+    align-items: flex-start; /* Align bullet to top of content */
   }
 
   .block-content {
@@ -1068,6 +1075,20 @@ code {
     font-size: 14px;
     padding: 1px 10px;
     border-radius: 4px;
+  }
+
+  /* Headers - don't overflow # into gutter on mobile (no space for it) */
+  .block-container--header .cm-line {
+    text-indent: 0 !important;
+  }
+
+  /* Headers flush left but with small margin so # doesn't touch edge */
+  .block-container--header {
+    margin-left: 8px !important;
+  }
+
+  .block-children .block-container--header {
+    margin-left: calc(-16px - 10px + 8px) !important; /* Compensate for mobile block-children spacing */
   }
 
   /* Sidebar items - comfortable touch targets (44px minimum per Apple HIG) */
@@ -1414,7 +1435,7 @@ html.force-mobile .cm-line {
 }
 
 html.force-mobile .page-content {
-  padding: 16px 24px 80px 24px !important;
+  padding: 16px 24px 80px 52px !important;
   max-width: 100% !important;
 }
 
@@ -1422,12 +1443,26 @@ html.force-mobile .block {
   gap: 10px !important;
   padding: 6px 0 !important;
   min-height: 48px !important;
+  align-items: flex-start !important;
 }
 
 html.force-mobile .tag-pill {
   font-size: 14px !important;
   padding: 1px 10px !important;
   border-radius: 4px !important;
+}
+
+/* Headers - no gutter overflow on mobile */
+html.force-mobile .block-container--header .cm-line {
+  text-indent: 0 !important;
+}
+
+html.force-mobile .block-container--header {
+  margin-left: 8px !important;
+}
+
+html.force-mobile .block-children .block-container--header {
+  margin-left: calc(-16px - 10px + 8px) !important;
 }
 
 html.force-mobile .task-status {
