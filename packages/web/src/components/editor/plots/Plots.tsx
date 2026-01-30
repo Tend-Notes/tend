@@ -271,6 +271,50 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     [getAllBlocks, updateCurrentPage, page.rootBlocks]
   )
 
+  const handleCreateBlockBefore = useCallback(
+    (beforeUuid: string): string => {
+      const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+      const beforeBlock = blocks.find((b) => b.uuid === beforeUuid)
+      if (!beforeBlock) return beforeUuid
+
+      // New block goes at same level, BEFORE the current block
+      const newBlock: Block = {
+        uuid: uuidv4(),
+        content: '',
+        parentUuid: beforeBlock.parentUuid,
+        children: [],
+        collapsed: false,
+        properties: {},
+        depth: beforeBlock.depth,
+      }
+
+      if (beforeBlock.parentUuid) {
+        const parent = blocks.find((b) => b.uuid === beforeBlock.parentUuid)
+        if (parent) {
+          const beforeIndex = parent.children.indexOf(beforeUuid)
+          parent.children = [
+            ...parent.children.slice(0, beforeIndex),
+            newBlock.uuid,
+            ...parent.children.slice(beforeIndex),
+          ]
+        }
+        updateCurrentPage([...blocks, newBlock])
+      } else {
+        // Root level - insert before in rootBlocks
+        const beforeIndex = page.rootBlocks.indexOf(beforeUuid)
+        const newRootBlocks = [
+          ...page.rootBlocks.slice(0, beforeIndex),
+          newBlock.uuid,
+          ...page.rootBlocks.slice(beforeIndex),
+        ]
+        updateCurrentPage([...blocks, newBlock], newRootBlocks)
+      }
+
+      return newBlock.uuid
+    },
+    [getAllBlocks, updateCurrentPage, page.rootBlocks]
+  )
+
   const handleMergeWithPrevious = useCallback(
     (uuid: string) => {
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
@@ -586,16 +630,22 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   const handleBoundaryEvent = useCallback((uuid: string, event: SeedBoundaryEvent) => {
     switch (event.type) {
       case 'enter': {
-        // Split block at cursor
-        const contentBefore = event.content.substring(0, event.cursorOffset)
-        const contentAfter = event.content.substring(event.cursorOffset)
+        if (event.cursorOffset === 0) {
+          // Cursor at start: create empty block BEFORE current, keep current content
+          const newUuid = handleCreateBlockBefore(uuid)
+          focusBlock(newUuid, 'start')
+        } else {
+          // Split block at cursor
+          const contentBefore = event.content.substring(0, event.cursorOffset)
+          const contentAfter = event.content.substring(event.cursorOffset)
 
-        // Update current block with content before cursor
-        handleBlockChange(uuid, contentBefore)
+          // Update current block with content before cursor
+          handleBlockChange(uuid, contentBefore)
 
-        // Create new block with content after cursor
-        const newUuid = handleCreateBlock(uuid, contentAfter)
-        focusBlock(newUuid, 'start')
+          // Create new block with content after cursor
+          const newUuid = handleCreateBlock(uuid, contentAfter)
+          focusBlock(newUuid, 'start')
+        }
         break
       }
 
@@ -662,6 +712,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   }, [
     handleBlockChange,
     handleCreateBlock,
+    handleCreateBlockBefore,
     handleMergeWithPrevious,
     handleMergeWithNext,
     navigateUp,
