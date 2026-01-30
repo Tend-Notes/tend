@@ -546,31 +546,25 @@ code {
   line-height: 1.4;
 }
 
-/* Header text alignment: text starts at normal position, # overflows into gutter */
-/* Using negative text-indent to pull # left, padding-left to push text back */
+/* Header text alignment: text starts at normal position (18px from .block padding),
+   # markup overflows into gutter via negative text-indent only */
 .block-container--header-1 .cm-line {
-  text-indent: -1.25em;
-  padding-left: 1.25em;
+  text-indent: -1.2em;
 }
 .block-container--header-2 .cm-line {
-  text-indent: -1.85em;
-  padding-left: 1.85em;
+  text-indent: -1.8em;
 }
 .block-container--header-3 .cm-line {
-  text-indent: -2.45em;
-  padding-left: 2.45em;
+  text-indent: -2.4em;
 }
 .block-container--header-4 .cm-line {
-  text-indent: -3.05em;
-  padding-left: 3.05em;
+  text-indent: -3.0em;
 }
 .block-container--header-5 .cm-line {
-  text-indent: -3.65em;
-  padding-left: 3.65em;
+  text-indent: -3.6em;
 }
 .block-container--header-6 .cm-line {
-  text-indent: -4.25em;
-  padding-left: 4.25em;
+  text-indent: -4.2em;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
