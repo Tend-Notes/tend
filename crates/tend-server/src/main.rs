@@ -12,7 +12,7 @@ use tokio::sync::broadcast;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 use tracing::{error, info, warn, Level};
 
@@ -275,8 +275,14 @@ async fn main() -> anyhow::Result<()> {
         api_router
     };
 
+    // SPA fallback: serve index.html for any unmatched routes (client-side routing)
+    let index_path = config.static_dir.join("index.html");
+    let static_service = ServeDir::new(&config.static_dir)
+        .append_index_html_on_directories(true)
+        .fallback(ServeFile::new(&index_path));
+
     let app = api_router
-        .fallback_service(ServeDir::new(&config.static_dir).append_index_html_on_directories(true))
+        .fallback_service(static_service)
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
         .with_state(state);
