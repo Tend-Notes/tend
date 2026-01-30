@@ -57,6 +57,7 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
   const lastTime = useRef(0)
   const animationFrame = useRef<number>()
   const repositionStart = useRef<{ x: number; y: number } | null>(null)
+  const hasDraggedRef = useRef(false) // Track if user actually dragged (vs tap)
 
   // Sizing - comfortably tappable
   const TRIGGER_SIZE = 68
@@ -138,19 +139,14 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
       return
     }
 
-    // Don't start drag on menu item buttons - let them handle taps
-    if (target.closest('button')) {
-      return
-    }
-
-    // Start drag for arc scrolling on non-button areas
+    // Start drag for arc scrolling (including on item buttons - we'll distinguish tap vs drag later)
     if (isOpen) {
-      e.preventDefault() // Prevent scroll
       dragStartY.current = touch.clientY
       dragStartOffset.current = scrollOffset
       lastY.current = touch.clientY
       lastTime.current = Date.now()
       velocity.current = 0
+      hasDraggedRef.current = false
       setIsDragging(true)
     }
   }, [isOpen, scrollOffset])
@@ -172,6 +168,12 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
       // Drag up = positive delta = scroll forward to later items
       // Convert pixel movement to degree offset (0.5 degrees per pixel)
       const deltaY = dragStartY.current - touch.clientY
+
+      // Mark as dragged if moved more than 10px (distinguish tap from drag)
+      if (Math.abs(deltaY) > 10) {
+        hasDraggedRef.current = true
+      }
+
       const newOffset = dragStartOffset.current + deltaY * 0.5
 
       const maxOffset = (items.length - 1) * ITEM_SPACING
@@ -257,6 +259,8 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
               <button
                 key={item.id}
                 onClick={() => {
+                  // Don't fire action if user was dragging to scroll
+                  if (hasDraggedRef.current) return
                   item.onClick()
                   setIsOpen(false)
                 }}
