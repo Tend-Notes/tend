@@ -1016,9 +1016,9 @@ code {
     line-height: 1.6 !important;
   }
 
-  /* Page content - generous padding for touch */
+  /* Page content - generous padding for touch, extra bottom for radial menu */
   .page-content {
-    padding: 16px !important;
+    padding: 16px 16px 80px 16px !important;
     max-width: 100% !important;
     margin: 0 !important;
   }
@@ -1409,7 +1409,7 @@ html.force-mobile .cm-line {
 }
 
 html.force-mobile .page-content {
-  padding: 16px !important;
+  padding: 16px 16px 80px 16px !important;
   max-width: 100% !important;
 }
 

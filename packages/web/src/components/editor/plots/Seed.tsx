@@ -409,6 +409,34 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       })
     }, [])
 
+    // Create typewriter scrolling listener - keeps cursor centered when past middle of viewport
+    const createTypewriterListener = useCallback(() => {
+      return EditorView.updateListener.of((update) => {
+        // Only trigger on selection changes (cursor movement or typing)
+        if (!update.selectionSet && !update.docChanged) return
+
+        const view = update.view
+        const pos = view.state.selection.main.head
+
+        // Get cursor coordinates
+        const cursorCoords = view.coordsAtPos(pos)
+        if (!cursorCoords) return
+
+        // Check if cursor is below the middle of the viewport
+        const viewportMiddle = window.innerHeight / 2
+
+        // If cursor is below the middle of the viewport, scroll to center it
+        if (cursorCoords.top > viewportMiddle) {
+          // Use requestAnimationFrame to avoid layout thrashing
+          requestAnimationFrame(() => {
+            view.dispatch({
+              effects: EditorView.scrollIntoView(pos, { y: 'center' })
+            })
+          })
+        }
+      })
+    }, [])
+
     // Create focus/blur handlers
     const createEventHandlers = useCallback(() => {
       return EditorView.domEventHandlers({
@@ -439,6 +467,7 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           createUpdateListener(),
+          createTypewriterListener(),
           createEventHandlers(),
           createWikilinkListener(),
           createSlashCommandListener(),
