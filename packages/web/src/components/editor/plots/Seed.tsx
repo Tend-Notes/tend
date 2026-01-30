@@ -410,8 +410,13 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     }, [])
 
     // Create typewriter scrolling listener - keeps cursor centered when past middle of viewport
+    // Disabled on mobile/touch devices where iOS handles scroll-to-focus natively
     const createTypewriterListener = useCallback(() => {
       return EditorView.updateListener.of((update) => {
+        // Skip on mobile - iOS scroll-to-focus conflicts with our scrolling
+        const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 768
+        if (isMobile) return
+
         // Only trigger on selection changes (cursor movement or typing)
         if (!update.selectionSet && !update.docChanged) return
 
