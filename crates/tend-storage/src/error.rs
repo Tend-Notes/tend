@@ -6,7 +6,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum StorageError {
     #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
 
     #[error("File not found: {0}")]
     NotFound(String),
@@ -28,4 +28,15 @@ pub enum StorageError {
 
     #[error("{0}")]
     Other(String),
+}
+
+impl From<std::io::Error> for StorageError {
+    fn from(e: std::io::Error) -> Self {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            // Extract path from error message if available, otherwise use generic message
+            StorageError::NotFound(e.to_string())
+        } else {
+            StorageError::Io(e)
+        }
+    }
 }
