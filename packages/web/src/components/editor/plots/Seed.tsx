@@ -12,7 +12,7 @@
 // Formatting, syntax highlighting, and decorations are handled by Actions.
 // If Actions fails or is unavailable, Seed continues as a plain text editor.
 
-import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState } from 'react'
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState, useMemo } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
 import { EditorState, Prec, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -22,6 +22,7 @@ import { wikilinkStateListener, type WikilinkState } from '../extensions/wikilin
 import { WikilinkSuggestions } from '../extensions/WikilinkSuggestions'
 import { slashCommandStateListener, type SlashCommandState } from '../extensions/slashCommand'
 import { SlashCommandSuggestions } from '../extensions/SlashCommandSuggestions'
+import { codeHighlightExtension } from '../extensions/codeHighlight'
 
 // Safe wrapper for Actions - Seed works without formatting if Actions fails
 function useSafeActions(): Extension[] {
@@ -139,13 +140,19 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       onBlur,
       readonly = false,
       isCodeBlock = false,
-      codeLanguage: _codeLanguage = '', // Reserved for syntax highlighting
+      codeLanguage = '',
     },
     ref
   ) => {
     const containerRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
     const contentRef = useRef(block.content)
+
+    // Code highlighting extension (only for code content blocks)
+    const codeHighlighting = useMemo(() => {
+      if (!isCodeBlock) return []
+      return [codeHighlightExtension(codeLanguage)]
+    }, [isCodeBlock, codeLanguage])
 
     // Track wikilink popup state
     const [wikilinkState, setWikilinkState] = useState<WikilinkState | null>(null)
@@ -420,6 +427,11 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     useEffect(() => {
       if (!containerRef.current) return
 
+      // For code blocks, skip normal formatting extensions and use code highlighting
+      const contentExtensions = isCodeBlock
+        ? codeHighlighting
+        : actionExtensions
+
       const state = EditorState.create({
         doc: block.content,
         extensions: [
@@ -434,7 +446,7 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           mobileContentEditable,
           EditorView.lineWrapping,
           EditorView.editable.of(!readonly),
-          ...actionExtensions,
+          ...contentExtensions,
         ],
       })
 
