@@ -38,11 +38,12 @@ interface FormatSpan {
 }
 
 /**
- * Find the formatting span that contains the given position.
+ * Find all formatting spans that contain the given position.
+ * Returns multiple spans for nested formatting (e.g., ***bold+italic***).
  */
-function findContainingFormat(state: EditorState, pos: number): FormatSpan | null {
+function findContainingFormats(state: EditorState, pos: number): FormatSpan[] {
   const tree = syntaxTree(state)
-  let result: FormatSpan | null = null
+  const results: FormatSpan[] = []
 
   tree.iterate({
     from: 0,
@@ -50,13 +51,13 @@ function findContainingFormat(state: EditorState, pos: number): FormatSpan | nul
     enter: (node) => {
       if (FORMAT_TYPES.has(node.name)) {
         if (pos >= node.from && pos <= node.to) {
-          result = { from: node.from, to: node.to }
+          results.push({ from: node.from, to: node.to })
         }
       }
     },
   })
 
-  return result
+  return results
 }
 
 /**
@@ -79,8 +80,8 @@ function buildDecorations(view: EditorView): DecorationSet {
   const state = view.state
   const cursorPos = state.selection.main.head
 
-  // Find the format span containing the cursor (if any)
-  const cursorFormat = findContainingFormat(state, cursorPos)
+  // Find all format spans containing the cursor (handles nested formatting)
+  const cursorFormats = findContainingFormats(state, cursorPos)
 
   const tree = syntaxTree(state)
 
@@ -90,11 +91,10 @@ function buildDecorations(view: EditorView): DecorationSet {
     to: state.doc.length,
     enter: (node) => {
       if (isDelimiterNode(node.name)) {
-        // Check if this delimiter is inside the cursor's format span
-        const isInCursorSpan =
-          cursorFormat &&
-          node.from >= cursorFormat.from &&
-          node.to <= cursorFormat.to
+        // Check if this delimiter is inside any of the cursor's format spans
+        const isInCursorSpan = cursorFormats.some(
+          (format) => node.from >= format.from && node.to <= format.to
+        )
 
         if (isInCursorSpan) {
           // Cursor is in this format span - show delimiter dimmed

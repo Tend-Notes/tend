@@ -63,7 +63,7 @@ const DEFAULT_CONTENT_TYPES: ContentType[] = [
     id: 'journal',
     name: 'Journal',
     directory: 'journals',
-    saveByDate: false, // journals use date as filename, not subfolder
+    saveByDate: true, // journals use date as filename (YYYY-MM-DD.md)
     template: '',
   },
 ]

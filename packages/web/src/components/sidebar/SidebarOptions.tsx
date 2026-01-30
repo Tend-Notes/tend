@@ -1232,11 +1232,15 @@ function ContentTypeRow({
               </div>
               <div className="flex items-center gap-2">
                 <label className="text-xs text-base-04 w-16">By date</label>
-                <Toggle
-                  checked={type.saveByDate}
-                  onChange={(checked) => onUpdate({ saveByDate: checked })}
-                />
-                <span className="text-xs text-base-03">Create date subfolders</span>
+                <div className={isBuiltIn ? 'opacity-50' : ''}>
+                  <Toggle
+                    checked={type.saveByDate}
+                    onChange={(checked) => !isBuiltIn && onUpdate({ saveByDate: checked })}
+                  />
+                </div>
+                <span className="text-xs text-base-03">
+                  {type.id === 'journal' ? 'Date as filename' : 'Create date subfolders'}
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <label className="text-xs text-base-04 w-16">Template</label>
