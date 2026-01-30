@@ -15,7 +15,7 @@ const MAX_RECENT_TAGS = 10
 
 // System tags that should not appear in the recent tags list
 // These are synthetic pages showing save/sync status
-const SYSTEM_TAGS = ['saved', 'stored']
+const SYSTEM_TAGS = ['unsaved', 'saved', 'stored', 'backed up']
 
 // Simplified tag info for sidebar display
 interface RecentTag {
