@@ -761,58 +761,68 @@ code {
 /* Phone screens (< 768px) */
 @media (max-width: 767px) {
   /*
-   * Mobile typography: iOS Dynamic Type "Large" default is ~17pt.
-   * We use 17px CSS pixels as the base. On a 3x Retina display (iPhone Pro Max),
-   * this renders at 51 physical pixels - clearly readable.
-   *
-   * The issue was CSS pixels vs rendered size. 17-19px CSS is standard.
+   * Mobile typography best practices (2025):
+   * - Body text: 16-18px minimum (we use 18px for comfortable reading)
+   * - Touch targets: 44x44px minimum
+   * - Line height: 1.5x font size
+   * - Adequate spacing between elements
+   * Reference: Apple HIG, Material Design, WCAG 2.1
    */
   html {
-    font-size: 17px;
+    font-size: 18px;
   }
 
   body {
-    font-size: 17px;
-    line-height: 1.5;
+    font-size: 18px;
+    line-height: 1.6;
     -webkit-text-size-adjust: 100%;
   }
 
-  /* Page title */
+  /* Page title - prominent, clear hierarchy */
   .page-title,
   h1 {
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 600;
+    margin-bottom: 16px;
+  }
+
+  h2 {
+    font-size: 22px;
+  }
+
+  h3 {
+    font-size: 19px;
   }
 
   /*
-   * CodeMirror - must override with !important.
-   * 17px is the iOS standard for body text.
+   * CodeMirror editor - match body text size
+   * Must use !important to override CodeMirror defaults
    */
   .cm-editor {
-    font-size: 17px !important;
+    font-size: 18px !important;
   }
 
   .cm-content {
-    font-size: 17px !important;
-    line-height: 1.5 !important;
+    font-size: 18px !important;
+    line-height: 1.6 !important;
   }
 
   .cm-line {
-    font-size: 17px !important;
-    line-height: 1.5 !important;
+    font-size: 18px !important;
+    line-height: 1.6 !important;
   }
 
-  /* Page content - use full width, minimal padding */
+  /* Page content - generous padding for touch */
   .page-content {
-    padding: 12px 10px 100px 10px !important;
+    padding: 16px 16px 120px 16px !important;
     max-width: 100% !important;
     margin: 0 !important;
   }
 
-  /* Bullets */
+  /* Bullets - larger touch target with visual padding */
   .bullet {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
     padding: 20px;
     margin: -20px;
     background-clip: content-box;
@@ -823,37 +833,46 @@ code {
     background-clip: content-box;
   }
 
-  /* Block layout */
+  /* Block layout - more vertical space */
   .block {
-    gap: 8px;
-    padding: 4px 0;
-    min-height: 44px;
+    gap: 10px;
+    padding: 6px 0;
+    min-height: 48px;
   }
 
   .block-content {
-    min-height: 1.4em;
-    font-size: 17px;
+    min-height: 1.5em;
+    font-size: 18px;
   }
 
-  /* Indentation */
+  /* Indentation - slightly more visible hierarchy */
   .block-children {
-    margin-left: 12px;
-    padding-left: 8px;
+    margin-left: 16px;
+    padding-left: 10px;
   }
 
-  /* Task badges */
+  /* Task badges - pill shape, readable */
   .task-status {
-    font-size: 15px;
-    padding: 4px 8px;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 12px;
   }
 
-  /* Tags */
+  /* Tags - horizontal pill shape (not circular) */
   .tag-pill {
-    font-size: 15px;
-    padding: 2px 6px;
+    font-size: 14px;
+    padding: 3px 12px;
+    border-radius: 14px;
   }
 
-  /* Sidebar overlay */
+  /* Sidebar items - comfortable touch targets */
+  .sidebar-item {
+    padding: 12px 16px;
+    min-height: 48px;
+  }
+
+  /* Sidebar overlay - full screen on mobile */
   .sidebar-mobile-overlay {
     position: fixed;
     inset: 0;
@@ -861,10 +880,10 @@ code {
     background-color: var(--sidebar-bg);
   }
 
-  /* Activity log */
+  /* Activity log - readable but compact */
   .activity-log {
-    font-size: 14px;
-    padding: 6px 10px;
+    font-size: 15px;
+    padding: 8px 16px;
   }
 
   /* Full-width dialogs */
@@ -875,33 +894,148 @@ code {
   }
 
   .command-palette {
-    width: calc(100% - 16px);
+    width: calc(100% - 24px);
     max-width: none;
-    margin: 8px;
+    margin: 12px;
+    border-radius: 12px;
   }
 
-  /* Wikilinks */
+  /* Wikilinks - larger tap area */
   .cm-wikilink {
-    padding: 2px 0;
+    padding: 4px 2px;
+  }
+
+  /* Buttons - ensure minimum touch target */
+  button, [role="button"] {
+    min-height: 44px;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  /* Input fields - prevent iOS zoom (must be 16px+) */
+  input, textarea, select {
+    font-size: 18px;
+  }
+
+  /* ─────────────────────────────────────────────────────────────────────────────
+     Sidebar Mobile Overrides
+     ───────────────────────────────────────────────────────────────────────────── */
+
+  /* Sidebar section headers */
+  .sidebar [class*="text-xs"] {
+    font-size: 13px !important;
+  }
+
+  /* Sidebar list items - ensure touch targets */
+  .sidebar button,
+  .sidebar a,
+  .sidebar [role="button"] {
+    min-height: 44px;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+  }
+
+  /* Sidebar navigation tabs */
+  .sidebar nav > div > button {
+    padding: 12px 8px !important;
+    font-size: 15px !important;
+  }
+
+  /* Settings option buttons (appearance, tasks, etc.) */
+  .sidebar [class*="py-1"]:not(.tag-pill):not(.task-status) {
+    padding-top: 8px !important;
+    padding-bottom: 8px !important;
+  }
+
+  /* Garden list items */
+  .sidebar [class*="py-1.5"] {
+    padding-top: 12px !important;
+    padding-bottom: 12px !important;
+  }
+
+  /* Small toggle buttons in settings */
+  .sidebar [class*="px-2"][class*="py-1"] {
+    padding: 10px 14px !important;
+    font-size: 14px !important;
   }
 }
 
 /* Tablet screens (768px - 1024px) */
 @media (min-width: 768px) and (max-width: 1024px) {
-  body {
+  html {
     font-size: 17px;
   }
 
-  /* Slightly larger bullets on tablet */
+  body {
+    font-size: 17px;
+    line-height: 1.55;
+  }
+
+  /* Page title */
+  .page-title,
+  h1 {
+    font-size: 26px;
+  }
+
+  /* CodeMirror */
+  .cm-editor,
+  .cm-content,
+  .cm-line {
+    font-size: 17px !important;
+    line-height: 1.55 !important;
+  }
+
+  /* Page content - balanced padding */
+  .page-content {
+    padding: 24px 32px 60px 32px !important;
+    max-width: 800px !important;
+    margin: 0 auto !important;
+  }
+
+  /* Bullets - touch-friendly on tablet */
   .bullet {
     width: 7px;
     height: 7px;
+    padding: 18px;
+    margin: -18px;
+    background-clip: content-box;
   }
 
-  /* Slightly larger block spacing */
+  .bullet--collapsed {
+    background-clip: content-box;
+  }
+
+  /* Block layout */
   .block {
-    gap: 14px;
-    padding: 4px 0;
+    gap: 12px;
+    padding: 5px 0;
+    min-height: 44px;
+  }
+
+  .block-content {
+    font-size: 17px;
+  }
+
+  /* Block children */
+  .block-children {
+    margin-left: 20px;
+    padding-left: 12px;
+  }
+
+  /* Tags and tasks */
+  .tag-pill {
+    font-size: 14px;
+    padding: 3px 10px;
+  }
+
+  .task-status {
+    font-size: 14px;
+    padding: 4px 10px;
+  }
+
+  /* Inputs */
+  input, textarea, select {
+    font-size: 17px;
   }
 }
 
@@ -913,6 +1047,14 @@ code {
   .clickable {
     min-height: 44px;
     min-width: 44px;
+  }
+
+  /* Small inline buttons (like status badges) - ensure tap area */
+  .task-status,
+  .tag-pill {
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
   }
 
   /* Remove hover effects that don't work well on touch */
@@ -947,6 +1089,15 @@ code {
   .mobile-toolbar-btn {
     touch-action: manipulation;
   }
+
+  /* Sidebar items need adequate touch targets */
+  .sidebar-item,
+  .sidebar nav button,
+  .sidebar nav a {
+    min-height: 44px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
 }
 
 /* Landscape phone orientation */
@@ -958,17 +1109,18 @@ code {
   }
 
   .block {
-    padding: 4px 0;
+    padding: 3px 0;
+    min-height: 40px;
   }
 
-  /* Smaller toolbar in landscape */
+  /* Compact toolbar in landscape - still meets 44px minimum */
   .mobile-toolbar {
-    padding: 4px 0;
+    padding: 2px 0;
   }
 
   .mobile-toolbar-btn {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
   }
 }
 
