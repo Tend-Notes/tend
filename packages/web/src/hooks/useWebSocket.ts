@@ -127,12 +127,23 @@ export function useWebSocket() {
               }
 
               if (pageName && pageName === currentPageName) {
+                // Don't reload if we have unsaved changes (user is actively editing)
+                // This also helps avoid reload loops when we just saved
+                if (usePageStore.getState().hasUnsavedChanges) {
+                  console.log('File changed but we have local changes, skipping reload')
+                  break
+                }
+
                 console.log('Current page changed externally, reloading...')
-                // Re-fetch the current page
+                // Re-fetch the current page (silent - don't show errors for background reloads)
                 if (isJournal) {
-                  navigateToJournal(pageName, false)
+                  navigateToJournal(pageName, false).catch((err) => {
+                    console.warn('Background reload failed:', err)
+                  })
                 } else {
-                  navigateToPage(pageName, false)
+                  navigateToPage(pageName, false).catch((err) => {
+                    console.warn('Background reload failed:', err)
+                  })
                 }
               }
               break
@@ -141,11 +152,22 @@ export function useWebSocket() {
             case 'page_updated':
               // Another client updated this page
               if (data.name === currentPageName) {
+                // Don't reload if we have unsaved changes
+                if (usePageStore.getState().hasUnsavedChanges) {
+                  console.log('Page updated but we have local changes, skipping reload')
+                  break
+                }
+
                 console.log('Page updated by another client, reloading...')
+                // Silent reload - don't show errors for background reloads
                 if (currentPage?.isJournal) {
-                  navigateToJournal(data.name, false)
+                  navigateToJournal(data.name, false).catch((err) => {
+                    console.warn('Background reload failed:', err)
+                  })
                 } else {
-                  navigateToPage(data.name, false)
+                  navigateToPage(data.name, false).catch((err) => {
+                    console.warn('Background reload failed:', err)
+                  })
                 }
               }
               break

@@ -9,6 +9,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      // Force new service worker to activate immediately (helps with stale caches)
+      devOptions: {
+        enabled: false, // Don't use SW in dev mode
+      },
       includeAssets: ['icons/icon.svg'],
       manifest: {
         name: 'Tend',
@@ -27,6 +31,10 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Skip waiting ensures new service worker activates immediately
+        // This prevents stale cache issues on mobile
+        skipWaiting: true,
+        clientsClaim: true,
         // Cache API responses for offline viewing
         runtimeCaching: [
           {
@@ -38,7 +46,13 @@ export default defineConfig({
                 maxEntries: 100,
                 maxAgeSeconds: 60 * 60 * 24, // 24 hours
               },
-              networkTimeoutSeconds: 3,
+              // Mobile browsers can have higher latency even on WiFi
+              // 15 seconds allows for slow connections while still enabling offline fallback
+              networkTimeoutSeconds: 15,
+              // Only cache successful responses (prevents caching error pages)
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
             },
           },
           {
@@ -50,7 +64,10 @@ export default defineConfig({
                 maxEntries: 50,
                 maxAgeSeconds: 60 * 60 * 24,
               },
-              networkTimeoutSeconds: 3,
+              networkTimeoutSeconds: 15,
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
             },
           },
           {

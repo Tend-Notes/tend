@@ -176,8 +176,20 @@ export function MainContent() {
 
   if (error) {
     return (
-      <main className="flex-1 flex items-center justify-center">
-        <div className="text-base-08 text-sm">{error}</div>
+      <main className="flex-1 flex items-center justify-center bg-base-00">
+        <div className="text-center p-4">
+          <div className="text-base-08 text-sm mb-4">{error}</div>
+          <button
+            onClick={() => {
+              // Clear error and retry loading
+              usePageStore.getState().setError(null)
+              usePageStore.getState().initializeFromUrl()
+            }}
+            className="px-4 py-2 bg-base-02 hover:bg-base-03 text-base-05 rounded text-sm transition-colors"
+          >
+            Retry
+          </button>
+        </div>
       </main>
     )
   }
