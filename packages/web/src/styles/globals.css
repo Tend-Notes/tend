@@ -544,8 +544,32 @@ code {
   line-height: 1.4;
 }
 
-/* Hide the # markers when not focused (through CodeMirror syntax hiding) */
-/* Note: The actual # hiding is handled by hideDelimiters extension */
+/* Header text alignment: text starts at normal position, # overflows into gutter */
+/* Using negative text-indent to pull # left, padding-left to push text back */
+.block-container--header-1 .cm-line {
+  text-indent: -1.25em;
+  padding-left: 1.25em;
+}
+.block-container--header-2 .cm-line {
+  text-indent: -1.85em;
+  padding-left: 1.85em;
+}
+.block-container--header-3 .cm-line {
+  text-indent: -2.45em;
+  padding-left: 2.45em;
+}
+.block-container--header-4 .cm-line {
+  text-indent: -3.05em;
+  padding-left: 3.05em;
+}
+.block-container--header-5 .cm-line {
+  text-indent: -3.65em;
+  padding-left: 3.65em;
+}
+.block-container--header-6 .cm-line {
+  text-indent: -4.25em;
+  padding-left: 4.25em;
+}
 
 /* ─────────────────────────────────────────────────────────────────────────────
    Code Block Styles (Fenced Code Regions)
