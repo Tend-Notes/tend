@@ -13,6 +13,10 @@ import type { PageMeta } from '../types'
 const MAX_RECENT_PER_TYPE = 10
 const MAX_RECENT_TAGS = 10
 
+// System tags that should not appear in the recent tags list
+// These are synthetic pages showing save/sync status
+const SYSTEM_TAGS = ['saved', 'stored']
+
 // Simplified tag info for sidebar display
 interface RecentTag {
   name: string  // e.g., "project" (without # or tags/ prefix)
@@ -60,6 +64,9 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
       },
 
       recordTagAccess: (tagName) => {
+        // Skip system tags (saved, stored) - these are synthetic status pages
+        if (SYSTEM_TAGS.includes(tagName)) return
+
         set((state) => {
           // Remove existing entry to avoid duplicates
           const filtered = state.recentTags.filter((t) => t.name !== tagName)
@@ -97,7 +104,7 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
     }),
     {
       name: 'tend-recent-sheets',
-      // Migration: filter out tag pages from sheets, add recentTags array
+      // Migration: filter out tag pages from sheets, add recentTags array, filter system tags
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as {
           recentSheets?: Record<string, PageMeta[]>
@@ -119,9 +126,20 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
             recentTags: state.recentTags || [],
           }
         }
+
+        // v2 -> v3: filter system tags from recentTags
+        if (version < 3) {
+          return {
+            ...state,
+            recentTags: (state.recentTags || []).filter(
+              (t) => !SYSTEM_TAGS.includes(t.name)
+            ),
+          }
+        }
+
         return state
       },
-      version: 2,
+      version: 3,
     }
   )
 )
