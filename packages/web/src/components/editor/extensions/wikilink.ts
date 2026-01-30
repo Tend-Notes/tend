@@ -110,7 +110,9 @@ class WikilinkWidget extends WidgetType {
     const link = document.createElement('a')
     link.href = this.buildHref(this.target)
     link.className = 'wiki-link'
-    link.textContent = this.target
+    // Display only the name after the last slash (for content type paths like person/John Smith)
+    const lastSlash = this.target.lastIndexOf('/')
+    link.textContent = lastSlash >= 0 ? this.target.slice(lastSlash + 1) : this.target
 
     // Prevent CodeMirror from handling mousedown (which would move cursor)
     link.addEventListener('mousedown', (e) => {
