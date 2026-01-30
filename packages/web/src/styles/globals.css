@@ -494,11 +494,9 @@ code {
   padding-left: 0 !important;
 }
 
-/* Header blocks: text aligns with normal block text, # overflows into gutter */
-/* Bullet (6px) + gap (12px) = 18px - header text starts at same position as normal text */
+/* Header blocks: text aligns with bullets, ### overflows into gutter */
 .block-container--header .block {
   gap: 0;
-  padding-left: 18px;
 }
 
 /* Vertical margins for header blocks */
