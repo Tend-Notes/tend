@@ -28,19 +28,19 @@ pub struct CreatePageRequest {
     pub content: Option<String>,
 }
 
-/// Create a new page
+/// Create a new page (idempotent - returns existing page if it already exists)
 pub async fn create_page(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CreatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
     let garden = state.garden.read().await;
 
-    // Check if page already exists
+    // If page already exists, return it (idempotent behavior to avoid race conditions
+    // when multiple requests try to create the same page simultaneously)
     if garden.file_manager.page_exists(&req.name).await {
-        return Err(AppError::BadRequest(format!(
-            "Page '{}' already exists",
-            req.name
-        )));
+        let existing_page = garden.file_manager.read_page(&req.name).await?;
+        debug!("Page already exists, returning existing: {}", req.name);
+        return Ok(Json(existing_page));
     }
 
     let mut page = Page::new(&req.name);
