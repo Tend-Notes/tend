@@ -156,10 +156,19 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     return result
   }, [])
 
-  // Convert blocks object to array for saving
+  // Convert blocks object to array for saving (deterministic tree order)
   const getAllBlocks = useCallback((): Block[] => {
-    return Object.values(page.blocks)
-  }, [page.blocks])
+    const result: Block[] = []
+    const traverse = (uuid: string) => {
+      const block = page.blocks[uuid]
+      if (block) {
+        result.push(block)
+        block.children.forEach(traverse)
+      }
+    }
+    page.rootBlocks.forEach(traverse)
+    return result
+  }, [page.blocks, page.rootBlocks])
 
   // Focus a block's Seed at a specific position
   const setLastFocusedBlockUuid = useUIStore((state) => state.setLastFocusedBlockUuid)
