@@ -1,9 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="64" fill="#181818"/>
-  <!-- T-handle grip -->
-  <rect x="136" y="56" width="240" height="44" rx="22" fill="#e8e8e8"/>
-  <!-- Handle shaft -->
-  <rect x="236" y="100" width="40" height="64" rx="4" fill="#e8e8e8"/>
-  <!-- Trowel blade - elongated pointed scoop -->
-  <path d="M256 164 L320 200 C332 240 328 320 310 380 L256 448 L202 380 C184 320 180 240 192 200 Z" fill="#e8e8e8"/>
+  <!-- White background -->
+  <rect width="512" height="512" rx="64" fill="#ffffff"/>
+
+  <!-- Isometric bean - rotated 45° and tilted forward -->
+  <g transform="translate(256, 280)">
+    <!-- Back cotyledon (right-back, darker) -->
+    <ellipse cx="45" cy="-20" rx="85" ry="110"
+             transform="rotate(25)" fill="#2d5a27"/>
+
+    <!-- Front cotyledon (left-front, lighter, overlapping) -->
+    <ellipse cx="-45" cy="20" rx="85" ry="110"
+             transform="rotate(-25)" fill="#4a8c3f"/>
+
+    <!-- Highlight on front cotyledon for 3D effect -->
+    <ellipse cx="-65" cy="0" rx="30" ry="50"
+             transform="rotate(-25)" fill="#5a9c4f" opacity="0.6"/>
+  </g>
+
+  <!-- Sprout emerging from split -->
+  <g transform="translate(256, 170)">
+    <!-- Stem -->
+    <path d="M0 80 Q-8 40 0 0" stroke="#3d7a34" stroke-width="14" fill="none" stroke-linecap="round"/>
+
+    <!-- Left leaf -->
+    <path d="M0 10 Q-60 -20 -80 -70 Q-30 -30 0 10" fill="#4a8c3f"/>
+    <path d="M0 10 Q-50 -15 -80 -70" stroke="#2d5a27" stroke-width="2" fill="none"/>
+
+    <!-- Right leaf -->
+    <path d="M0 10 Q60 -20 80 -70 Q30 -30 0 10" fill="#4a8c3f"/>
+    <path d="M0 10 Q50 -15 80 -70" stroke="#2d5a27" stroke-width="2" fill="none"/>
+  </g>
 </svg>
