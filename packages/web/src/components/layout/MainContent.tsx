@@ -8,7 +8,8 @@ import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { ActivityLog } from '../ui/ActivityLog'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
-import { RadialMenu } from '../ui/RadialMenu'
+import { MobileToolbar } from '../ui/MobileToolbar'
+// import { RadialMenu } from '../ui/RadialMenu' // Disabled - trying vertical toolbar
 
 // Find the currently focused editor element
 function findActiveEditor(): HTMLElement | null {
@@ -249,8 +250,8 @@ export function MainContent() {
       {/* Activity log at the bottom - desktop only */}
       {!isMobile && <ActivityLog />}
 
-      {/* Radial menu for mobile - experimental alternative to bottom toolbar */}
-      {isMobile && <RadialMenu items={radialMenuItems} />}
+      {/* Mobile toolbar - vertical strip on right edge */}
+      {isMobile && <MobileToolbar items={radialMenuItems} />}
     </main>
   )
 }
