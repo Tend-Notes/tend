@@ -262,16 +262,15 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   // On mobile, sidebar is a full-screen overlay when open, pull tab when closed
   if (isMobile) {
     if (!sidebarOpen) {
-      // Minimal pull tab on left edge - 44px touch target per Apple HIG
+      // Minimal pull tab on left edge - matches desktop position (top)
       return (
         <aside
-          className="fixed left-0 top-0 bottom-0 z-50 flex items-center"
-          style={{ width: '44px' }}
+          className="fixed left-0 top-0 z-50 flex flex-col items-center py-3"
+          style={{ width: '44px', backgroundColor: 'var(--sidebar-bg)' }}
         >
           <button
             onClick={toggleSidebar}
-            className="w-full h-24 flex items-center justify-center text-base-03 active:text-base-05 transition-colors"
-            style={{ backgroundColor: 'var(--sidebar-bg)' }}
+            className="p-2 text-base-03 active:text-base-05 transition-colors"
             title="Open sidebar"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
