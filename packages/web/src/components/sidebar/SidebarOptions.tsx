@@ -1216,6 +1216,7 @@ function ContentTypeRow({
                   value={type.name}
                   onChange={(e) => handleNameChange(e.target.value)}
                   disabled={isBuiltIn}
+                  autoFocus={!isBuiltIn}
                   className="flex-1 bg-base-01 border border-base-02 rounded px-2 py-1 text-xs text-base-05 focus:outline-none focus:border-base-04 disabled:opacity-50"
                 />
               </div>
