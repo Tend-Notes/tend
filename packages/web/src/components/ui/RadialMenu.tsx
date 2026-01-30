@@ -261,6 +261,11 @@ export function RadialMenu({ items, triggerIcon }: RadialMenuProps) {
             return (
               <button
                 key={item.id}
+                onMouseDown={(e) => e.preventDefault()} // Prevent focus shift from editor
+                onTouchStart={(e) => {
+                  // Only prevent default if not dragging (allow scroll gesture)
+                  if (!isDragging) e.preventDefault()
+                }}
                 onClick={() => {
                   // Don't fire action if user was dragging to scroll
                   if (hasDraggedRef.current) return

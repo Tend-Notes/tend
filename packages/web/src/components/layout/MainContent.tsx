@@ -54,17 +54,19 @@ function dispatchBoundaryEvent(eventType: 'tab' | 'shift-tab') {
 }
 
 // Check if device is mobile/touch (also respects force-mobile CSS class for dev testing)
+function checkIsMobile() {
+  if (typeof window === 'undefined') return false
+  const isForcedMobile = document.documentElement.classList.contains('force-mobile')
+  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+  const isNarrowScreen = window.innerWidth < 768
+  return isForcedMobile || isTouchDevice || isNarrowScreen
+}
+
 function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(false)
+  const [isMobile, setIsMobile] = useState(checkIsMobile)
 
   useEffect(() => {
-    const check = () => {
-      const isForcedMobile = document.documentElement.classList.contains('force-mobile')
-      const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-      const isNarrowScreen = window.innerWidth < 768
-      setIsMobile(isForcedMobile || isTouchDevice || isNarrowScreen)
-    }
-    check()
+    const check = () => setIsMobile(checkIsMobile())
     window.addEventListener('resize', check)
 
     // Watch for force-mobile class changes (dev toggle)
