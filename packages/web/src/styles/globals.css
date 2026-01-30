@@ -1063,11 +1063,11 @@ code {
     border-radius: 12px;
   }
 
-  /* Tags - horizontal pill shape (not circular) */
+  /* Tags - flat horizontal pill shape */
   .tag-pill {
     font-size: 14px;
-    padding: 4px 14px;
-    border-radius: 8px;
+    padding: 1px 10px;
+    border-radius: 4px;
   }
 
   /* Sidebar items - comfortable touch targets (44px minimum per Apple HIG) */
@@ -1256,10 +1256,15 @@ code {
     min-width: 44px;
   }
 
-  /* Small inline buttons (like status badges) - ensure tap area */
-  .task-status,
-  .tag-pill {
+  /* Task status badges - ensure tap area */
+  .task-status {
     min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  /* Tag pills stay compact - they're inline content, not buttons */
+  .tag-pill {
     display: inline-flex;
     align-items: center;
   }
@@ -1421,8 +1426,8 @@ html.force-mobile .block {
 
 html.force-mobile .tag-pill {
   font-size: 14px !important;
-  padding: 4px 14px !important;
-  border-radius: 8px !important;
+  padding: 1px 10px !important;
+  border-radius: 4px !important;
 }
 
 html.force-mobile .task-status {
