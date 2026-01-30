@@ -547,6 +547,111 @@ code {
 /* Hide the # markers when not focused (through CodeMirror syntax hiding) */
 /* Note: The actual # hiding is handled by hideDelimiters extension */
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Code Block Styles (Fenced Code Regions)
+   Blocks between ``` fences get special visual treatment:
+   - No bullet
+   - Flush left (no indentation regardless of nesting)
+   - Subtle background color
+   - Monospace font for code content
+   - Vertical margins above/below the block group
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* All code block lines - base styles */
+.block-container--code {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+  background-color: var(--base01);
+}
+
+/* Code blocks inside nested children - flush left */
+.block-children .block-container--code {
+  margin-left: calc(-24px - 12px) !important; /* Compensate for block-children ml-6 pl-3 */
+  padding-left: 0 !important;
+}
+
+/* Remove gap that would be left by hidden bullet */
+.block-container--code .block {
+  gap: 0;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+/* Opening fence line (```js, etc.) */
+.block-container--code-start {
+  margin-top: 1rem;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  padding-top: 0.5rem;
+}
+
+/* Closing fence line (```) */
+.block-container--code-end {
+  margin-bottom: 1rem;
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  padding-bottom: 0.5rem;
+}
+
+/* Single-line code block (opening and closing on same block - edge case) */
+.block-container--code-start.block-container--code-end {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+/* First code block in page doesn't need top margin */
+.outliner-editor > .block-container--code-start:first-child {
+  margin-top: 0;
+}
+
+/* Code content (between fence lines) - monospace font */
+.code-content {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace !important;
+  font-size: 0.9em;
+  line-height: 1.5;
+}
+
+.code-content .cm-editor,
+.code-content .cm-content,
+.code-content .cm-line {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace !important;
+}
+
+/* Fence line styling (the ``` lines themselves) */
+.block-container--code-start .block-content,
+.block-container--code-end .block-content {
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+  font-size: 0.85em;
+  color: var(--base03);
+}
+
+/* Language indicator (subtle display of language from fence) */
+.block-container--code-start::after {
+  content: attr(data-code-language);
+  position: absolute;
+  top: 0.5rem;
+  right: 1rem;
+  font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+  font-size: 0.7em;
+  color: var(--base03);
+  text-transform: lowercase;
+  pointer-events: none;
+}
+
+/* Only show language if it exists */
+.block-container--code-start:not([data-code-language])::after,
+.block-container--code-start[data-code-language=""]::after {
+  display: none;
+}
+
+/* Position relative for the language indicator */
+.block-container--code-start {
+  position: relative;
+}
+
 /* Block container - subtle transitions for indent/outdent/reorder */
 .block-container {
   transition:

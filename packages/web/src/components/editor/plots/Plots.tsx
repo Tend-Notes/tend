@@ -5,6 +5,7 @@
 // Drop-in replacement for OutlinerEditor - same props interface.
 //
 // Seeds handle text editing and report boundary events back to Plots.
+// Code fence detection scans blocks to identify ``` regions for visual treatment.
 
 import { useMemo, useEffect, useCallback, useState, useRef } from 'react'
 import type { Page, Block } from '../../../types'
@@ -18,6 +19,69 @@ import { v4 as uuidv4 } from 'uuid'
 interface PlotsProps {
   page: Page
   readonly?: boolean
+}
+
+// Code block metadata for blocks within a fenced code region
+interface CodeBlockInfo {
+  isCodeBlock: true
+  isStart: boolean   // Has opening ```
+  isEnd: boolean     // Has closing ```
+  language: string   // Language from opening fence (e.g., "js", "rust")
+}
+
+// Detect code fence regions by scanning block content in document order
+// Returns a map of block UUID to code block metadata
+function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): Map<string, CodeBlockInfo> {
+  const result = new Map<string, CodeBlockInfo>()
+  let inCodeBlock = false
+  let currentLanguage = ''
+  let startUuid: string | null = null
+  const pendingBlocks: string[] = []
+
+  for (const uuid of flatOrder) {
+    const block = blocks[uuid]
+    if (!block) continue
+
+    const content = block.content.trim()
+    const openMatch = content.match(/^```(\w*)$/)
+    const closeMatch = content === '```'
+
+    if (!inCodeBlock && openMatch) {
+      // Starting a new code block
+      inCodeBlock = true
+      currentLanguage = openMatch[1] || ''
+      startUuid = uuid
+      pendingBlocks.length = 0
+      pendingBlocks.push(uuid)
+    } else if (inCodeBlock && closeMatch) {
+      // Closing the code block
+      pendingBlocks.push(uuid)
+
+      // Mark all pending blocks
+      for (let i = 0; i < pendingBlocks.length; i++) {
+        const pendingUuid = pendingBlocks[i]
+        result.set(pendingUuid, {
+          isCodeBlock: true,
+          isStart: pendingUuid === startUuid,
+          isEnd: pendingUuid === uuid,
+          language: currentLanguage,
+        })
+      }
+
+      inCodeBlock = false
+      currentLanguage = ''
+      startUuid = null
+      pendingBlocks.length = 0
+    } else if (inCodeBlock) {
+      // Inside code block
+      pendingBlocks.push(uuid)
+    }
+  }
+
+  // If we ended while still in a code block, don't mark any blocks
+  // (incomplete fence should render normally)
+
+  return result
 }
 
 export function Plots({ page, readonly = false }: PlotsProps) {
@@ -65,6 +129,11 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     traverse(page.rootBlocks)
     return result
   }, [page.blocks, page.rootBlocks])
+
+  // Detect code fence regions for visual treatment
+  const codeFenceMap = useMemo(() => {
+    return detectCodeFences(flatBlockOrder, page.blocks)
+  }, [flatBlockOrder, page.blocks])
 
   // Get fresh flat block order directly from store (not memoized, for selection)
   // This is needed because the memoized flatBlockOrder may be stale after state updates
@@ -619,12 +688,25 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     const headerLevel = getHeaderLevel(block.content)
     const isHeader = headerLevel !== null
 
+    // Check if block is part of a code fence
+    const codeInfo = codeFenceMap.get(block.uuid)
+    const isCodeBlock = codeInfo?.isCodeBlock ?? false
+    const isCodeStart = codeInfo?.isStart ?? false
+    const isCodeEnd = codeInfo?.isEnd ?? false
+    const codeLanguage = codeInfo?.language ?? ''
+
+    // Hide bullet for headers and code blocks
+    const hideBullet = isHeader || isCodeBlock
+
     // Build class names for the block container
     const containerClasses = [
       'block-container',
       isInMultiSelection ? 'block-container--selected' : '',
       isHeader ? 'block-container--header' : '',
       isHeader ? `block-container--header-${headerLevel}` : '',
+      isCodeBlock ? 'block-container--code' : '',
+      isCodeStart ? 'block-container--code-start' : '',
+      isCodeEnd ? 'block-container--code-end' : '',
     ].filter(Boolean).join(' ')
 
     return (
@@ -632,6 +714,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         key={block.uuid}
         className={containerClasses}
         data-block-id={block.uuid}
+        data-code-language={isCodeBlock ? codeLanguage : undefined}
         onClick={(e) => {
           // Let CodeMirror handle clicks inside the editor completely
           const target = e.target as HTMLElement
@@ -646,8 +729,8 @@ export function Plots({ page, readonly = false }: PlotsProps) {
         }}
       >
         <div className="block flex items-start py-0.5">
-          {/* Bullet - hidden for header blocks */}
-          {!isHeader && (
+          {/* Bullet - hidden for header and code blocks */}
+          {!hideBullet && (
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -674,6 +757,8 @@ export function Plots({ page, readonly = false }: PlotsProps) {
                 clearSelection()
               }}
               readonly={readonly}
+              isCodeBlock={isCodeBlock && !isCodeStart && !isCodeEnd}
+              codeLanguage={codeLanguage}
             />
           </div>
         </div>

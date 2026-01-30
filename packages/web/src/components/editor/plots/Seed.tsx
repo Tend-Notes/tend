@@ -73,6 +73,10 @@ interface SeedProps {
   onFocus?: () => void
   onBlur?: () => void
   readonly?: boolean
+  /** Whether this block is code content (between ``` fences, not the fence lines) */
+  isCodeBlock?: boolean
+  /** Language from the opening code fence (e.g., "js", "rust") */
+  codeLanguage?: string
 }
 
 /**
@@ -134,6 +138,8 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       onFocus,
       onBlur,
       readonly = false,
+      isCodeBlock = false,
+      codeLanguage: _codeLanguage = '', // Reserved for syntax highlighting
     },
     ref
   ) => {
@@ -606,7 +612,7 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           data-seed-editor
           className={`block-content outline-none min-h-[1.5em] ${
             readonly ? 'cursor-default' : ''
-          }`}
+          } ${isCodeBlock ? 'code-content' : ''}`}
         />
         {wikilinkState && viewRef.current && (
           <WikilinkSuggestions view={viewRef.current} state={wikilinkState} />
