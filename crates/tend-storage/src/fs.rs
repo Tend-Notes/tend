@@ -212,6 +212,11 @@ impl FileManager {
             pending.insert(path.to_path_buf());
         }
 
+        // Ensure parent directory exists (for nested page names like "meeting/2026-01-23/Name")
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
         // Write to temp file
         tokio::fs::write(&tmp_path, &content).await?;
 
