@@ -250,10 +250,27 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const displayWidth = isResizing ? visualWidth : sidebarWidth
   const currentWidth = sidebarOpen ? displayWidth : 32
 
-  // On mobile, sidebar is a full-screen overlay when open, completely hidden when closed
+  // On mobile, sidebar is a full-screen overlay when open, pull tab when closed
   if (isMobile) {
     if (!sidebarOpen) {
-      return null // No collapsed state on mobile - use toolbar to open
+      // Minimal pull tab on left edge - 44px touch target per Apple HIG
+      return (
+        <aside
+          className="fixed left-0 top-0 bottom-0 z-50 flex items-center"
+          style={{ width: '44px' }}
+        >
+          <button
+            onClick={toggleSidebar}
+            className="w-full h-24 flex items-center justify-center text-base-03 active:text-base-05 transition-colors"
+            style={{ backgroundColor: 'var(--sidebar-bg)' }}
+            title="Open sidebar"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            </svg>
+          </button>
+        </aside>
+      )
     }
 
     return (
