@@ -981,11 +981,11 @@ code {
   }
 
   html {
-    font-size: 20px;
+    font-size: 18px;
   }
 
   body {
-    font-size: 20px;
+    font-size: 18px;
     line-height: 1.6;
     -webkit-text-size-adjust: 100%;
     /* Prevent Safari from auto-zooming */
@@ -1013,16 +1013,16 @@ code {
    * Must use !important to override CodeMirror defaults
    */
   .cm-editor {
-    font-size: 20px !important;
+    font-size: 18px !important;
   }
 
   .cm-content {
-    font-size: 20px !important;
+    font-size: 18px !important;
     line-height: 1.6 !important;
   }
 
   .cm-line {
-    font-size: 20px !important;
+    font-size: 18px !important;
     line-height: 1.6 !important;
   }
 
@@ -1044,7 +1044,7 @@ code {
     height: 7px;
     padding: 20px;
     margin: -20px;
-    margin-top: -16px; /* Adjust vertical position to align with text */
+    margin-top: -10px; /* Align with lowercase letter center (18px font, 1.6 line-height) */
     background-clip: content-box;
   }
 
@@ -1063,7 +1063,7 @@ code {
 
   .block-content {
     min-height: 1.5em;
-    font-size: 20px;
+    font-size: 18px;
   }
 
   /* Indentation - slightly more visible hierarchy */
@@ -1083,8 +1083,9 @@ code {
   /* Tags - flat horizontal pill shape */
   .tag-pill {
     font-size: 14px;
-    padding: 1px 10px;
+    padding: 0 8px;
     border-radius: 4px;
+    line-height: 1.4;
   }
 
   /* Headers - don't overflow # into gutter on mobile (no space for it) */
