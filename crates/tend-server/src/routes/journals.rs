@@ -9,6 +9,7 @@ use chrono::{Local, NaiveDate};
 use tend_core::{Block, Page, PageMeta};
 use tracing::debug;
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::routes::pages::UpdatePageRequest;
 use crate::state::AppState;
@@ -16,8 +17,10 @@ use crate::state::AppState;
 /// List all journals
 pub async fn list_journals(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<Vec<PageMeta>>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let journals = garden.file_manager.list_journals().await?;
     Ok(Json(journals))
 }
@@ -25,8 +28,10 @@ pub async fn list_journals(
 /// Get today's journal (creates if doesn't exist)
 pub async fn get_today(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<Page>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let today = Local::now().date_naive();
     let page = garden.file_manager.read_journal(today).await?;
 
@@ -55,9 +60,11 @@ pub async fn get_today(
 /// Get a journal by date
 pub async fn get_journal(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(date_str): Path<String>,
 ) -> Result<Json<Page>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}", date_str)))?;
 
@@ -68,10 +75,12 @@ pub async fn get_journal(
 /// Update a journal
 pub async fn update_journal(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(date_str): Path<String>,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let date = NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
         .map_err(|_| AppError::BadRequest(format!("Invalid date format: {}", date_str)))?;
 

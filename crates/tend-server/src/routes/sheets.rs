@@ -11,6 +11,7 @@ use chrono::NaiveDate;
 use serde::Deserialize;
 use tend_core::{Block, ContentType, Page, PageMeta};
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::routes::pages::BlockData;
 use crate::state::AppState;
@@ -75,10 +76,12 @@ fn parse_date(date_str: &Option<String>) -> Result<Option<NaiveDate>, AppError> 
 /// List all sheets of a content type
 pub async fn list_sheets(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(content_type_id): Path<String>,
 ) -> Result<Json<Vec<PageMeta>>, AppError> {
     let content_type = get_content_type(&content_type_id)?;
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let sheets = garden.file_manager.list_sheets(&content_type).await?;
     Ok(Json(sheets))
 }
@@ -86,12 +89,14 @@ pub async fn list_sheets(
 /// Get a specific sheet
 pub async fn get_sheet(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(path): Path<SheetPath>,
     Query(query): Query<SheetQuery>,
 ) -> Result<Json<Page>, AppError> {
     let content_type = get_content_type(&path.content_type)?;
     let date = parse_date(&query.date)?;
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let page = garden.file_manager.read_sheet(&content_type, &path.name, date).await?;
     Ok(Json(page))
 }
@@ -99,6 +104,7 @@ pub async fn get_sheet(
 /// Create a new sheet
 pub async fn create_sheet(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(content_type_id): Path<String>,
     Json(req): Json<CreateSheetRequest>,
 ) -> Result<Json<Page>, AppError> {
@@ -112,7 +118,8 @@ pub async fn create_sheet(
         date
     };
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Check if sheet already exists
     if garden.file_manager.sheet_exists(&content_type, &req.name, date).await {
@@ -149,6 +156,7 @@ pub async fn create_sheet(
 /// Update a sheet
 pub async fn update_sheet(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(path): Path<SheetPath>,
     Query(query): Query<SheetQuery>,
     Json(req): Json<UpdateSheetRequest>,
@@ -156,7 +164,8 @@ pub async fn update_sheet(
     let content_type = get_content_type(&path.content_type)?;
     let date = parse_date(&query.date)?;
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Read existing sheet or create new
     let mut page = garden
@@ -226,13 +235,15 @@ pub async fn update_sheet(
 /// Delete a sheet
 pub async fn delete_sheet(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(path): Path<SheetPath>,
     Query(query): Query<SheetQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
     let content_type = get_content_type(&path.content_type)?;
     let date = parse_date(&query.date)?;
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     garden.file_manager.delete_sheet(&content_type, &path.name, date).await?;
 
     // Remove from search index (if search is enabled)

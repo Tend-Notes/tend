@@ -8,6 +8,7 @@ use axum::Json;
 use serde::Deserialize;
 use tend_git::{BackupResult, CommitDiff, CommitInfo, GitStatus, ImportResult, PushResult, RemoteGardenInfo, RemoteResult};
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::ws::WsEvent;
@@ -47,17 +48,25 @@ pub struct SetRemoteRequest {
 }
 
 /// Get git status
-pub async fn status(State(state): State<Arc<AppState>>) -> Result<Json<GitStatus>, AppError> {
-    let garden = state.garden.read().await;
+pub async fn status(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<GitStatus>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let status = garden.backup_manager.status()?;
     Ok(Json(status))
 }
 
 /// Trigger an auto-backup (scheduled/smart commit)
-pub async fn backup(State(state): State<Arc<AppState>>) -> Result<Json<BackupResult>, AppError> {
+pub async fn backup(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<BackupResult>, AppError> {
     state.broadcast(WsEvent::BackupStarted);
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Acquire exclusive lock on file manager
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
@@ -82,11 +91,13 @@ pub async fn backup(State(state): State<Arc<AppState>>) -> Result<Json<BackupRes
 /// Create a commit (manual commit via command palette)
 pub async fn commit(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(request): Json<CommitRequest>,
 ) -> Result<Json<BackupResult>, AppError> {
     state.broadcast(WsEvent::BackupStarted);
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Acquire exclusive lock on file manager
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
@@ -111,9 +122,11 @@ pub async fn commit(
 /// Get commit history
 pub async fn history(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<Vec<CommitInfo>>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let commits = garden.backup_manager.history(query.limit, query.path.as_deref())?;
     Ok(Json(commits))
 }
@@ -121,10 +134,12 @@ pub async fn history(
 /// Get diff for a specific commit
 pub async fn diff(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(commit_sha): Path<String>,
     Query(query): Query<DiffQuery>,
 ) -> Result<Json<CommitDiff>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let diff = garden.backup_manager.diff(&commit_sha, query.path.as_deref())?;
     Ok(Json(diff))
 }
@@ -132,9 +147,11 @@ pub async fn diff(
 /// Restore to a specific commit, optionally for a single file
 pub async fn restore(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(request): Json<RestoreRequest>,
 ) -> Result<Json<BackupResult>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Acquire exclusive lock on file manager
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
@@ -156,10 +173,14 @@ pub async fn restore(
 }
 
 /// Push to remote repository
-pub async fn push(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>, AppError> {
+pub async fn push(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<PushResult>, AppError> {
     state.broadcast(WsEvent::PushStarted);
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     match garden.backup_manager.push() {
         Ok(result) => {
@@ -178,8 +199,12 @@ pub async fn push(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>
 }
 
 /// Pull from remote repository
-pub async fn pull(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>, AppError> {
-    let garden = state.garden.read().await;
+pub async fn pull(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<PushResult>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Acquire exclusive lock since pull modifies files
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
@@ -191,37 +216,55 @@ pub async fn pull(State(state): State<Arc<AppState>>) -> Result<Json<PushResult>
 /// Set the remote repository URL
 pub async fn set_remote(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(request): Json<SetRemoteRequest>,
 ) -> Result<Json<RemoteResult>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let result = garden.backup_manager.set_remote(&request.url)?;
     Ok(Json(result))
 }
 
 /// Test connection to the remote repository
-pub async fn test_remote(State(state): State<Arc<AppState>>) -> Result<Json<RemoteResult>, AppError> {
-    let garden = state.garden.read().await;
+pub async fn test_remote(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<RemoteResult>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let result = garden.backup_manager.test_remote()?;
     Ok(Json(result))
 }
 
 /// Remove the remote repository
-pub async fn remove_remote(State(state): State<Arc<AppState>>) -> Result<(), AppError> {
-    let garden = state.garden.read().await;
+pub async fn remove_remote(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<(), AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     garden.backup_manager.remove_remote()?;
     Ok(())
 }
 
 /// Check if the remote repository contains a garden
-pub async fn check_remote_garden(State(state): State<Arc<AppState>>) -> Result<Json<RemoteGardenInfo>, AppError> {
-    let garden = state.garden.read().await;
+pub async fn check_remote_garden(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<RemoteGardenInfo>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let garden_info = garden.backup_manager.check_remote_has_garden()?;
     Ok(Json(garden_info))
 }
 
 /// Import a garden from the remote repository
-pub async fn import_remote_garden(State(state): State<Arc<AppState>>) -> Result<Json<ImportResult>, AppError> {
-    let garden = state.garden.read().await;
+pub async fn import_remote_garden(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<ImportResult>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Acquire exclusive lock since this modifies files
     let _lock = garden.file_manager.acquire_exclusive_lock().await;

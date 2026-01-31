@@ -12,7 +12,8 @@ use chrono::{DateTime, Utc};
 
 use tend_core::ContentType;
 
-use crate::config::{base_dir, gardens_json_path, gardens_root};
+use crate::auth::AuthenticatedUser;
+use crate::config::{base_dir, gardens_json_path, gardens_root, user_gardens_json_path, user_gardens_root};
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -120,6 +121,11 @@ fn gardens_config_path() -> PathBuf {
     gardens_json_path()
 }
 
+/// Get the user-scoped gardens config file path
+fn user_gardens_config_path(username: &str) -> PathBuf {
+    user_gardens_json_path(username)
+}
+
 /// Load content types for the active garden (used by sheets routes)
 pub fn load_content_types() -> Result<Vec<ContentType>, crate::error::AppError> {
     let config = load_gardens_config();
@@ -205,11 +211,86 @@ fn save_gardens_config(config: &GardensConfig) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+/// Load user-scoped gardens configuration, purging archives older than 15 days
+fn load_user_gardens_config(username: &str) -> GardensConfig {
+    let path = user_gardens_config_path(username);
+    let mut config = if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => match serde_json::from_str(&content) {
+                Ok(config) => config,
+                Err(e) => {
+                    tracing::warn!("Failed to parse gardens config for user {}: {}", username, e);
+                    default_user_gardens_config(username)
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Failed to read gardens config for user {}: {}", username, e);
+                default_user_gardens_config(username)
+            }
+        }
+    } else {
+        default_user_gardens_config(username)
+    };
+
+    // Purge archives older than 15 days
+    let cutoff = Utc::now() - chrono::Duration::days(15);
+    let original_len = config.archived.len();
+    config.archived.retain(|a| a.archived_at > cutoff);
+
+    // Save if we purged anything
+    if config.archived.len() != original_len {
+        let _ = save_user_gardens_config(username, &config);
+    }
+
+    config
+}
+
+fn default_user_gardens_config(username: &str) -> GardensConfig {
+    let default_path = user_gardens_root(username).join("Notes");
+    GardensConfig {
+        gardens: vec![Garden {
+            id: "default".to_string(),
+            name: "Notes".to_string(),
+            path: default_path.to_string_lossy().to_string(),
+            encrypted: false,
+            search_enabled: true,
+            index_ttl_hours: 0, // No TTL for unencrypted gardens
+            content_types: ContentType::defaults(),
+        }],
+        active: "default".to_string(),
+        archived: vec![],
+    }
+}
+
+/// Save user-scoped gardens configuration with restrictive permissions
+fn save_user_gardens_config(username: &str, config: &GardensConfig) -> Result<(), std::io::Error> {
+    let path = user_gardens_config_path(username);
+
+    // Ensure parent directory exists
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let content = serde_json::to_string_pretty(config)?;
+    std::fs::write(&path, &content)?;
+
+    // Set restrictive permissions (0600 - owner read/write only)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&path, permissions)?;
+    }
+
+    Ok(())
+}
+
 /// List all gardens
 pub async fn list_gardens(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<GardensResponse>, AppError> {
-    let config = load_gardens_config();
+    let config = load_user_gardens_config(&user.username);
 
     Ok(Json(GardensResponse {
         gardens: config.gardens,
@@ -235,9 +316,10 @@ fn expand_tilde(path: &str) -> PathBuf {
 /// Create a new garden
 pub async fn create_garden(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(req): Json<CreateGardenRequest>,
 ) -> Result<Json<Garden>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Generate ID from name
     let id = req.name
@@ -302,7 +384,7 @@ pub async fn create_garden(
 
     config.gardens.push(garden.clone());
 
-    save_gardens_config(&config)
+    save_user_gardens_config(&user.username, &config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     // If encrypted, store the passphrase hash for unlock verification
@@ -331,9 +413,10 @@ pub async fn create_garden(
 /// Archive a garden (moves to archived list, files preserved for 15 days)
 pub async fn delete_garden(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Don't allow archiving the active garden
     if config.active == id {
@@ -358,7 +441,7 @@ pub async fn delete_garden(
         archived_at: Utc::now(),
     });
 
-    save_gardens_config(&config)
+    save_user_gardens_config(&user.username, &config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     Ok(Json(serde_json::json!({
@@ -370,9 +453,10 @@ pub async fn delete_garden(
 /// Restore an archived garden
 pub async fn restore_garden(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<Garden>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Find and remove from archived
     let archived_idx = config.archived.iter().position(|a| a.garden.id == id);
@@ -393,7 +477,7 @@ pub async fn restore_garden(
     let garden = archived.garden;
     config.gardens.push(garden.clone());
 
-    save_gardens_config(&config)
+    save_user_gardens_config(&user.username, &config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     Ok(Json(garden))
@@ -551,9 +635,10 @@ fn validate_garden_path_for_deletion(path: &PathBuf) -> Option<String> {
 /// Permanently delete an archived garden (removes from archive AND deletes files from disk)
 pub async fn delete_archived_garden(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Find and remove from archived
     let archived_idx = config.archived.iter().position(|a| a.garden.id == id);
@@ -576,7 +661,7 @@ pub async fn delete_archived_garden(
         tracing::info!("Deleted garden directory: {}", garden_path.display());
     }
 
-    save_gardens_config(&config)
+    save_user_gardens_config(&user.username, &config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     Ok(Json(serde_json::json!({
@@ -590,9 +675,10 @@ pub async fn delete_archived_garden(
 /// For encrypted gardens, returns a special response indicating unlock is required.
 pub async fn switch_garden(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(req): Json<SwitchGardenRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Verify the garden exists and check if encrypted
     let garden = config
@@ -612,14 +698,18 @@ pub async fn switch_garden(
 
     config.active = req.id.clone();
 
-    save_gardens_config(&config)
+    save_user_gardens_config(&user.username, &config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     // Hot-reload the garden state
-    state
+    let user_state = state.get_user_state(&user.username).await?;
+    user_state
         .switch_garden(&req.id)
         .await
         .map_err(|e| AppError::Internal(format!("Failed to switch garden: {}", e)))?;
+
+    // Broadcast garden switch event
+    state.broadcast_garden_switched(&user.username, &req.id);
 
     Ok(Json(serde_json::json!({
         "active": req.id,
@@ -630,9 +720,10 @@ pub async fn switch_garden(
 /// Unlock an encrypted garden with passphrase
 pub async fn unlock_garden(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(req): Json<UnlockGardenRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Verify the garden exists and is encrypted
     let garden = config
@@ -649,14 +740,18 @@ pub async fn unlock_garden(
     }
 
     // Try to unlock with the provided passphrase
-    match state
+    let user_state = state.get_user_state(&user.username).await?;
+    match user_state
         .switch_garden_encrypted(&req.id, req.passphrase)
         .await
     {
         Ok(_) => {
             config.active = req.id.clone();
-            save_gardens_config(&config)
+            save_user_gardens_config(&user.username, &config)
                 .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
+
+            // Broadcast garden switch event
+            state.broadcast_garden_switched(&user.username, &req.id);
 
             Ok(Json(serde_json::json!({
                 "active": req.id,
@@ -677,9 +772,10 @@ pub async fn unlock_garden(
 /// Rename the active garden
 pub async fn rename_garden(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(req): Json<RenameGardenRequest>,
 ) -> Result<Json<Garden>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Find the active garden
     let active_id = config.active.clone();
@@ -706,7 +802,7 @@ pub async fn rename_garden(
     )
     .map_err(|e| AppError::Internal(format!("Failed to update .garden-meta: {}", e)))?;
 
-    save_gardens_config(&config)
+    save_user_gardens_config(&user.username, &config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     Ok(Json(updated_garden))
@@ -715,8 +811,9 @@ pub async fn rename_garden(
 /// Get content types for the active garden
 pub async fn get_content_types(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<Vec<ContentType>>, AppError> {
-    let config = load_gardens_config();
+    let config = load_user_gardens_config(&user.username);
 
     let garden = config
         .gardens
@@ -736,9 +833,10 @@ pub struct UpdateContentTypesRequest {
 /// Update content types for the active garden
 pub async fn update_content_types(
     State(_state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(req): Json<UpdateContentTypesRequest>,
 ) -> Result<Json<Vec<ContentType>>, AppError> {
-    let mut config = load_gardens_config();
+    let mut config = load_user_gardens_config(&user.username);
 
     // Validate: must have page and journal types
     let has_page = req.content_types.iter().any(|ct| ct.id == "page");
@@ -783,7 +881,7 @@ pub async fn update_content_types(
     garden.content_types = req.content_types;
     let result = garden.content_types.clone();
 
-    save_gardens_config(&config)
+    save_user_gardens_config(&user.username, &config)
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     Ok(Json(result))

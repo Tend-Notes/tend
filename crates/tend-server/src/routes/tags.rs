@@ -9,6 +9,7 @@ use axum::Json;
 use regex::Regex;
 use serde::Serialize;
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -23,8 +24,10 @@ pub struct TagInfo {
 /// List all tags used across the garden
 pub async fn list_tags(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<Vec<TagInfo>>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let mut tag_counts: HashMap<String, usize> = HashMap::new();
 
     // Regex to match tags: #tagname (at start or after whitespace)

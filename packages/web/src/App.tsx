@@ -5,6 +5,8 @@ import { MainContent } from './components/layout/MainContent'
 import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
 import { usePageStore } from './stores/pageStore'
+import { useRecentSheetsStore } from './stores/recentSheetsStore'
+import { useTagStore } from './stores/tagStore'
 
 // Lazy load heavy/rarely-used components to reduce initial bundle size
 const CommandPalette = lazy(() => import('./components/command-palette/CommandPalette'))
@@ -15,7 +17,8 @@ import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
-import { contentTypes as contentTypesApi } from './lib/api'
+import { contentTypes as contentTypesApi, identity } from './lib/api'
+import { initUserSync } from './lib/userSync'
 
 function App() {
   const [keyboardHelpOpen, setKeyboardHelpOpen] = useState(false)
@@ -30,6 +33,8 @@ function App() {
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const openSearch = useUIStore((state) => state.openSearch)
   const setContentTypes = useSettingsStore((state) => state.setContentTypes)
+  const clearRecentSheets = useRecentSheetsStore((state) => state.clearAll)
+  const clearTags = useTagStore((state) => state.reset)
 
   // Initialize auto-commit system
   useAutoCommit()
@@ -42,14 +47,35 @@ function App() {
 
   // Load initial data and handle URL - runs once on mount
   useEffect(() => {
+    // Load user preferences and state from server (multi-tenant support)
+    // This overwrites any localStorage cache with the server's authoritative data
+    identity.whoami()
+      .then(async ({ username }) => {
+        const lastUser = localStorage.getItem('tend-last-user')
+        if (lastUser && lastUser !== username) {
+          console.log(`User changed from ${lastUser} to ${username}`)
+          // Clear localStorage cache - server will provide correct data
+          clearRecentSheets()
+          clearTags()
+          // Redirect to home - current path may not exist for new user
+          window.history.replaceState(null, '', '/')
+        }
+        localStorage.setItem('tend-last-user', username)
+
+        // Load user's preferences and state from server, then start syncing
+        await initUserSync()
+
+        // Initialize page from URL AFTER user sync (URL may have been redirected)
+        initializeFromUrl()
+      })
+      .catch((err) => console.error('Failed to get current user:', err))
+
     // Load content types from API (needed for content type routing)
     contentTypesApi.list()
       .then((types) => {
         setContentTypes(types)
       })
       .catch((err) => console.error('Failed to load content types:', err))
-
-    initializeFromUrl()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Run only on mount - these are stable store actions
 

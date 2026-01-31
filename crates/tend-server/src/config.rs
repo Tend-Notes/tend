@@ -42,19 +42,55 @@ pub struct Config {
     pub auth: AuthConfig,
 }
 
-/// Authentication configuration (for WebSocket and future auth needs)
+/// Authentication configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
+    /// Header name containing the authenticated username (set by reverse proxy)
+    /// Default: "Remote-User" (standard Authelia header)
+    #[serde(default = "default_user_header")]
+    pub user_header: String,
+
+    /// Require authentication. Set to false only for local development.
+    /// When false, uses default_user or X-Dev-User header.
+    #[serde(default = "default_auth_required")]
+    pub required: bool,
+
+    /// Default username when auth is not required (local dev only)
+    #[serde(default)]
+    pub default_user: Option<String>,
+
+    /// Header to use for simulating users in dev mode (when required=false)
+    #[serde(default = "default_dev_user_header")]
+    pub dev_user_header: String,
+
     /// URL to verify authentication (e.g., "http://localhost:9091/api/verify")
     /// Used for WebSocket connections which can't go through reverse proxy auth.
-    /// If not set, WebSocket connections are not authenticated (local dev mode).
     #[serde(default)]
     pub verify_url: Option<String>,
+}
+
+fn default_user_header() -> String {
+    std::env::var("TEND_AUTH_HEADER").unwrap_or_else(|_| "Remote-User".to_string())
+}
+
+fn default_auth_required() -> bool {
+    std::env::var("TEND_AUTH_REQUIRED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(true)
+}
+
+fn default_dev_user_header() -> String {
+    "X-Dev-User".to_string()
 }
 
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
+            user_header: default_user_header(),
+            required: default_auth_required(),
+            default_user: std::env::var("TEND_AUTH_DEFAULT_USER").ok(),
+            dev_user_header: default_dev_user_header(),
             verify_url: std::env::var("TEND_AUTH_VERIFY_URL").ok(),
         }
     }
@@ -213,6 +249,61 @@ pub fn gardens_root() -> PathBuf {
 /// Get the path for the gardens.json registry file
 pub fn gardens_json_path() -> PathBuf {
     base_dir().join("gardens.json")
+}
+
+// ========== User-Scoped Path Functions (Multi-Tenant) ==========
+
+/// Get the base directory for a specific user's data
+///
+/// Returns: $TEND_BASE_DIR/users/$username/
+pub fn user_base_dir(username: &str) -> PathBuf {
+    base_dir().join("users").join(username)
+}
+
+/// Get the directory where a user's gardens are stored
+///
+/// Returns: $TEND_BASE_DIR/users/$username/Gardens/
+pub fn user_gardens_root(username: &str) -> PathBuf {
+    user_base_dir(username).join("Gardens")
+}
+
+/// Get the path for a user's gardens.json registry file
+///
+/// Returns: $TEND_BASE_DIR/users/$username/gardens.json
+pub fn user_gardens_json_path(username: &str) -> PathBuf {
+    user_base_dir(username).join("gardens.json")
+}
+
+/// Get the path for a user's preferences file
+///
+/// Returns: $TEND_BASE_DIR/users/$username/.prefs.json
+pub fn user_prefs_path(username: &str) -> PathBuf {
+    user_base_dir(username).join(".prefs.json")
+}
+
+/// Get the path for a user's UI state file
+///
+/// Returns: $TEND_BASE_DIR/users/$username/.state.json
+pub fn user_state_path(username: &str) -> PathBuf {
+    user_base_dir(username).join(".state.json")
+}
+
+/// Ensure a user's base directory exists with secure permissions
+///
+/// Creates the directory with mode 0700 (owner only) on Unix systems.
+pub fn ensure_user_dir(username: &str) -> std::io::Result<PathBuf> {
+    let user_dir = user_base_dir(username);
+    if !user_dir.exists() {
+        std::fs::create_dir_all(&user_dir)?;
+
+        // Set restrictive permissions (0700 - owner only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&user_dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+    }
+    Ok(user_dir)
 }
 
 fn default_data_dir() -> PathBuf {

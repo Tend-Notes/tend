@@ -13,6 +13,7 @@ use tokio::fs;
 
 use anyhow::Context;
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -61,6 +62,7 @@ pub struct BrokenLink {
 /// Import a Logseq graph
 pub async fn import_logseq(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(req): Json<ImportLogseqRequest>,
 ) -> Result<Json<ImportResult>, AppError> {
     let source_path = PathBuf::from(&req.source_path);
@@ -73,7 +75,8 @@ pub async fn import_logseq(
         )));
     }
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let garden_path = garden.file_manager.root().to_path_buf();
 
     let mut pages_imported = 0;

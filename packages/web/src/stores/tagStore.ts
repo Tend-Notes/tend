@@ -52,6 +52,9 @@ interface TagState {
   // Legacy compatibility
   getTagHue: (tagName: string) => number
   setTagHue: (tagName: string, hue: number) => void
+
+  // Reset (for user switching)
+  reset: () => void
 }
 
 export const useTagStore = create<TagState>()(
@@ -116,6 +119,11 @@ export const useTagStore = create<TagState>()(
 
       ensureTag: (tagName: string) => {
         get().getTagColors(tagName) // This will create if not exists
+      },
+
+      // Reset all tag data (used when switching users)
+      reset: () => {
+        set({ tags: {}, selectedTag: null })
       },
     }),
     {

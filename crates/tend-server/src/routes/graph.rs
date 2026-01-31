@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::Json;
 use serde::Serialize;
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::routes::gardens::load_content_types;
 use crate::state::AppState;
@@ -52,8 +53,10 @@ pub struct Graph {
 /// Get the full knowledge graph
 pub async fn get_graph(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<Graph>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     let mut nodes = Vec::new();
     let mut edges_map: HashMap<(String, String), usize> = HashMap::new();
