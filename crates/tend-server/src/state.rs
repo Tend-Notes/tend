@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
-use crate::ws::{EventSender, WsEvent};
+use crate::ws::{BroadcastEvent, EventSender, WsEvent};
 
 /// Status of the search index
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -735,15 +735,27 @@ impl AppState {
     /// Broadcast an event to all connected WebSocket clients
     pub fn broadcast(&self, event: WsEvent) {
         // Ignore errors (no subscribers is fine)
-        let _ = self.event_sender.send(event);
+        let _ = self.event_sender.send(BroadcastEvent {
+            username: None, // Send to all users
+            event,
+        });
+    }
+
+    /// Broadcast an event to a specific user's WebSocket connections
+    pub fn broadcast_to_user(&self, username: &str, event: WsEvent) {
+        let _ = self.event_sender.send(BroadcastEvent {
+            username: Some(username.to_string()),
+            event,
+        });
     }
 
     /// Broadcast a garden switch event for a specific user
-    /// Note: username is reserved for future per-user event channels
-    pub fn broadcast_garden_switched(&self, _username: &str, garden_id: &str) {
-        // TODO: In the future, broadcast only to this user's WebSocket connections
-        self.broadcast(WsEvent::GardenSwitched {
-            garden_id: garden_id.to_string(),
-        });
+    pub fn broadcast_garden_switched(&self, username: &str, garden_id: &str) {
+        self.broadcast_to_user(
+            username,
+            WsEvent::GardenSwitched {
+                garden_id: garden_id.to_string(),
+            },
+        );
     }
 }
