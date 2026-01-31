@@ -63,8 +63,9 @@ export function MobileToolbar({ indentItem, outdentItem, extraItems }: MobileToo
   const bottomOffset = keyboardHeight > 0 ? keyboardHeight + 50 : 80
 
   const buttonClass = `w-10 h-10 flex items-center justify-center rounded-md
-    text-base-05 active:bg-base-02 active:scale-95
-    transition-colors duration-100`
+    text-base-05
+    active:bg-base-0D active:text-base-00 active:scale-90
+    transition-all duration-75`
 
   return (
     <div
@@ -90,8 +91,9 @@ export function MobileToolbar({ indentItem, outdentItem, extraItems }: MobileToo
         onTouchStart={handleTouchStart}
         onClick={() => setExpanded(!expanded)}
         className={`w-10 h-6 flex items-center justify-center rounded-md
-          text-base-04 active:bg-base-02 active:scale-95
-          transition-colors duration-100 ${expanded ? 'bg-base-02' : ''}`}
+          text-base-04
+          active:bg-base-0D active:text-base-00 active:scale-90
+          transition-all duration-75 ${expanded ? 'bg-base-02' : ''}`}
         title={expanded ? 'Collapse' : 'More actions'}
         aria-label={expanded ? 'Collapse' : 'More actions'}
       >
