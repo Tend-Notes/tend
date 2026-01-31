@@ -1295,10 +1295,9 @@ code {
     align-items: center;
   }
 
-  /* Tag pills stay compact - they're inline content, not buttons */
+  /* Tag pills - remove any flex that adds height */
   .tag-pill {
-    display: inline-flex;
-    align-items: center;
+    display: inline-block;
   }
 
   /* Remove hover effects that don't work well on touch */
@@ -1459,8 +1458,10 @@ html.force-mobile .block {
 
 html.force-mobile .tag-pill {
   font-size: 14px !important;
-  padding: 1px 10px !important;
+  padding: 0 8px !important;
   border-radius: 4px !important;
+  line-height: 1.4 !important;
+  display: inline-block !important;
 }
 
 /* Headers - no gutter overflow on mobile */
