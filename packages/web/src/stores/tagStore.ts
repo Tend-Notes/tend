@@ -12,7 +12,9 @@ export interface TagMetadata {
 
 // Pick a random hue from the full color wheel
 function randomHue(): number {
-  return Math.floor(Math.random() * 360)
+  const hue = Math.floor(Math.random() * 360)
+  console.log('randomHue generated:', hue)
+  return hue
 }
 
 interface TagState {
@@ -79,10 +81,12 @@ export const useTagStore = create<TagState>()(
       getTagHue: (tagName: string) => {
         const tag = get().tags[tagName]
         if (tag?.hue !== undefined) {
+          console.log(`getTagHue(${tagName}): cached ${tag.hue}`)
           return tag.hue
         }
         // First access - generate and persist a random hue
         const hue = randomHue()
+        console.log(`getTagHue(${tagName}): NEW ${hue}`)
         set((state) => ({
           tags: {
             ...state.tags,
