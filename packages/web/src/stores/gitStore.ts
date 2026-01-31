@@ -35,6 +35,7 @@ interface GitState {
   checkSmartCommit: () => boolean
   checkAutoCommit: () => boolean
   triggerAutoCommit: () => Promise<void>
+  resetAll: () => void
 }
 
 export const useGitStore = create<GitState>()(
@@ -127,6 +128,17 @@ export const useGitStore = create<GitState>()(
           console.error('[GitStore] Auto-commit failed:', err)
         }
       },
+
+      // Full reset for user switching
+      resetAll: () => set({
+        autoCommitIntervalMinutes: 10,
+        smartCommitThreshold: 'page',
+        autoCommitEnabled: true,
+        lastCommitTime: null,
+        characterCountAtLastCommit: 0,
+        smartCommitWindowStart: null,
+        smartCommitWindowChars: 0,
+      }),
     }),
     {
       name: 'tend-git-settings',

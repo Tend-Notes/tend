@@ -52,6 +52,7 @@ interface UIState {
   setInsertTextAtCursor: (fn: ((text: string) => void) | null) => void
   setLastFocusedBlockUuid: (uuid: string | null) => void
   reset: () => void
+  resetAll: () => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -117,6 +118,22 @@ export const useUIStore = create<UIState>()(
         backlinksOpen: false,
         graphOpen: false,
         searchOpen: false,
+        commandPaletteOpen: false,
+        pendingContentType: null,
+        onSheetCreated: null,
+        insertTextAtCursor: null,
+        lastFocusedBlockUuid: null,
+      }),
+
+      // Full reset for user switching - clears all state including preferences
+      resetAll: () => set({
+        sidebarOpen: false,
+        sidebarWidth: 328,
+        sidebarMode: 'navigation' as SidebarMode,
+        backlinksOpen: false,
+        graphOpen: false,
+        searchOpen: false,
+        theme: 'one-dark',
         commandPaletteOpen: false,
         pendingContentType: null,
         onSheetCreated: null,

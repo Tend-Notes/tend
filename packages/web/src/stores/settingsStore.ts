@@ -120,6 +120,9 @@ interface SettingsState {
   setCurrentGraphId: (id: string | null) => void
   setOpenSection: (section: string | null) => void
 
+  // Reset (for user switching)
+  resetAll: () => void
+
   // Computed
   getEffectiveFontSize: () => number
   getTaskStatuses: () => TaskStatus[]
@@ -184,6 +187,26 @@ export const useSettingsStore = create<SettingsState>()(
         })),
       setCurrentGraphId: (currentGraphId) => set({ currentGraphId }),
       setOpenSection: (openSection) => set({ openSection }),
+
+      // Full reset for user switching
+      resetAll: () => set({
+        themeMode: 'dark',
+        lightThemeName: 'Tend Light',
+        darkThemeName: 'Tend Dark',
+        customLightTheme: null,
+        customDarkTheme: null,
+        fontSizePreset: 'medium',
+        customFontSize: 16,
+        taskStatusSet: 'todo-doing-done' as TaskStatusSet,
+        gardenPath: '',
+        backupEnabled: false,
+        backupRemoteUrl: '',
+        backupIntervalMinutes: 30,
+        backupAuthMethod: 'none',
+        contentTypes: DEFAULT_CONTENT_TYPES,
+        currentGraphId: null,
+        openSection: 'appearance',
+      }),
 
       // Computed
       getEffectiveFontSize: () => {
