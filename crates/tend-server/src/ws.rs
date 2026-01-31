@@ -57,12 +57,48 @@ pub enum WsEvent {
     GardenSwitched { garden_id: String },
 }
 
-/// Sender for broadcasting events to all connected clients
-pub type EventSender = broadcast::Sender<WsEvent>;
+/// A broadcast event with optional user targeting
+#[derive(Debug, Clone)]
+pub struct BroadcastEvent {
+    /// Target username (None = broadcast to all users)
+    pub username: Option<String>,
+    /// The actual event to send
+    pub event: WsEvent,
+}
+
+/// Sender for broadcasting events to connected clients
+pub type EventSender = broadcast::Sender<BroadcastEvent>;
 
 /// Create a new event broadcast channel
-pub fn create_event_channel() -> (EventSender, broadcast::Receiver<WsEvent>) {
+pub fn create_event_channel() -> (EventSender, broadcast::Receiver<BroadcastEvent>) {
     broadcast::channel(100)
+}
+
+/// Extract username from headers (matches auth.rs logic)
+fn extract_username(headers: &HeaderMap, config: &crate::config::Config) -> Option<String> {
+    // Try the configured user header (e.g., Remote-User from Authelia)
+    if let Some(value) = headers.get(&config.auth.user_header) {
+        if let Ok(username) = value.to_str() {
+            if !username.is_empty() {
+                return Some(username.to_string());
+            }
+        }
+    }
+
+    // In dev mode, try the dev header
+    if !config.auth.required {
+        if let Some(value) = headers.get(&config.auth.dev_user_header) {
+            if let Ok(username) = value.to_str() {
+                if !username.is_empty() {
+                    return Some(username.to_string());
+                }
+            }
+        }
+        // Fall back to default user
+        return config.auth.default_user.clone();
+    }
+
+    None
 }
 
 /// Verify authentication by forwarding cookies to the auth service
@@ -128,6 +164,9 @@ pub async fn ws_handler(
         }
     }
 
+    // Extract username for per-user event filtering
+    let username = extract_username(&headers, &state.config);
+
     // Check connection limit before upgrading
     let current = state.ws_connection_count.load(Ordering::Relaxed);
     if current >= MAX_WS_CONNECTIONS {
@@ -138,14 +177,18 @@ pub async fn ws_handler(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    Ok(ws.on_upgrade(|socket| handle_socket(socket, state)))
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, username)))
 }
 
 /// Handle a WebSocket connection
-async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
+async fn handle_socket(socket: WebSocket, state: Arc<AppState>, my_username: Option<String>) {
     // Increment connection count
     let count = state.ws_connection_count.fetch_add(1, Ordering::Relaxed) + 1;
-    debug!("WebSocket client connected ({} active)", count);
+    debug!(
+        "WebSocket client connected ({} active, user: {:?})",
+        count,
+        my_username.as_deref().unwrap_or("anonymous")
+    );
 
     // Ensure we decrement on exit
     let _guard = scopeguard::guard(Arc::clone(&state), |s| {
@@ -165,9 +208,17 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>) {
     }
 
     // Spawn task to forward broadcast events to this client
+    // Only send events targeted to this user or broadcast to all (username = None)
     let mut send_task = tokio::spawn(async move {
-        while let Ok(event) = event_rx.recv().await {
-            let msg = match serde_json::to_string(&event) {
+        while let Ok(broadcast_event) = event_rx.recv().await {
+            // Filter: skip events targeted to a different user
+            if let Some(ref target_user) = broadcast_event.username {
+                if my_username.as_ref() != Some(target_user) {
+                    continue; // Event is for a different user
+                }
+            }
+
+            let msg = match serde_json::to_string(&broadcast_event.event) {
                 Ok(json) => json,
                 Err(e) => {
                     warn!("Failed to serialize event: {}", e);

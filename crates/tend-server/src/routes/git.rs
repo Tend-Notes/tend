@@ -63,7 +63,7 @@ pub async fn backup(
     State(state): State<Arc<AppState>>,
     user: AuthenticatedUser,
 ) -> Result<Json<BackupResult>, AppError> {
-    state.broadcast(WsEvent::BackupStarted);
+    state.broadcast_to_user(&user.username, WsEvent::BackupStarted);
 
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
@@ -73,14 +73,14 @@ pub async fn backup(
 
     match garden.backup_manager.backup() {
         Ok(result) => {
-            state.broadcast(WsEvent::BackupCompleted {
+            state.broadcast_to_user(&user.username, WsEvent::BackupCompleted {
                 commit_sha: result.commit_sha.clone(),
                 message: result.message.clone(),
             });
             Ok(Json(result))
         }
         Err(e) => {
-            state.broadcast(WsEvent::BackupFailed {
+            state.broadcast_to_user(&user.username, WsEvent::BackupFailed {
                 error: e.to_string(),
             });
             Err(e.into())
@@ -94,7 +94,7 @@ pub async fn commit(
     user: AuthenticatedUser,
     Json(request): Json<CommitRequest>,
 ) -> Result<Json<BackupResult>, AppError> {
-    state.broadcast(WsEvent::BackupStarted);
+    state.broadcast_to_user(&user.username, WsEvent::BackupStarted);
 
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
@@ -104,14 +104,14 @@ pub async fn commit(
 
     match garden.backup_manager.commit(request.message.as_deref()) {
         Ok(result) => {
-            state.broadcast(WsEvent::BackupCompleted {
+            state.broadcast_to_user(&user.username, WsEvent::BackupCompleted {
                 commit_sha: result.commit_sha.clone(),
                 message: result.message.clone(),
             });
             Ok(Json(result))
         }
         Err(e) => {
-            state.broadcast(WsEvent::BackupFailed {
+            state.broadcast_to_user(&user.username, WsEvent::BackupFailed {
                 error: e.to_string(),
             });
             Err(e.into())
@@ -177,20 +177,20 @@ pub async fn push(
     State(state): State<Arc<AppState>>,
     user: AuthenticatedUser,
 ) -> Result<Json<PushResult>, AppError> {
-    state.broadcast(WsEvent::PushStarted);
+    state.broadcast_to_user(&user.username, WsEvent::PushStarted);
 
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
     match garden.backup_manager.push() {
         Ok(result) => {
-            state.broadcast(WsEvent::PushCompleted {
+            state.broadcast_to_user(&user.username, WsEvent::PushCompleted {
                 message: result.message.clone(),
             });
             Ok(Json(result))
         }
         Err(e) => {
-            state.broadcast(WsEvent::PushFailed {
+            state.broadcast_to_user(&user.username, WsEvent::PushFailed {
                 error: e.to_string(),
             });
             Err(e.into())

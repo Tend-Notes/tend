@@ -15,7 +15,9 @@ use tokio::sync::RwLock;
 use tracing::info;
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
-use crate::ws::{EventSender, WsEvent};
+use crate::ws::{BroadcastEvent, EventSender, WsEvent};
+use std::time::Duration;
+use tend_storage::watcher::SimpleFileWatcher;
 
 /// Status of the search index
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -421,12 +423,18 @@ pub struct UserState {
     pub garden: RwLock<GardenState>,
     /// Reference to global config
     config: Config,
+    /// Event sender for WebSocket broadcasts
+    event_sender: EventSender,
+    /// File watcher task handle (aborted on garden switch)
+    watcher_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
+    /// Backup scheduler task handle (aborted on garden switch)
+    backup_task_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl UserState {
     /// Create a new UserState for the given username
     /// This creates the user's directory and loads their default garden
-    pub async fn new(username: String, config: &Config) -> anyhow::Result<Self> {
+    pub async fn new(username: String, config: &Config, event_sender: EventSender) -> anyhow::Result<Self> {
         // Ensure user directory exists with secure permissions
         ensure_user_dir(&username)?;
 
@@ -445,16 +453,83 @@ impl UserState {
             // Encrypted garden requires unlock - return error
             return Err(anyhow::anyhow!("UNLOCK_REQUIRED:default"));
         } else {
-            GardenState::new(garden_path, &config.git).await?
+            GardenState::new(garden_path.clone(), &config.git).await?
         };
 
         info!("Initialized state for user: {}", username);
+
+        // Start file watcher for the garden
+        let watcher_handle = Self::start_file_watcher(
+            &username,
+            &garden_path,
+            &garden.file_manager,
+            event_sender.clone(),
+        );
 
         Ok(Self {
             username,
             garden: RwLock::new(garden),
             config: config.clone(),
+            event_sender,
+            watcher_handle: RwLock::new(watcher_handle),
+            // Backup task requires Arc<Self>, started by start_backup_task() after Arc wrapping
+            backup_task_handle: RwLock::new(None),
         })
+    }
+
+    /// Start a file watcher for the given garden path
+    fn start_file_watcher(
+        username: &str,
+        garden_path: &Path,
+        file_manager: &UnifiedFileManager,
+        event_sender: EventSender,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let pending_writes = match file_manager {
+            UnifiedFileManager::Plain(fm) => fm.pending_writes(),
+            UnifiedFileManager::Encrypted(efm) => efm.pending_writes(),
+        };
+
+        match SimpleFileWatcher::new(garden_path, pending_writes) {
+            Ok(watcher) => {
+                let mut rx = watcher.subscribe();
+                let username_for_log = username.to_string();
+                let username_for_task = username_for_log.clone();
+                let sender = event_sender;
+
+                let handle = tokio::spawn(async move {
+                    let username = username_for_task;
+                    // Keep watcher alive by holding reference
+                    let _watcher = watcher;
+
+                    while let Ok(file_event) = rx.recv().await {
+                        // Convert file event to WsEvent
+                        let path_str = match &file_event {
+                            tend_storage::watcher::FileEvent::Created(p)
+                            | tend_storage::watcher::FileEvent::Modified(p)
+                            | tend_storage::watcher::FileEvent::Deleted(p) => {
+                                p.to_string_lossy().to_string()
+                            }
+                            tend_storage::watcher::FileEvent::Renamed { to, .. } => {
+                                to.to_string_lossy().to_string()
+                            }
+                        };
+
+                        // Broadcast to this user only
+                        let _ = sender.send(BroadcastEvent {
+                            username: Some(username.clone()),
+                            event: WsEvent::FileChanged { path: path_str },
+                        });
+                    }
+                });
+
+                info!("File watcher started for user: {}", username_for_log);
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start file watcher: {}", e);
+                None
+            }
+        }
     }
 
     /// Load the active garden path from user's gardens.json
@@ -617,11 +692,27 @@ impl UserState {
             new_data_dir.display()
         );
 
+        // Stop old file watcher
+        self.stop_file_watcher().await;
+
         let new_garden = GardenState::new(new_data_dir.clone(), &self.config.git).await?;
+
+        // Start new file watcher
+        let new_watcher = Self::start_file_watcher(
+            &self.username,
+            &new_data_dir,
+            &new_garden.file_manager,
+            self.event_sender.clone(),
+        );
 
         {
             let mut garden = self.garden.write().await;
             *garden = new_garden;
+        }
+
+        {
+            let mut handle = self.watcher_handle.write().await;
+            *handle = new_watcher;
         }
 
         info!("User {} garden switch complete: {}", self.username, garden_id);
@@ -650,6 +741,9 @@ impl UserState {
             new_data_dir.display()
         );
 
+        // Stop old file watcher
+        self.stop_file_watcher().await;
+
         let new_garden = GardenState::new_encrypted(
             new_data_dir.clone(),
             passphrase,
@@ -658,14 +752,111 @@ impl UserState {
         )
         .await?;
 
+        // Start new file watcher
+        let new_watcher = Self::start_file_watcher(
+            &self.username,
+            &new_data_dir,
+            &new_garden.file_manager,
+            self.event_sender.clone(),
+        );
+
         {
             let mut garden = self.garden.write().await;
             *garden = new_garden;
         }
 
+        {
+            let mut handle = self.watcher_handle.write().await;
+            *handle = new_watcher;
+        }
+
         info!("User {} encrypted garden switch complete: {}", self.username, garden_id);
 
         Ok(new_data_dir)
+    }
+
+    /// Stop the current file watcher
+    async fn stop_file_watcher(&self) {
+        let mut handle = self.watcher_handle.write().await;
+        if let Some(h) = handle.take() {
+            h.abort();
+            info!("File watcher stopped for user: {}", self.username);
+        }
+    }
+
+    /// Start the backup scheduler task. Must be called after UserState is wrapped in Arc.
+    pub async fn start_backup_task(self: &Arc<Self>) {
+        if !self.config.git.enabled || self.config.git.backup_interval_minutes == 0 {
+            info!(
+                "Backup scheduler disabled for user {} (git.enabled={}, interval={})",
+                self.username, self.config.git.enabled, self.config.git.backup_interval_minutes
+            );
+            return;
+        }
+
+        let weak_self = Arc::downgrade(self);
+        let interval = Duration::from_secs(self.config.git.backup_interval_minutes as u64 * 60);
+        let username = self.username.clone();
+        let event_sender = self.event_sender.clone();
+
+        let handle = tokio::spawn(async move {
+            info!(
+                "Backup scheduler started for user {} (interval: {} minutes)",
+                username,
+                interval.as_secs() / 60
+            );
+
+            loop {
+                tokio::time::sleep(interval).await;
+
+                let Some(user_state) = weak_self.upgrade() else {
+                    info!("Backup scheduler stopping: user {} state dropped", username);
+                    break;
+                };
+
+                // Broadcast backup started
+                let _ = event_sender.send(BroadcastEvent {
+                    username: Some(username.clone()),
+                    event: WsEvent::BackupStarted,
+                });
+
+                // Perform backup
+                let garden = user_state.garden.read().await;
+                let _lock = garden.file_manager.acquire_exclusive_lock().await;
+
+                match garden.backup_manager.backup() {
+                    Ok(result) => {
+                        let _ = event_sender.send(BroadcastEvent {
+                            username: Some(username.clone()),
+                            event: WsEvent::BackupCompleted {
+                                commit_sha: result.commit_sha,
+                                message: result.message,
+                            },
+                        });
+                    }
+                    Err(e) => {
+                        let _ = event_sender.send(BroadcastEvent {
+                            username: Some(username.clone()),
+                            event: WsEvent::BackupFailed {
+                                error: e.to_string(),
+                            },
+                        });
+                    }
+                }
+            }
+        });
+
+        let mut backup_handle = self.backup_task_handle.write().await;
+        *backup_handle = Some(handle);
+    }
+
+    /// Stop the current backup scheduler
+    async fn stop_backup_task(&self) {
+        let mut handle = self.backup_task_handle.write().await;
+        if let Some(h) = handle.take() {
+            h.abort();
+            info!("Backup scheduler stopped for user: {}", self.username);
+        }
     }
 }
 
@@ -720,8 +911,15 @@ impl AppState {
         }
 
         // Create new user state
-        let user_state = UserState::new(username.to_string(), &self.config).await?;
+        let user_state = UserState::new(
+            username.to_string(),
+            &self.config,
+            self.event_sender.clone(),
+        ).await?;
         let user_state = Arc::new(user_state);
+
+        // Start backup scheduler (requires Arc for Weak reference)
+        user_state.start_backup_task().await;
 
         // Cache it
         {
@@ -735,15 +933,27 @@ impl AppState {
     /// Broadcast an event to all connected WebSocket clients
     pub fn broadcast(&self, event: WsEvent) {
         // Ignore errors (no subscribers is fine)
-        let _ = self.event_sender.send(event);
+        let _ = self.event_sender.send(BroadcastEvent {
+            username: None, // Send to all users
+            event,
+        });
+    }
+
+    /// Broadcast an event to a specific user's WebSocket connections
+    pub fn broadcast_to_user(&self, username: &str, event: WsEvent) {
+        let _ = self.event_sender.send(BroadcastEvent {
+            username: Some(username.to_string()),
+            event,
+        });
     }
 
     /// Broadcast a garden switch event for a specific user
-    /// Note: username is reserved for future per-user event channels
-    pub fn broadcast_garden_switched(&self, _username: &str, garden_id: &str) {
-        // TODO: In the future, broadcast only to this user's WebSocket connections
-        self.broadcast(WsEvent::GardenSwitched {
-            garden_id: garden_id.to_string(),
-        });
+    pub fn broadcast_garden_switched(&self, username: &str, garden_id: &str) {
+        self.broadcast_to_user(
+            username,
+            WsEvent::GardenSwitched {
+                garden_id: garden_id.to_string(),
+            },
+        );
     }
 }
