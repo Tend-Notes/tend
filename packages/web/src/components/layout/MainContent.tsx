@@ -90,18 +90,32 @@ export function MainContent() {
   const isMobile = useIsMobile()
   const openSearch = useUIStore((state) => state.openSearch)
 
-  // Mobile toolbar items - indent/outdent at top and bottom for easy access
-  const mobileToolbarItems = [
-    {
-      id: 'indent',
-      label: 'Indent',
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5v14" />
-        </svg>
-      ),
-      onClick: () => dispatchBoundaryEvent('tab'),
-    },
+  const openCommandPalette = useUIStore((state) => state.openCommandPalette)
+
+  // Mobile toolbar - indent/outdent always visible, extras in expandable drawer
+  const indentItem = {
+    id: 'indent',
+    label: 'Indent',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5v14" />
+      </svg>
+    ),
+    onClick: () => dispatchBoundaryEvent('tab'),
+  }
+
+  const outdentItem = {
+    id: 'outdent',
+    label: 'Outdent',
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14V5" />
+      </svg>
+    ),
+    onClick: () => dispatchBoundaryEvent('shift-tab'),
+  }
+
+  const extraToolbarItems = [
     {
       id: 'bold',
       label: 'Bold',
@@ -141,14 +155,14 @@ export function MainContent() {
       onClick: openSearch,
     },
     {
-      id: 'outdent',
-      label: 'Outdent',
+      id: 'palette',
+      label: 'Command Palette',
       icon: (
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14V5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
         </svg>
       ),
-      onClick: () => dispatchBoundaryEvent('shift-tab'),
+      onClick: openCommandPalette,
     },
   ]
 
@@ -251,7 +265,13 @@ export function MainContent() {
       {!isMobile && <ActivityLog />}
 
       {/* Mobile toolbar - vertical strip on right edge */}
-      {isMobile && <MobileToolbar items={mobileToolbarItems} />}
+      {isMobile && (
+        <MobileToolbar
+          indentItem={indentItem}
+          outdentItem={outdentItem}
+          extraItems={extraToolbarItems}
+        />
+      )}
     </main>
   )
 }

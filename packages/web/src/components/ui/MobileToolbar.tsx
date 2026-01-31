@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 //
 // Mobile Toolbar - Vertical strip on right edge for formatting actions
+// Collapsed: indent + expand + outdent
+// Expanded: all formatting buttons
 // Positions above iOS keyboard accessory bar when keyboard is visible
 
 import { useState, useEffect, useCallback } from 'react'
@@ -13,11 +15,14 @@ interface ToolbarItem {
 }
 
 interface MobileToolbarProps {
-  items: ToolbarItem[]
+  indentItem: ToolbarItem
+  outdentItem: ToolbarItem
+  extraItems: ToolbarItem[]
 }
 
-export function MobileToolbar({ items }: MobileToolbarProps) {
+export function MobileToolbar({ indentItem, outdentItem, extraItems }: MobileToolbarProps) {
   const [keyboardHeight, setKeyboardHeight] = useState(0)
+  const [expanded, setExpanded] = useState(false)
 
   // Track keyboard visibility via visualViewport API
   useEffect(() => {
@@ -57,27 +62,72 @@ export function MobileToolbar({ items }: MobileToolbarProps) {
   // Add extra padding (50px) above keyboard for iOS accessory bar
   const bottomOffset = keyboardHeight > 0 ? keyboardHeight + 50 : 80
 
+  const buttonClass = `w-10 h-10 flex items-center justify-center rounded-md
+    text-base-05 active:bg-base-02 active:scale-95
+    transition-colors duration-100`
+
   return (
     <div
       className="fixed right-2 z-50 flex flex-col gap-1 p-1
         bg-base-01 border border-base-02 rounded-lg shadow-lg"
       style={{ bottom: bottomOffset }}
     >
-      {items.map((item) => (
+      {/* Indent - always visible at top */}
+      <button
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onClick={indentItem.onClick}
+        className={buttonClass}
+        title={indentItem.label}
+        aria-label={indentItem.label}
+      >
+        {indentItem.icon}
+      </button>
+
+      {/* Expand/collapse button */}
+      <button
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onClick={() => setExpanded(!expanded)}
+        className={`${buttonClass} ${expanded ? 'bg-base-02' : ''}`}
+        title={expanded ? 'Collapse' : 'More actions'}
+        aria-label={expanded ? 'Collapse' : 'More actions'}
+      >
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          {expanded ? (
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          ) : (
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-6-6h12" />
+          )}
+        </svg>
+      </button>
+
+      {/* Extra items - only when expanded */}
+      {expanded && extraItems.map((item) => (
         <button
           key={item.id}
           onMouseDown={handleMouseDown}
           onTouchStart={handleTouchStart}
           onClick={item.onClick}
-          className="w-10 h-10 flex items-center justify-center rounded-md
-            text-base-05 active:bg-base-02 active:scale-95
-            transition-colors duration-100"
+          className={buttonClass}
           title={item.label}
           aria-label={item.label}
         >
           {item.icon}
         </button>
       ))}
+
+      {/* Outdent - always visible at bottom */}
+      <button
+        onMouseDown={handleMouseDown}
+        onTouchStart={handleTouchStart}
+        onClick={outdentItem.onClick}
+        className={buttonClass}
+        title={outdentItem.label}
+        aria-label={outdentItem.label}
+      >
+        {outdentItem.icon}
+      </button>
     </div>
   )
 }
