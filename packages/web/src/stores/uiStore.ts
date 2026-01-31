@@ -110,10 +110,9 @@ export const useUIStore = create<UIState>()(
       lastFocusedBlockUuid: null as string | null,
       setLastFocusedBlockUuid: (uuid) => set({ lastFocusedBlockUuid: uuid }),
 
-      // Reset all UI state to initial values (for garden switching)
+      // Reset transient UI state (for garden switching)
+      // Preserves user preferences: sidebarOpen, sidebarWidth, theme
       reset: () => set({
-        sidebarOpen: false,
-        sidebarWidth: 328,
         sidebarMode: 'navigation' as SidebarMode,
         backlinksOpen: false,
         graphOpen: false,
@@ -123,7 +122,6 @@ export const useUIStore = create<UIState>()(
         onSheetCreated: null,
         insertTextAtCursor: null,
         lastFocusedBlockUuid: null,
-        // Note: theme is intentionally not reset - user preference persists across gardens
       }),
     }),
     {
