@@ -428,3 +428,12 @@ export const sheets = {
     })
   },
 }
+
+// Identity API
+export interface WhoamiResponse {
+  username: string
+}
+
+export const identity = {
+  whoami: () => fetchJson<WhoamiResponse>(`${API_BASE}/whoami`),
+}

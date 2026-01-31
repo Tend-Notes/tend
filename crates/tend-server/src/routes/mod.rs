@@ -4,8 +4,10 @@
 use std::sync::Arc;
 
 use axum::routing::{delete, get, post, put};
-use axum::Router;
+use axum::{Json, Router};
+use serde::Serialize;
 
+use crate::auth::AuthenticatedUser;
 use crate::state::AppState;
 
 mod pages;
@@ -78,8 +80,23 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/sheets/{content_type}/{name}", delete(sheets::delete_sheet))
         // Import
         .route("/import/logseq", post(import::import_logseq))
+        // Identity
+        .route("/whoami", get(whoami))
         // Health check
         .route("/health", get(health))
+}
+
+/// Response for whoami endpoint
+#[derive(Serialize)]
+struct WhoamiResponse {
+    username: String,
+}
+
+/// Returns the currently authenticated user
+async fn whoami(user: AuthenticatedUser) -> Json<WhoamiResponse> {
+    Json(WhoamiResponse {
+        username: user.username,
+    })
 }
 
 async fn health() -> &'static str {
