@@ -100,34 +100,68 @@ export async function loadUserState(): Promise<void> {
 }
 
 /**
+ * Build the current preferences object.
+ */
+function buildPrefs(): Record<string, unknown> {
+  const settings = useSettingsStore.getState()
+  const git = useGitStore.getState()
+
+  return {
+    // Settings
+    themeMode: settings.themeMode,
+    lightThemeName: settings.lightThemeName,
+    darkThemeName: settings.darkThemeName,
+    customLightTheme: settings.customLightTheme,
+    customDarkTheme: settings.customDarkTheme,
+    fontSizePreset: settings.fontSizePreset,
+    customFontSize: settings.customFontSize,
+    taskStatusSet: settings.taskStatusSet,
+    // Git
+    autoCommitIntervalMinutes: git.autoCommitIntervalMinutes,
+    smartCommitThreshold: git.smartCommitThreshold,
+    autoCommitEnabled: git.autoCommitEnabled,
+  }
+}
+
+/**
+ * Build the current UI state object.
+ */
+function buildState(): Record<string, unknown> {
+  const ui = useUIStore.getState()
+  const recentSheets = useRecentSheetsStore.getState()
+  const tags = useTagStore.getState()
+
+  return {
+    // UI
+    sidebarOpen: ui.sidebarOpen,
+    sidebarWidth: ui.sidebarWidth,
+    sidebarMode: ui.sidebarMode,
+    backlinksOpen: ui.backlinksOpen,
+    graphOpen: ui.graphOpen,
+    // Recent sheets
+    recentSheets: recentSheets.recentSheets,
+    recentTags: recentSheets.recentTags,
+    // Tags
+    tags: tags.tags,
+  }
+}
+
+// Track if we have pending changes
+let prefsDirty = false
+let stateDirty = false
+
+/**
  * Save current preferences to server (debounced).
  */
 function savePrefsToServer(): void {
   if (isLoadingFromServer) return
 
+  prefsDirty = true
   if (prefsSaveTimeout) clearTimeout(prefsSaveTimeout)
   prefsSaveTimeout = setTimeout(async () => {
-    const settings = useSettingsStore.getState()
-    const git = useGitStore.getState()
-
-    const prefs = {
-      // Settings
-      themeMode: settings.themeMode,
-      lightThemeName: settings.lightThemeName,
-      darkThemeName: settings.darkThemeName,
-      customLightTheme: settings.customLightTheme,
-      customDarkTheme: settings.customDarkTheme,
-      fontSizePreset: settings.fontSizePreset,
-      customFontSize: settings.customFontSize,
-      taskStatusSet: settings.taskStatusSet,
-      // Git
-      autoCommitIntervalMinutes: git.autoCommitIntervalMinutes,
-      smartCommitThreshold: git.smartCommitThreshold,
-      autoCommitEnabled: git.autoCommitEnabled,
-    }
-
     try {
-      await user.savePrefs(prefs)
+      await user.savePrefs(buildPrefs())
+      prefsDirty = false
       console.log('[UserSync] Saved preferences to server')
     } catch (err) {
       console.error('[UserSync] Failed to save preferences:', err)
@@ -141,33 +175,34 @@ function savePrefsToServer(): void {
 function saveStateToServer(): void {
   if (isLoadingFromServer) return
 
+  stateDirty = true
   if (stateSaveTimeout) clearTimeout(stateSaveTimeout)
   stateSaveTimeout = setTimeout(async () => {
-    const ui = useUIStore.getState()
-    const recentSheets = useRecentSheetsStore.getState()
-    const tags = useTagStore.getState()
-
-    const state = {
-      // UI
-      sidebarOpen: ui.sidebarOpen,
-      sidebarWidth: ui.sidebarWidth,
-      sidebarMode: ui.sidebarMode,
-      backlinksOpen: ui.backlinksOpen,
-      graphOpen: ui.graphOpen,
-      // Recent sheets
-      recentSheets: recentSheets.recentSheets,
-      recentTags: recentSheets.recentTags,
-      // Tags
-      tags: tags.tags,
-    }
-
     try {
-      await user.saveState(state)
+      await user.saveState(buildState())
+      stateDirty = false
       console.log('[UserSync] Saved state to server')
     } catch (err) {
       console.error('[UserSync] Failed to save state:', err)
     }
   }, DEBOUNCE_MS)
+}
+
+/**
+ * Flush any pending saves immediately (synchronous, for beforeunload).
+ * Uses sendBeacon for reliable delivery during page unload.
+ */
+function flushPendingSaves(): void {
+  if (prefsDirty) {
+    const prefs = JSON.stringify(buildPrefs())
+    navigator.sendBeacon('/api/v1/user/prefs', new Blob([prefs], { type: 'application/json' }))
+    prefsDirty = false
+  }
+  if (stateDirty) {
+    const state = JSON.stringify(buildState())
+    navigator.sendBeacon('/api/v1/user/state', new Blob([state], { type: 'application/json' }))
+    stateDirty = false
+  }
 }
 
 // Unsubscribe functions
@@ -176,6 +211,9 @@ let unsubGit: (() => void) | null = null
 let unsubUI: (() => void) | null = null
 let unsubRecentSheets: (() => void) | null = null
 let unsubTags: (() => void) | null = null
+
+// beforeunload handler reference
+let beforeUnloadHandler: (() => void) | null = null
 
 /**
  * Start syncing stores with server.
@@ -192,6 +230,10 @@ export function startSync(): void {
   unsubRecentSheets = useRecentSheetsStore.subscribe(saveStateToServer)
   unsubTags = useTagStore.subscribe(saveStateToServer)
 
+  // Add beforeunload handler to flush pending saves when closing tab/browser
+  beforeUnloadHandler = flushPendingSaves
+  window.addEventListener('beforeunload', beforeUnloadHandler)
+
   console.log('[UserSync] Started sync subscriptions')
 }
 
@@ -204,6 +246,11 @@ export function stopSync(): void {
   if (unsubUI) { unsubUI(); unsubUI = null }
   if (unsubRecentSheets) { unsubRecentSheets(); unsubRecentSheets = null }
   if (unsubTags) { unsubTags(); unsubTags = null }
+
+  if (beforeUnloadHandler) {
+    window.removeEventListener('beforeunload', beforeUnloadHandler)
+    beforeUnloadHandler = null
+  }
 
   if (prefsSaveTimeout) { clearTimeout(prefsSaveTimeout); prefsSaveTimeout = null }
   if (stateSaveTimeout) { clearTimeout(stateSaveTimeout); stateSaveTimeout = null }

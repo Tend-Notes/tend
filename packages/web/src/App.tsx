@@ -57,11 +57,16 @@ function App() {
           // Clear localStorage cache - server will provide correct data
           clearRecentSheets()
           clearTags()
+          // Redirect to home - current path may not exist for new user
+          window.history.replaceState(null, '', '/')
         }
         localStorage.setItem('tend-last-user', username)
 
         // Load user's preferences and state from server, then start syncing
         await initUserSync()
+
+        // Initialize page from URL AFTER user sync (URL may have been redirected)
+        initializeFromUrl()
       })
       .catch((err) => console.error('Failed to get current user:', err))
 
@@ -71,8 +76,6 @@ function App() {
         setContentTypes(types)
       })
       .catch((err) => console.error('Failed to load content types:', err))
-
-    initializeFromUrl()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Run only on mount - these are stable store actions
 
