@@ -7,7 +7,6 @@ import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDial
 import { usePageStore } from './stores/pageStore'
 import { useRecentSheetsStore } from './stores/recentSheetsStore'
 import { useTagStore } from './stores/tagStore'
-import { useGitStore } from './stores/gitStore'
 
 // Lazy load heavy/rarely-used components to reduce initial bundle size
 const CommandPalette = lazy(() => import('./components/command-palette/CommandPalette'))
@@ -33,11 +32,8 @@ function App() {
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
   const openSearch = useUIStore((state) => state.openSearch)
   const setContentTypes = useSettingsStore((state) => state.setContentTypes)
-  const resetSettings = useSettingsStore((state) => state.resetAll)
-  const resetUI = useUIStore((state) => state.resetAll)
   const clearRecentSheets = useRecentSheetsStore((state) => state.clearAll)
   const clearTags = useTagStore((state) => state.reset)
-  const resetGit = useGitStore((state) => state.resetAll)
 
   // Initialize auto-commit system
   useAutoCommit()
@@ -57,12 +53,12 @@ function App() {
         const lastUser = localStorage.getItem('tend-last-user')
         if (lastUser && lastUser !== username) {
           console.log(`User changed from ${lastUser} to ${username}, clearing cached data`)
-          // Clear all user-scoped localStorage stores
+          // Clear data stores that reference user-specific content
+          // (pages, tags are per-user on the server)
           clearRecentSheets()
           clearTags()
-          resetSettings()
-          resetUI()
-          resetGit()
+          // Note: settings/UI/git stores are browser preferences, not user data
+          // To have per-user preferences, would need to scope localStorage keys by username
         }
         localStorage.setItem('tend-last-user', username)
       })
