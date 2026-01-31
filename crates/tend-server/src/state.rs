@@ -324,6 +324,14 @@ impl GardenState {
     pub async fn touch_search_index(&self) {
         let mut last_use = self.last_search_use.write().await;
         *last_use = Some(Instant::now());
+
+        // Persist to disk for GC task (survives restarts, works without loading state)
+        let last_use_path = self.data_dir.join(".tend").join("search_last_use");
+        if let Some(parent) = last_use_path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let timestamp = chrono::Utc::now().timestamp();
+        let _ = tokio::fs::write(&last_use_path, timestamp.to_string()).await;
     }
 
     /// Delete the search index (for TTL expiry)
@@ -956,4 +964,130 @@ impl AppState {
             },
         );
     }
+}
+
+// ========== Search Index Garbage Collection ==========
+
+/// Start a background task that periodically cleans up expired search indices
+/// for encrypted gardens. Runs every hour.
+pub fn start_search_index_gc_task(base_dir: PathBuf) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let gc_interval = Duration::from_secs(3600); // Check every hour
+        info!("Search index GC task started (interval: 1 hour)");
+
+        loop {
+            tokio::time::sleep(gc_interval).await;
+
+            if let Err(e) = run_search_index_gc(&base_dir).await {
+                tracing::warn!("Search index GC error: {}", e);
+            }
+        }
+    })
+}
+
+/// Run one GC pass: scan all users, find expired search indices, delete them
+async fn run_search_index_gc(base_dir: &Path) -> anyhow::Result<()> {
+    let users_dir = base_dir.join("users");
+    if !users_dir.exists() {
+        return Ok(());
+    }
+
+    let mut entries = tokio::fs::read_dir(&users_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let username = match path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name.to_string(),
+            None => continue,
+        };
+
+        if let Err(e) = gc_user_search_indices(&path, &username).await {
+            tracing::warn!("GC error for user {}: {}", username, e);
+        }
+    }
+
+    Ok(())
+}
+
+/// GC search indices for a single user
+async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Result<()> {
+    let gardens_json = user_dir.join("gardens.json");
+    if !gardens_json.exists() {
+        return Ok(());
+    }
+
+    let content = tokio::fs::read_to_string(&gardens_json).await?;
+    let config: serde_json::Value = serde_json::from_str(&content)?;
+
+    let gardens = config.get("gardens").and_then(|g| g.as_object());
+    let Some(gardens) = gardens else {
+        return Ok(());
+    };
+
+    for (garden_id, garden_info) in gardens {
+        // Only check encrypted gardens with search enabled and TTL > 0
+        let encrypted = garden_info.get("encrypted").and_then(|v| v.as_bool()).unwrap_or(false);
+        let search_enabled = garden_info.get("search_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+        let ttl_hours = garden_info.get("index_ttl_hours").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        if !encrypted || !search_enabled || ttl_hours == 0 {
+            continue;
+        }
+
+        let garden_path = user_dir.join("Gardens").join(garden_id);
+        let index_path = garden_path.join(".tend").join("search_index");
+        let last_use_path = garden_path.join(".tend").join("search_last_use");
+
+        // Skip if no index exists
+        if !index_path.exists() {
+            continue;
+        }
+
+        // Check last use timestamp
+        let is_expired = if last_use_path.exists() {
+            match tokio::fs::read_to_string(&last_use_path).await {
+                Ok(ts_str) => {
+                    if let Ok(ts) = ts_str.trim().parse::<i64>() {
+                        let now = chrono::Utc::now().timestamp();
+                        let age_hours = (now - ts) / 3600;
+                        age_hours > ttl_hours as i64
+                    } else {
+                        false // Can't parse, don't delete
+                    }
+                }
+                Err(_) => false, // Can't read, don't delete
+            }
+        } else {
+            // No last_use file but index exists - could be old index
+            // Check index directory mtime as fallback
+            match tokio::fs::metadata(&index_path).await {
+                Ok(meta) => {
+                    if let Ok(modified) = meta.modified() {
+                        let age = modified.elapsed().unwrap_or_default();
+                        age.as_secs() > ttl_hours * 3600
+                    } else {
+                        false
+                    }
+                }
+                Err(_) => false,
+            }
+        };
+
+        if is_expired {
+            info!(
+                "GC: Deleting expired search index for user {} garden {} (TTL: {} hours)",
+                username, garden_id, ttl_hours
+            );
+            if let Err(e) = tokio::fs::remove_dir_all(&index_path).await {
+                tracing::warn!("Failed to delete expired index: {}", e);
+            }
+            // Also remove the last_use file
+            let _ = tokio::fs::remove_file(&last_use_path).await;
+        }
+    }
+
+    Ok(())
 }

@@ -57,6 +57,9 @@ async fn main() -> anyhow::Result<()> {
     // File watcher is now per-user: started when user's garden is loaded in UserState::new()
     info!("Per-user file watchers enabled (started on garden load)");
 
+    // Start search index GC task (cleans up expired indices for encrypted gardens)
+    let _gc_handle = state::start_search_index_gc_task(config.data_dir.clone());
+
     // Build CORS layer based on configuration
     let cors_layer = if config.cors.allowed_origins.is_empty() {
         // No origins configured = same-origin only (most restrictive)
