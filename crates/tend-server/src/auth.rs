@@ -91,6 +91,17 @@ fn extract_username_from_headers(
     headers: &HeaderMap,
     config: &Config,
 ) -> Result<String, AuthError> {
+    // Debug: log what we're looking for and what we have
+    tracing::warn!(
+        "Auth: looking for header '{}', auth_required={}",
+        config.auth.user_header,
+        config.auth.required
+    );
+    tracing::warn!(
+        "Auth: received headers: {:?}",
+        headers.keys().map(|k| k.as_str()).collect::<Vec<_>>()
+    );
+
     // Try the primary auth header first (set by reverse proxy like Authelia)
     if let Some(value) = headers.get(&config.auth.user_header) {
         if let Ok(username) = value.to_str() {
