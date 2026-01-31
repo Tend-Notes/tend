@@ -4,6 +4,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
+import { usePageStore } from '../../stores/pageStore'
+import { useUIStore } from '../../stores/uiStore'
+import { useSyncStatusStore } from '../../stores/syncStatusStore'
+import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi } from '../../lib/api'
 import {
   getDarkThemes,
@@ -1424,10 +1428,17 @@ function GardensSection() {
         return
       }
 
-      // Update state immediately - the WebSocket may trigger reload before we get here
+      // Update state and reset all stores to load the new garden
       setCurrentGraphId(id)
-      // Reload the page to refresh all data for the new garden
-      window.location.reload()
+      usePageStore.getState().reset()
+      useUIStore.getState().reset()
+      useSyncStatusStore.getState().reset()
+      useRecentSheetsStore.getState().reset()
+      // Load the new garden's content types
+      const types = await contentTypesApi.list()
+      useSettingsStore.getState().setContentTypes(types)
+      // Load the new garden's default page
+      await usePageStore.getState().initializeFromUrl()
     } catch (err) {
       // Ignore AbortError - either our timeout or page reload aborted the request.
       // If it's a real timeout, the page won't reload and user can retry.
@@ -1466,8 +1477,16 @@ function GardensSection() {
       setCurrentGraphId(unlockGardenId)
       setUnlockGardenId(null)
       setUnlockPassphrase('')
-      // Reload the page to refresh all data for the new garden
-      window.location.reload()
+      // Reset all stores and load the new garden's content types and default page
+      usePageStore.getState().reset()
+      useUIStore.getState().reset()
+      useSyncStatusStore.getState().reset()
+      useRecentSheetsStore.getState().reset()
+      // Load the new garden's content types
+      const types = await contentTypesApi.list()
+      useSettingsStore.getState().setContentTypes(types)
+      // Load the new garden's default page
+      await usePageStore.getState().initializeFromUrl()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to unlock garden')
     } finally {

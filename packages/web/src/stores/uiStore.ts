@@ -51,6 +51,7 @@ interface UIState {
   clearPendingContentType: () => void
   setInsertTextAtCursor: (fn: ((text: string) => void) | null) => void
   setLastFocusedBlockUuid: (uuid: string | null) => void
+  reset: () => void
 }
 
 export const useUIStore = create<UIState>()(
@@ -108,6 +109,22 @@ export const useUIStore = create<UIState>()(
       setInsertTextAtCursor: (fn) => set({ insertTextAtCursor: fn }),
       lastFocusedBlockUuid: null as string | null,
       setLastFocusedBlockUuid: (uuid) => set({ lastFocusedBlockUuid: uuid }),
+
+      // Reset all UI state to initial values (for garden switching)
+      reset: () => set({
+        sidebarOpen: false,
+        sidebarWidth: 328,
+        sidebarMode: 'navigation' as SidebarMode,
+        backlinksOpen: false,
+        graphOpen: false,
+        searchOpen: false,
+        commandPaletteOpen: false,
+        pendingContentType: null,
+        onSheetCreated: null,
+        insertTextAtCursor: null,
+        lastFocusedBlockUuid: null,
+        // Note: theme is intentionally not reset - user preference persists across gardens
+      }),
     }),
     {
       name: 'tend-ui',

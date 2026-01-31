@@ -36,6 +36,7 @@ interface RecentSheetsState {
   removeSheet: (name: string) => void
   clearAll: () => void
   clearByType: (contentTypeId: string) => void
+  reset: () => void
 }
 
 export const useRecentSheetsStore = create<RecentSheetsState>()(
@@ -100,6 +101,10 @@ export const useRecentSheetsStore = create<RecentSheetsState>()(
           const { [contentTypeId]: _, ...rest } = state.recentSheets
           return { recentSheets: rest }
         })
+      },
+
+      reset: () => {
+        set({ recentSheets: {}, recentTags: [] })
       },
     }),
     {

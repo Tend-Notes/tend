@@ -56,6 +56,8 @@ interface PageState {
   flushPendingSave: () => Promise<void>
   // Clear the recent files history
   clearRecentFiles: () => void
+  // Reset all state to initial values (for switching gardens)
+  reset: () => void
 }
 
 // Helper to build URL path for content
@@ -720,6 +722,30 @@ export const usePageStore = create<PageState>()(
     clearRecentFiles: () => {
       // Clear locally tracked recent sheets
       useRecentSheetsStore.getState().clearAll()
+    },
+
+    reset: () => {
+      // Cancel any pending debounced operations
+      if (saveTimeout) {
+        clearTimeout(saveTimeout)
+        saveTimeout = null
+      }
+      if (draftTimeout) {
+        clearTimeout(draftTimeout)
+        draftTimeout = null
+      }
+      pendingSaveData = null
+
+      // Reset all state to initial values
+      set((state) => {
+        state.currentPage = null
+        state.currentPageName = null
+        state.isLoading = false
+        state.error = null
+        state.hasUnsavedChanges = false
+        state.pendingDraftRecovery = null
+        state.pendingConflict = null
+      })
     },
   }))
 )
