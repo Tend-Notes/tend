@@ -274,6 +274,20 @@ pub fn user_gardens_json_path(username: &str) -> PathBuf {
     user_base_dir(username).join("gardens.json")
 }
 
+/// Get the path for a user's preferences file
+///
+/// Returns: $TEND_BASE_DIR/users/$username/.prefs.json
+pub fn user_prefs_path(username: &str) -> PathBuf {
+    user_base_dir(username).join(".prefs.json")
+}
+
+/// Get the path for a user's UI state file
+///
+/// Returns: $TEND_BASE_DIR/users/$username/.state.json
+pub fn user_state_path(username: &str) -> PathBuf {
+    user_base_dir(username).join(".state.json")
+}
+
 /// Ensure a user's base directory exists with secure permissions
 ///
 /// Creates the directory with mode 0700 (owner only) on Unix systems.

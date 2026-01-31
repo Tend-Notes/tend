@@ -20,6 +20,7 @@ mod sheets;
 mod tags;
 mod todos;
 mod import;
+mod user;
 
 /// Build the API router
 pub fn api_router() -> Router<Arc<AppState>> {
@@ -82,6 +83,11 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/import/logseq", post(import::import_logseq))
         // Identity
         .route("/whoami", get(whoami))
+        // User preferences and state (multi-tenant)
+        .route("/user/prefs", get(user::get_prefs))
+        .route("/user/prefs", put(user::put_prefs))
+        .route("/user/state", get(user::get_state))
+        .route("/user/state", put(user::put_state))
         // Health check
         .route("/health", get(health))
 }

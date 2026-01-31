@@ -18,6 +18,7 @@ import { useAutoCommit } from './hooks/useAutoCommit'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
 import { contentTypes as contentTypesApi, identity } from './lib/api'
+import { initUserSync } from './lib/userSync'
 
 function App() {
   const [keyboardHelpOpen, setKeyboardHelpOpen] = useState(false)
@@ -46,21 +47,21 @@ function App() {
 
   // Load initial data and handle URL - runs once on mount
   useEffect(() => {
-    // Check if user changed (multi-tenant support)
-    // If so, clear user-scoped localStorage to prevent data leakage
+    // Load user preferences and state from server (multi-tenant support)
+    // This overwrites any localStorage cache with the server's authoritative data
     identity.whoami()
-      .then(({ username }) => {
+      .then(async ({ username }) => {
         const lastUser = localStorage.getItem('tend-last-user')
         if (lastUser && lastUser !== username) {
-          console.log(`User changed from ${lastUser} to ${username}, clearing cached data`)
-          // Clear data stores that reference user-specific content
-          // (pages, tags are per-user on the server)
+          console.log(`User changed from ${lastUser} to ${username}`)
+          // Clear localStorage cache - server will provide correct data
           clearRecentSheets()
           clearTags()
-          // Note: settings/UI/git stores are browser preferences, not user data
-          // To have per-user preferences, would need to scope localStorage keys by username
         }
         localStorage.setItem('tend-last-user', username)
+
+        // Load user's preferences and state from server, then start syncing
+        await initUserSync()
       })
       .catch((err) => console.error('Failed to get current user:', err))
 

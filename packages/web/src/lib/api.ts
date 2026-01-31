@@ -437,3 +437,33 @@ export interface WhoamiResponse {
 export const identity = {
   whoami: () => fetchJson<WhoamiResponse>(`${API_BASE}/whoami`),
 }
+
+// User preferences and state API (multi-tenant)
+// Preferences are stored on the server per-user
+export const user = {
+  // Get user preferences (theme, fonts, git settings, etc.)
+  getPrefs: () => fetchJson<Record<string, unknown>>(`${API_BASE}/user/prefs`),
+
+  // Save user preferences
+  savePrefs: (prefs: Record<string, unknown>) =>
+    fetch(`${API_BASE}/user/prefs`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
+    }).then((res) => {
+      if (!res.ok) throw new Error('Failed to save preferences')
+    }),
+
+  // Get user UI state (sidebar, recent sheets, tag colors, etc.)
+  getState: () => fetchJson<Record<string, unknown>>(`${API_BASE}/user/state`),
+
+  // Save user UI state
+  saveState: (state: Record<string, unknown>) =>
+    fetch(`${API_BASE}/user/state`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(state),
+    }).then((res) => {
+      if (!res.ok) throw new Error('Failed to save state')
+    }),
+}
