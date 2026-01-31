@@ -90,25 +90,35 @@ export function MainContent() {
   const isMobile = useIsMobile()
   const openSearch = useUIStore((state) => state.openSearch)
 
-  // Radial menu items for mobile
-  const radialMenuItems = [
+  // Mobile toolbar items - indent/outdent at top and bottom for easy access
+  const mobileToolbarItems = [
+    {
+      id: 'indent',
+      label: 'Indent',
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5v14" />
+        </svg>
+      ),
+      onClick: () => dispatchBoundaryEvent('tab'),
+    },
     {
       id: 'bold',
       label: 'Bold',
-      icon: <span className="font-bold text-sm">B</span>,
+      icon: <span className="font-bold">B</span>,
       onClick: () => applyFormatting('**'),
     },
     {
       id: 'italic',
       label: 'Italic',
-      icon: <span className="italic text-sm">I</span>,
+      icon: <span className="italic">I</span>,
       onClick: () => applyFormatting('*'),
     },
     {
       id: 'highlight',
       label: 'Highlight',
       icon: (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
         </svg>
       ),
@@ -117,38 +127,28 @@ export function MainContent() {
     {
       id: 'strikethrough',
       label: 'Strikethrough',
-      icon: <span className="line-through text-sm">S</span>,
+      icon: <span className="line-through">S</span>,
       onClick: () => applyFormatting('~~'),
-    },
-    {
-      id: 'indent',
-      label: 'Indent',
-      icon: (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5v14" />
-        </svg>
-      ),
-      onClick: () => dispatchBoundaryEvent('tab'),
-    },
-    {
-      id: 'outdent',
-      label: 'Outdent',
-      icon: (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14V5" />
-        </svg>
-      ),
-      onClick: () => dispatchBoundaryEvent('shift-tab'),
     },
     {
       id: 'search',
       label: 'Search',
       icon: (
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
       ),
       onClick: openSearch,
+    },
+    {
+      id: 'outdent',
+      label: 'Outdent',
+      icon: (
+        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14V5" />
+        </svg>
+      ),
+      onClick: () => dispatchBoundaryEvent('shift-tab'),
     },
   ]
 
@@ -251,7 +251,7 @@ export function MainContent() {
       {!isMobile && <ActivityLog />}
 
       {/* Mobile toolbar - vertical strip on right edge */}
-      {isMobile && <MobileToolbar items={radialMenuItems} />}
+      {isMobile && <MobileToolbar items={mobileToolbarItems} />}
     </main>
   )
 }
