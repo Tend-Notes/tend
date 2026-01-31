@@ -8,6 +8,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use tend_search::SearchResult;
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::state::{AppState, IndexStatus};
 
@@ -51,8 +52,10 @@ pub struct SearchStatusResponse {
 /// Get search index status
 pub async fn status(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<SearchStatusResponse>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let index_status = garden.get_index_status().await;
 
     let num_docs = if let Some(ref index) = garden.search_index {
@@ -80,10 +83,13 @@ pub async fn status(
 /// Trigger index rebuild
 pub async fn rebuild(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<SearchStatusResponse>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+
     // Get current status first
     let current_status = {
-        let garden = state.garden.read().await;
+        let garden = user_state.garden.read().await;
         garden.get_index_status().await
     };
 
@@ -92,7 +98,7 @@ pub async fn rebuild(
         return Ok(Json(SearchStatusResponse {
             index_status: IndexStatus::Building,
             num_docs: None,
-            encrypted: state.garden.read().await.encrypted,
+            encrypted: user_state.garden.read().await.encrypted,
             message: Some("Index build already in progress".to_string()),
         }));
     }
@@ -101,21 +107,21 @@ pub async fn rebuild(
         return Ok(Json(SearchStatusResponse {
             index_status: IndexStatus::Disabled,
             num_docs: None,
-            encrypted: state.garden.read().await.encrypted,
+            encrypted: user_state.garden.read().await.encrypted,
             message: Some("Search is disabled for this garden".to_string()),
         }));
     }
 
     // Build the index (this will block - consider spawning a task for large gardens)
     {
-        let mut garden = state.garden.write().await;
+        let mut garden = user_state.garden.write().await;
         garden.build_index().await.map_err(|e| {
             AppError::Internal(format!("Failed to build index: {}", e))
         })?;
     }
 
     // Return updated status
-    let garden = state.garden.read().await;
+    let garden = user_state.garden.read().await;
     let num_docs = if let Some(ref index) = garden.search_index {
         Some(index.read().await.num_docs())
     } else {
@@ -133,6 +139,7 @@ pub async fn rebuild(
 /// Search for blocks
 pub async fn search(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, AppError> {
     if query.q.trim().is_empty() {
@@ -142,7 +149,8 @@ pub async fn search(
         }));
     }
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let index_status = garden.get_index_status().await;
 
     // Check index status

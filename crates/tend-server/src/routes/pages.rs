@@ -9,14 +9,17 @@ use serde::{Deserialize, Serialize};
 use tend_core::{Block, Page, PageMeta};
 use tracing::debug;
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
 /// List all pages
 pub async fn list_pages(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<Vec<PageMeta>>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let pages = garden.file_manager.list_pages().await?;
     Ok(Json(pages))
 }
@@ -31,9 +34,11 @@ pub struct CreatePageRequest {
 /// Create a new page (idempotent - returns existing page if it already exists)
 pub async fn create_page(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Json(req): Json<CreatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // If page already exists, return it (idempotent behavior to avoid race conditions
     // when multiple requests try to create the same page simultaneously)
@@ -102,6 +107,7 @@ fn create_user_tag_page(tag_name: &str) -> Page {
 /// Get a page by name
 pub async fn get_page(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(name): Path<String>,
 ) -> Result<Json<Page>, AppError> {
     // Check if this is a tag page
@@ -119,7 +125,8 @@ pub async fn get_page(
         return Ok(Json(create_user_tag_page(tag_name)));
     }
 
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let page = garden.file_manager.read_page(&name).await?;
     Ok(Json(page))
 }
@@ -148,10 +155,12 @@ pub struct BlockData {
 /// Update a page
 pub async fn update_page(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(name): Path<String>,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Read existing page or create new
     let mut page = garden
@@ -222,9 +231,11 @@ pub async fn update_page(
 /// Delete a page
 pub async fn delete_page(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(name): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     garden.file_manager.delete_page(&name).await?;
 
     // Remove from search index (if search is enabled)
@@ -278,9 +289,11 @@ fn block_contains_reference(content: &str, page_name: &str, tag_name: Option<&st
 /// Get backlinks to a page
 pub async fn get_backlinks(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<BacklinkRef>>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
     let mut backlinks = Vec::new();
 
     // Check if this is a tag page (tags/tagname)

@@ -16,6 +16,28 @@ use tracing::{debug, info};
 
 use crate::error::StorageError;
 
+/// Validates that a name is safe for use in file paths.
+/// Rejects path traversal attempts, absolute paths, and null bytes.
+pub fn validate_safe_name(name: &str) -> Result<(), StorageError> {
+    if name.is_empty() {
+        return Err(StorageError::InvalidPath("Name cannot be empty".into()));
+    }
+    if name.contains("..") {
+        return Err(StorageError::InvalidPath("Name cannot contain '..'".into()));
+    }
+    if name.starts_with('/') || name.starts_with('\\') {
+        return Err(StorageError::InvalidPath("Name cannot be an absolute path".into()));
+    }
+    if name.contains('\0') {
+        return Err(StorageError::InvalidPath("Name cannot contain null bytes".into()));
+    }
+    // Also reject Windows-style absolute paths like C:\
+    if name.len() >= 2 && name.chars().nth(1) == Some(':') {
+        return Err(StorageError::InvalidPath("Name cannot be an absolute path".into()));
+    }
+    Ok(())
+}
+
 /// Manages file operations for the garden
 pub struct FileManager {
     /// Root path of the garden
@@ -128,6 +150,7 @@ impl FileManager {
 
     /// Read a page by name
     pub async fn read_page(&self, name: &str) -> Result<Page, StorageError> {
+        validate_safe_name(name)?;
         let path = self.page_path(name);
 
         if !path.exists() {
@@ -187,6 +210,9 @@ impl FileManager {
 
     /// Write a page (atomic operation)
     pub async fn write_page(&self, page: &Page) -> Result<(), StorageError> {
+        if !page.is_journal {
+            validate_safe_name(&page.name)?;
+        }
         let path = if page.is_journal {
             self.journal_path(page.journal_date.unwrap_or_else(|| {
                 chrono::Local::now().date_naive()
@@ -239,6 +265,7 @@ impl FileManager {
 
     /// Delete a page
     pub async fn delete_page(&self, name: &str) -> Result<(), StorageError> {
+        validate_safe_name(name)?;
         let path = self.page_path(name);
 
         if !path.exists() {
@@ -263,6 +290,9 @@ impl FileManager {
 
     /// Check if a page exists
     pub async fn page_exists(&self, name: &str) -> bool {
+        if validate_safe_name(name).is_err() {
+            return false;
+        }
         self.page_path(name).exists()
     }
 
@@ -381,6 +411,8 @@ impl FileManager {
 
     /// Read a sheet by content type, name, and optional date
     pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
+        validate_safe_name(name)?;
+        validate_safe_name(&content_type.directory)?;
         let path = self.sheet_path(content_type, name, date);
 
         if !path.exists() {
@@ -418,6 +450,9 @@ impl FileManager {
             return self.write_page(page).await;
         }
 
+        validate_safe_name(&page.name)?;
+        validate_safe_name(&content_type.directory)?;
+
         // Ensure directory exists
         self.ensure_content_type_dir(content_type, date).await?;
 
@@ -444,6 +479,8 @@ impl FileManager {
             return Ok(());
         }
 
+        validate_safe_name(name)?;
+        validate_safe_name(&content_type.directory)?;
         let path = self.sheet_path(content_type, name, date);
 
         if !path.exists() {
@@ -480,6 +517,9 @@ impl FileManager {
             return false;
         }
 
+        if validate_safe_name(name).is_err() || validate_safe_name(&content_type.directory).is_err() {
+            return false;
+        }
         self.sheet_path(content_type, name, date).exists()
     }
 }
@@ -571,5 +611,67 @@ mod tests {
 
         let result = fm.read_page("Nonexistent").await;
         assert!(matches!(result, Err(StorageError::NotFound(_))));
+    }
+
+    #[test]
+    fn test_validate_safe_name() {
+        // Valid names
+        assert!(validate_safe_name("My Page").is_ok());
+        assert!(validate_safe_name("nested/page").is_ok());
+        assert!(validate_safe_name("Meeting Notes 2026").is_ok());
+
+        // Invalid: path traversal
+        assert!(validate_safe_name("../secret").is_err());
+        assert!(validate_safe_name("foo/../bar").is_err());
+        assert!(validate_safe_name("..").is_err());
+
+        // Invalid: absolute paths
+        assert!(validate_safe_name("/etc/passwd").is_err());
+        assert!(validate_safe_name("\\Windows\\System32").is_err());
+        assert!(validate_safe_name("C:\\secret").is_err());
+
+        // Invalid: null bytes
+        assert!(validate_safe_name("page\0name").is_err());
+
+        // Invalid: empty
+        assert!(validate_safe_name("").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_blocked_read() {
+        let (_temp_dir, fm) = setup().await;
+
+        let result = fm.read_page("../secret").await;
+        assert!(matches!(result, Err(StorageError::InvalidPath(_))));
+
+        let result = fm.read_page("/etc/passwd").await;
+        assert!(matches!(result, Err(StorageError::InvalidPath(_))));
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_blocked_write() {
+        let (_temp_dir, fm) = setup().await;
+
+        let mut page = Page::new("../secret");
+        page.add_block(tend_core::Block::new("Content"));
+        let result = fm.write_page(&page).await;
+        assert!(matches!(result, Err(StorageError::InvalidPath(_))));
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_blocked_delete() {
+        let (_temp_dir, fm) = setup().await;
+
+        let result = fm.delete_page("../secret").await;
+        assert!(matches!(result, Err(StorageError::InvalidPath(_))));
+    }
+
+    #[tokio::test]
+    async fn test_path_traversal_page_exists() {
+        let (_temp_dir, fm) = setup().await;
+
+        // Should return false (not crash) for traversal attempts
+        assert!(!fm.page_exists("../secret").await);
+        assert!(!fm.page_exists("/etc/passwd").await);
     }
 }

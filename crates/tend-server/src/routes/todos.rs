@@ -8,6 +8,7 @@ use axum::Json;
 use regex::Regex;
 use serde::Serialize;
 
+use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::state::AppState;
 
@@ -41,8 +42,10 @@ pub struct TaskList {
 /// Get all tasks across all pages and journals
 pub async fn list_todos(
     State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
 ) -> Result<Json<TaskList>, AppError> {
-    let garden = state.garden.read().await;
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
 
     // Task status keywords to look for
     // Match keyword at start, optionally followed by whitespace and content
