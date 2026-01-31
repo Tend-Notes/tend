@@ -5,6 +5,9 @@ import { useEffect, useRef } from 'react'
 import { usePageStore } from '../stores/pageStore'
 import { useSyncStatusStore } from '../stores/syncStatusStore'
 import { useSettingsStore } from '../stores/settingsStore'
+import { useUIStore } from '../stores/uiStore'
+import { useRecentSheetsStore } from '../stores/recentSheetsStore'
+import { contentTypes as contentTypesApi } from '../lib/api'
 
 // WebSocket event types (must match server-side WsEvent enum)
 interface WsEventBase {
@@ -193,10 +196,24 @@ export function useWebSocket() {
 
             case 'garden_switched':
               // Garden was switched (by another client or this client)
-              // Update the current garden ID before reloading so UI shows correct active state
+              // Reset all stores and reinitialize without a full page reload
               console.log('Garden switched to:', data.garden_id)
               useSettingsStore.getState().setCurrentGraphId(data.garden_id)
-              window.location.reload()
+              usePageStore.getState().reset()
+              useUIStore.getState().reset()
+              useSyncStatusStore.getState().reset()
+              useRecentSheetsStore.getState().reset()
+              // Load the new garden's content types and default page
+              contentTypesApi.list()
+                .then((types) => {
+                  useSettingsStore.getState().setContentTypes(types)
+                  usePageStore.getState().initializeFromUrl()
+                })
+                .catch((err) => {
+                  console.error('Failed to load content types after garden switch:', err)
+                  // Still try to initialize the page
+                  usePageStore.getState().initializeFromUrl()
+                })
               break
 
             default:

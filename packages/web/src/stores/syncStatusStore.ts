@@ -27,6 +27,7 @@ interface SyncStatusState {
   checkGitStatus: (filePath: string) => Promise<void>
   recordCommit: () => void
   recordPush: () => void
+  reset: () => void
 }
 
 export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
@@ -105,5 +106,9 @@ export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
     if (backupEnabled) {
       set({ status: 'backed up' })
     }
+  },
+
+  reset: () => {
+    set({ status: 'saved', isChecking: false, lastCheck: null })
   },
 }))
