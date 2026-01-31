@@ -11,19 +11,11 @@ export interface TagMetadata {
 }
 
 // 12 well-separated hues around the color wheel (every 30 degrees)
-// Provides good visual distinction between adjacent picks
 const HUE_PALETTE = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
 
-// Generate a deterministic hue from tag name (consistent across sessions)
-function hashTagToHue(tagName: string): number {
-  let hash = 0
-  for (let i = 0; i < tagName.length; i++) {
-    const char = tagName.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
-    hash = hash & hash // Convert to 32-bit integer
-  }
-  // Pick from discrete palette, not continuous range
-  const index = Math.abs(hash) % HUE_PALETTE.length
+// Pick a random hue from the palette
+function randomHue(): number {
+  const index = Math.floor(Math.random() * HUE_PALETTE.length)
   return HUE_PALETTE[index]
 }
 
@@ -78,8 +70,8 @@ function colorToHue(color: string): number {
     return Math.round(h * 360)
   }
 
-  // Default to random-ish hue based on string
-  return hashTagToHue(color)
+  // Fallback to random hue if parsing fails
+  return randomHue()
 }
 
 export const useTagStore = create<TagState>()(
@@ -90,7 +82,7 @@ export const useTagStore = create<TagState>()(
 
       getTagHue: (tagName: string) => {
         const tag = get().tags[tagName]
-        return tag?.hue ?? hashTagToHue(tagName)
+        return tag?.hue ?? randomHue()
       },
 
       setTagHue: (tagName: string, hue: number) => {
@@ -127,7 +119,7 @@ export const useTagStore = create<TagState>()(
             ...state.tags,
             [tagName]: {
               ...state.tags[tagName],
-              hue: state.tags[tagName]?.hue ?? hashTagToHue(tagName),
+              hue: state.tags[tagName]?.hue ?? randomHue(),
               description,
             },
           },
@@ -146,7 +138,7 @@ export const useTagStore = create<TagState>()(
             tags: {
               ...state.tags,
               [tagName]: {
-                hue: hashTagToHue(tagName),
+                hue: randomHue(),
               },
             },
           })
@@ -163,7 +155,7 @@ export const useTagStore = create<TagState>()(
             const migratedTags: Record<string, TagMetadata> = {}
             for (const [name, data] of Object.entries(state.tags)) {
               migratedTags[name] = {
-                hue: data.hue ?? (data.color ? colorToHue(data.color) : hashTagToHue(name)),
+                hue: data.hue ?? (data.color ? colorToHue(data.color) : randomHue()),
                 description: data.description,
               }
             }
