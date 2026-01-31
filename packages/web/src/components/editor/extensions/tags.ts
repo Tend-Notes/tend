@@ -54,7 +54,7 @@ function findTags(doc: string): TagSpan[] {
 class TagWidget extends WidgetType {
   constructor(
     readonly name: string,
-    readonly getColor: (name: string) => string,
+    readonly getHue: (name: string) => number,
     readonly onNavigate?: (name: string) => void
   ) {
     super()
@@ -64,7 +64,9 @@ class TagWidget extends WidgetType {
     const span = document.createElement('span')
     span.className = 'tag-pill'
     span.textContent = `#${this.name}`
-    span.style.setProperty('--tag-color', this.getColor(this.name))
+    // Set hue as CSS custom property for HSL-based styling
+    const hue = this.getHue(this.name)
+    span.style.setProperty('--tag-hue', String(hue))
     span.style.cursor = 'pointer'
 
     // Use mousedown to prevent CodeMirror from handling the event first
@@ -89,7 +91,7 @@ class TagWidget extends WidgetType {
 }
 
 interface TagExtensionOptions {
-  getColor: (name: string) => string
+  getHue: (name: string) => number
   onNavigate?: (target: string) => void
 }
 
@@ -120,7 +122,7 @@ function buildTagDecorations(
       // Replace with widget when cursor is outside
       decorations.push(
         Decoration.replace({
-          widget: new TagWidget(tag.name, options.getColor, options.onNavigate),
+          widget: new TagWidget(tag.name, options.getHue, options.onNavigate),
         }).range(tag.from, tag.to)
       )
     }
