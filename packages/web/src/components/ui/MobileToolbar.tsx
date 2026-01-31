@@ -104,10 +104,9 @@ export function MobileToolbar({ indentItem, outdentItem, extraItems }: MobileToo
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 11l4-2 4 2" />
             </>
           ) : (
-            /* Expand: chevrons pointing outward with wiggle */
+            /* Expand: chevrons pointing outward */
             <>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l4-2 4 2" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8c2-1 4 1 6 0s4 1 6 0" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 12l4 2 4-2" />
             </>
           )}
