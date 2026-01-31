@@ -11,7 +11,7 @@ use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
-use tracing::{info, warn, Level};
+use tracing::{info, Level};
 
 mod auth;
 mod config;
@@ -46,13 +46,11 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState::new(&config).await?;
     let state = Arc::new(state);
 
-    // TODO: In multi-tenant mode, backup and file watcher tasks need to be per-user.
-    // For now, these are disabled. Users can trigger manual backups via the API.
-    // Future: Start these tasks when a user's garden is loaded, stop when inactive.
+    // Backup scheduler is now per-user: started when user's garden is loaded in get_user_state()
     if config.git.enabled && config.git.backup_interval_minutes > 0 {
-        warn!(
-            "Scheduled backups configured but disabled in multi-tenant mode. \
-             Users can trigger manual backups via the API."
+        info!(
+            "Per-user backup schedulers enabled (interval: {} minutes)",
+            config.git.backup_interval_minutes
         );
     }
 
