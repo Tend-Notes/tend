@@ -84,20 +84,32 @@ export function MobileToolbar({ indentItem, outdentItem, extraItems }: MobileToo
         {indentItem.icon}
       </button>
 
-      {/* Expand/collapse button */}
+      {/* Expand/collapse toggle - smaller, suggests "more above/below" */}
       <button
         onMouseDown={handleMouseDown}
         onTouchStart={handleTouchStart}
         onClick={() => setExpanded(!expanded)}
-        className={`${buttonClass} ${expanded ? 'bg-base-02' : ''}`}
+        className={`w-10 h-6 flex items-center justify-center rounded-md
+          text-base-04 active:bg-base-02 active:scale-95
+          transition-colors duration-100 ${expanded ? 'bg-base-02' : ''}`}
         title={expanded ? 'Collapse' : 'More actions'}
         aria-label={expanded ? 'Collapse' : 'More actions'}
       >
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        {/* Chevrons up/down with wiggle line between */}
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={1.5}>
           {expanded ? (
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            /* Collapse: chevrons pointing inward */
+            <>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 5l4 2 4-2" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 11l4-2 4 2" />
+            </>
           ) : (
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-6-6h12" />
+            /* Expand: chevrons pointing outward with wiggle */
+            <>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4l4-2 4 2" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8c2-1 4 1 6 0s4 1 6 0" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 12l4 2 4-2" />
+            </>
           )}
         </svg>
       </button>
