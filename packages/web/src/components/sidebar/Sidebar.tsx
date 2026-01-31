@@ -43,7 +43,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
   const { contentTypes } = useSettingsStore()
   const { recentSheets, recentTags } = useRecentSheetsStore()
-  const getTagHue = useTagStore((state) => state.getTagHue)
+  const getTagColors = useTagStore((state) => state.getTagColors)
 
   // Visual width during drag (can exceed bounds for bounceback effect)
   const [visualWidth, setVisualWidth] = useState(sidebarWidth)
@@ -229,7 +229,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                   <ul>
                     {recentTags.map((tag) => {
                       const tagPath = `tags/${tag.name}`
-                      const tagHue = getTagHue(tag.name)
+                      const colors = getTagColors(tag.name)
                       const isActive = currentPageName === tagPath
                       return (
                         <li key={tag.name} className="px-2 py-1">
@@ -237,7 +237,10 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                             onClick={() => navigateToPage(tagPath)}
                             className="tag-pill text-sm"
                             style={{
-                              '--tag-hue': tagHue,
+                              '--tag-hue': colors.hue,
+                              '--tag-sat': colors.sat,
+                              '--tag-textL': colors.textL,
+                              '--tag-bgL': colors.bgL,
                               opacity: isActive ? 1 : 0.8,
                             } as React.CSSProperties}
                           >

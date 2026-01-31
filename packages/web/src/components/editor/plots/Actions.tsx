@@ -58,7 +58,7 @@ export function useActions(): Extension[] {
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
   const taskStatusSet = useSettingsStore((state) => state.taskStatusSet)
-  const getTagHue = useTagStore((state) => state.getTagHue)
+  const getTagColors = useTagStore((state) => state.getTagColors)
 
   // Navigation callback for wikilinks (SPA navigation without full page reload)
   const handleWikilinkNavigate = useCallback((target: string) => {
@@ -85,9 +85,9 @@ export function useActions(): Extension[] {
       formattingKeymap(),
       taskStatus(taskStatusSet),
       tagExtension({
-        getHue: getTagHue,
+        getColors: getTagColors,
         onNavigate: handleWikilinkNavigate,
       }),
     ]
-  }, [handleWikilinkNavigate, taskStatusSet, getTagHue])
+  }, [handleWikilinkNavigate, taskStatusSet, getTagColors])
 }

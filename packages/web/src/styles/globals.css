@@ -339,15 +339,14 @@ code {
   text-decoration: underline;
 }
 
-/* Tag pill styles - hue-based with guaranteed contrast
- * Uses --tag-hue (0-360) to derive light bg + dark text
- * Light bg: 90% lightness, 60% saturation (pastel)
- * Dark text: 30% lightness, 70% saturation (rich)
+/* Tag pill styles - randomized HSL for vibrant, clashing colors
+ * Uses CSS variables: --tag-hue, --tag-sat, --tag-textL, --tag-bgL
  */
 .tag-pill {
   display: inline-block;
-  background-color: hsl(var(--tag-hue), 60%, 90%);
-  color: hsl(var(--tag-hue), 70%, 30%);
+  background-color: hsl(var(--tag-hue), calc(var(--tag-sat) * 1%), calc(var(--tag-bgL) * 1%));
+  color: hsl(var(--tag-hue), calc(var(--tag-sat) * 1%), calc(var(--tag-textL) * 1%));
+  border: 2px solid hsl(var(--tag-hue), calc(var(--tag-sat) * 1%), calc(var(--tag-textL) * 1%));
   padding: 0 6px;
   border-radius: 10px;
   font-size: 0.9em;
@@ -357,7 +356,7 @@ code {
 }
 
 .tag-pill:hover {
-  background-color: hsl(var(--tag-hue), 65%, 85%);
+  background-color: hsl(var(--tag-hue), calc(var(--tag-sat) * 1%), calc(var(--tag-bgL) * 1% - 5%));
 }
 
 /* Task markers (legacy) */

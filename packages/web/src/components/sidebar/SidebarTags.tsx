@@ -13,11 +13,11 @@ interface SidebarTagsProps {
 type SortMode = 'alpha' | 'count'
 
 export function SidebarTags({ onBack }: SidebarTagsProps) {
-  const { getTagHue, setTagHue } = useTagStore()
+  const { getTagColors, setTagColors } = useTagStore()
   const { currentPage, navigateToPage } = usePageStore()
 
-  // Tag currently being hue-edited (inline)
-  const [editingHueTag, setEditingHueTag] = useState<string | null>(null)
+  // Tag currently being color-edited (inline)
+  const [editingColorTag, setEditingColorTag] = useState<string | null>(null)
 
   // Sort mode and direction
   const [sortMode, setSortMode] = useState<SortMode>('alpha')
@@ -103,16 +103,16 @@ export function SidebarTags({ onBack }: SidebarTagsProps) {
     navigateToPage(`tags/${tagName}`)
   }, [navigateToPage])
 
-  // Handle color pill click - toggle hue editor
-  const handleHuePillClick = useCallback((tagName: string, e: React.MouseEvent) => {
+  // Handle color pill click - toggle color editor
+  const handleColorPillClick = useCallback((tagName: string, e: React.MouseEvent) => {
     e.stopPropagation() // Don't trigger tag navigation
-    setEditingHueTag(editingHueTag === tagName ? null : tagName)
-  }, [editingHueTag])
+    setEditingColorTag(editingColorTag === tagName ? null : tagName)
+  }, [editingColorTag])
 
   // Handle hue change
   const handleHueChange = useCallback((tagName: string, hue: number) => {
-    setTagHue(tagName, hue)
-  }, [setTagHue])
+    setTagColors(tagName, { hue })
+  }, [setTagColors])
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -185,23 +185,23 @@ export function SidebarTags({ onBack }: SidebarTagsProps) {
         ) : (
           <ul className="space-y-1">
             {sortedTags.map((tag) => {
-              const hue = getTagHue(tag.name)
-              const isEditingHue = editingHueTag === tag.name
+              const colors = getTagColors(tag.name)
+              const isEditing = editingColorTag === tag.name
 
               return (
                 <li key={tag.name} className="relative">
                   <div className="flex items-center gap-1">
-                    {/* Color pill - click to edit hue */}
+                    {/* Color pill - click to edit */}
                     <button
-                      onClick={(e) => handleHuePillClick(tag.name, e)}
+                      onClick={(e) => handleColorPillClick(tag.name, e)}
                       className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
-                        isEditingHue ? 'bg-base-02' : 'hover:bg-base-01'
+                        isEditing ? 'bg-base-02' : 'hover:bg-base-01'
                       }`}
                       title="Edit tag color"
                     >
                       <span
                         className="block w-3 h-3 rounded-full"
-                        style={{ backgroundColor: `hsl(${hue}, 60%, 50%)` }}
+                        style={{ backgroundColor: `hsl(${colors.hue}, ${colors.sat}%, 50%)` }}
                       />
                     </button>
 
@@ -218,13 +218,13 @@ export function SidebarTags({ onBack }: SidebarTagsProps) {
                   </div>
 
                   {/* Inline hue slider (shown when editing) */}
-                  {isEditingHue && (
+                  {isEditing && (
                     <div className="mt-1 ml-1 p-2 bg-base-01 rounded-lg border border-base-02 flex items-center gap-2">
                       <input
                         type="range"
                         min={0}
                         max={359}
-                        value={hue}
+                        value={colors.hue}
                         onChange={(e) => handleHueChange(tag.name, parseInt(e.target.value, 10))}
                         className="flex-1 h-2 rounded-lg appearance-none cursor-pointer"
                         style={{
@@ -233,10 +233,10 @@ export function SidebarTags({ onBack }: SidebarTagsProps) {
                       />
                       <span
                         className="w-6 h-6 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: `hsl(${hue}, 60%, 50%)` }}
+                        style={{ backgroundColor: `hsl(${colors.hue}, ${colors.sat}%, 50%)` }}
                       />
                       <button
-                        onClick={() => setEditingHueTag(null)}
+                        onClick={() => setEditingColorTag(null)}
                         className="p-1 text-base-04 hover:text-base-05 transition-colors"
                         title="Close"
                       >

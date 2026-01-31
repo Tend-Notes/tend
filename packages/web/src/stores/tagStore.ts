@@ -4,17 +4,34 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+// Tag color values for HSL styling
+export interface TagColors {
+  hue: number        // 0-359 hue
+  sat: number        // 50-85 saturation (vibrant)
+  textL: number      // 22-38 text lightness (dark)
+  bgL: number        // 82-94 background lightness (light)
+}
+
 // Tag metadata stored per-tag
-export interface TagMetadata {
-  hue: number // 0-360 hue value
+export interface TagMetadata extends TagColors {
   description?: string
 }
 
-// Pick a random hue from the full color wheel
-function randomHue(): number {
-  const hue = Math.floor(Math.random() * 360)
-  console.log('randomHue generated:', hue)
-  return hue
+// Random value in range [min, max]
+function randomInRange(min: number, max: number): number {
+  return Math.floor(Math.random() * (max - min + 1)) + min
+}
+
+// Generate random tag color values
+function randomTagColors(): TagColors {
+  const colors = {
+    hue: randomInRange(0, 359),
+    sat: randomInRange(50, 85),
+    textL: randomInRange(22, 38),
+    bgL: randomInRange(82, 94),
+  }
+  console.log('randomTagColors generated:', colors)
+  return colors
 }
 
 interface TagState {
@@ -25,51 +42,16 @@ interface TagState {
   selectedTag: string | null
 
   // Actions
-  getTagHue: (tagName: string) => number
-  setTagHue: (tagName: string, hue: number) => void
+  getTagColors: (tagName: string) => TagColors
+  setTagColors: (tagName: string, colors: Partial<TagColors>) => void
   getTagDescription: (tagName: string) => string | undefined
   setTagDescription: (tagName: string, description: string) => void
   selectTag: (tagName: string | null) => void
   ensureTag: (tagName: string) => void
 
-  // Legacy compatibility - returns CSS hsl() string for text color
-  getTagColor: (tagName: string) => string
-  setTagColor: (tagName: string, color: string) => void
-}
-
-/**
- * Parse a color string to extract hue
- * Supports: hsl(h, s%, l%), #rrggbb, rgb(r, g, b)
- */
-function colorToHue(color: string): number {
-  // HSL format
-  const hslMatch = color.match(/hsl\(\s*(\d+)/)
-  if (hslMatch) {
-    return parseInt(hslMatch[1], 10)
-  }
-
-  // Hex format
-  const hexMatch = color.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i)
-  if (hexMatch) {
-    const r = parseInt(hexMatch[1], 16) / 255
-    const g = parseInt(hexMatch[2], 16) / 255
-    const b = parseInt(hexMatch[3], 16) / 255
-    const max = Math.max(r, g, b)
-    const min = Math.min(r, g, b)
-    let h = 0
-    if (max !== min) {
-      const d = max - min
-      switch (max) {
-        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break
-        case g: h = ((b - r) / d + 2) / 6; break
-        case b: h = ((r - g) / d + 4) / 6; break
-      }
-    }
-    return Math.round(h * 360)
-  }
-
-  // Fallback to random hue if parsing fails
-  return randomHue()
+  // Legacy compatibility
+  getTagHue: (tagName: string) => number
+  setTagHue: (tagName: string, hue: number) => void
 }
 
 export const useTagStore = create<TagState>()(
@@ -78,46 +60,40 @@ export const useTagStore = create<TagState>()(
       tags: {},
       selectedTag: null,
 
-      getTagHue: (tagName: string) => {
+      getTagColors: (tagName: string) => {
         const tag = get().tags[tagName]
-        if (tag?.hue !== undefined) {
-          console.log(`getTagHue(${tagName}): cached ${tag.hue}`)
-          return tag.hue
+        if (tag?.hue !== undefined && tag?.sat !== undefined && tag?.textL !== undefined && tag?.bgL !== undefined) {
+          console.log(`getTagColors(${tagName}): cached`, { hue: tag.hue, sat: tag.sat, textL: tag.textL, bgL: tag.bgL })
+          return { hue: tag.hue, sat: tag.sat, textL: tag.textL, bgL: tag.bgL }
         }
-        // First access - generate and persist a random hue
-        const hue = randomHue()
-        console.log(`getTagHue(${tagName}): NEW ${hue}`)
+        // First access - generate and persist random colors
+        const colors = randomTagColors()
+        console.log(`getTagColors(${tagName}): NEW`, colors)
         set((state) => ({
           tags: {
             ...state.tags,
-            [tagName]: { ...state.tags[tagName], hue },
+            [tagName]: { ...state.tags[tagName], ...colors },
           },
         }))
-        return hue
+        return colors
+      },
+
+      setTagColors: (tagName: string, colors: Partial<TagColors>) => {
+        set((state) => ({
+          tags: {
+            ...state.tags,
+            [tagName]: { ...state.tags[tagName], ...colors },
+          },
+        }))
+      },
+
+      // Legacy: just returns hue
+      getTagHue: (tagName: string) => {
+        return get().getTagColors(tagName).hue
       },
 
       setTagHue: (tagName: string, hue: number) => {
-        set((state) => ({
-          tags: {
-            ...state.tags,
-            [tagName]: {
-              ...state.tags[tagName],
-              hue: hue % 360,
-            },
-          },
-        }))
-      },
-
-      // Legacy: returns dark text color as hsl() string
-      getTagColor: (tagName: string) => {
-        const hue = get().getTagHue(tagName)
-        return `hsl(${hue}, 70%, 35%)`
-      },
-
-      // Legacy: extracts hue from color and stores it
-      setTagColor: (tagName: string, color: string) => {
-        const hue = colorToHue(color)
-        get().setTagHue(tagName, hue)
+        get().setTagColors(tagName, { hue })
       },
 
       getTagDescription: (tagName: string) => {
@@ -125,14 +101,11 @@ export const useTagStore = create<TagState>()(
       },
 
       setTagDescription: (tagName: string, description: string) => {
+        const colors = get().getTagColors(tagName) // Ensure colors exist
         set((state) => ({
           tags: {
             ...state.tags,
-            [tagName]: {
-              ...state.tags[tagName],
-              hue: state.tags[tagName]?.hue ?? randomHue(),
-              description,
-            },
+            [tagName]: { ...state.tags[tagName], ...colors, description },
           },
         }))
       },
@@ -141,41 +114,35 @@ export const useTagStore = create<TagState>()(
         set({ selectedTag: tagName })
       },
 
-      // Ensure a tag exists in the store (called when tag is first seen)
       ensureTag: (tagName: string) => {
-        const state = get()
-        if (!state.tags[tagName]) {
-          set({
-            tags: {
-              ...state.tags,
-              [tagName]: {
-                hue: randomHue(),
-              },
-            },
-          })
-        }
+        get().getTagColors(tagName) // This will create if not exists
       },
     }),
     {
       name: 'tend-tags',
-      // Migrate old hex color format to hue
+      // Migrate old formats to new color structure
       migrate: (persistedState: unknown, version: number) => {
-        if (version < 1) {
-          const state = persistedState as { tags?: Record<string, { color?: string; hue?: number; description?: string }> }
-          if (state.tags) {
-            const migratedTags: Record<string, TagMetadata> = {}
-            for (const [name, data] of Object.entries(state.tags)) {
-              migratedTags[name] = {
-                hue: data.hue ?? (data.color ? colorToHue(data.color) : randomHue()),
-                description: data.description,
-              }
+        const state = persistedState as { tags?: Record<string, Partial<TagMetadata>> }
+
+        if (version < 2 && state.tags) {
+          // v0/v1 had only hue (or old hex color), upgrade to full color set
+          const migratedTags: Record<string, TagMetadata> = {}
+          for (const [name, data] of Object.entries(state.tags)) {
+            const colors = randomTagColors()
+            migratedTags[name] = {
+              hue: data.hue ?? colors.hue,
+              sat: data.sat ?? colors.sat,
+              textL: data.textL ?? colors.textL,
+              bgL: data.bgL ?? colors.bgL,
+              description: data.description,
             }
-            return { ...state, tags: migratedTags }
           }
+          return { ...state, tags: migratedTags }
         }
+
         return persistedState
       },
-      version: 1,
+      version: 2,
     }
   )
 )
