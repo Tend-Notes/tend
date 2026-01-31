@@ -10,13 +10,9 @@ export interface TagMetadata {
   description?: string
 }
 
-// 12 well-separated hues around the color wheel (every 30 degrees)
-const HUE_PALETTE = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
-
-// Pick a random hue from the palette
+// Pick a random hue from the full color wheel
 function randomHue(): number {
-  const index = Math.floor(Math.random() * HUE_PALETTE.length)
-  return HUE_PALETTE[index]
+  return Math.floor(Math.random() * 360)
 }
 
 interface TagState {
