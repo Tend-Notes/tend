@@ -10,6 +10,10 @@ export interface TagMetadata {
   description?: string
 }
 
+// 12 well-separated hues around the color wheel (every 30 degrees)
+// Provides good visual distinction between adjacent picks
+const HUE_PALETTE = [0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330]
+
 // Generate a deterministic hue from tag name (consistent across sessions)
 function hashTagToHue(tagName: string): number {
   let hash = 0
@@ -18,8 +22,9 @@ function hashTagToHue(tagName: string): number {
     hash = ((hash << 5) - hash) + char
     hash = hash & hash // Convert to 32-bit integer
   }
-  // Map to 0-360 range
-  return Math.abs(hash) % 360
+  // Pick from discrete palette, not continuous range
+  const index = Math.abs(hash) % HUE_PALETTE.length
+  return HUE_PALETTE[index]
 }
 
 interface TagState {
