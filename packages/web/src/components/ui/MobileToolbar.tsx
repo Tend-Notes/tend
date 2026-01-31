@@ -4,6 +4,12 @@
 // Collapsed: indent + expand + outdent
 // Expanded: all formatting buttons
 // Positions above iOS keyboard accessory bar when keyboard is visible
+//
+// KNOWN LIMITATION (see GitHub issue #61):
+// Tapping toolbar buttons loses editor focus on iOS Safari, closing the keyboard.
+// We use preventDefault on touchstart but iOS ignores it for contenteditable.
+// The action still fires (via lastFocusedBlockUuid fallback) but UX is broken.
+// Proper fix requires Capacitor wrapper for native keyboard control.
 
 import { useState, useEffect, useCallback } from 'react'
 
