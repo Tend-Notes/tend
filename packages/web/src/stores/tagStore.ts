@@ -82,7 +82,18 @@ export const useTagStore = create<TagState>()(
 
       getTagHue: (tagName: string) => {
         const tag = get().tags[tagName]
-        return tag?.hue ?? randomHue()
+        if (tag?.hue !== undefined) {
+          return tag.hue
+        }
+        // First access - generate and persist a random hue
+        const hue = randomHue()
+        set((state) => ({
+          tags: {
+            ...state.tags,
+            [tagName]: { ...state.tags[tagName], hue },
+          },
+        }))
+        return hue
       },
 
       setTagHue: (tagName: string, hue: number) => {
