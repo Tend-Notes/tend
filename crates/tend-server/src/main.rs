@@ -56,9 +56,8 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
-    // TODO: File watcher needs to be per-user in multi-tenant mode.
-    // For now, real-time file change notifications are disabled.
-    info!("File watcher disabled in multi-tenant mode (per-user watchers not yet implemented)");
+    // File watcher is now per-user: started when user's garden is loaded in UserState::new()
+    info!("Per-user file watchers enabled (started on garden load)");
 
     // Build CORS layer based on configuration
     let cors_layer = if config.cors.allowed_origins.is_empty() {

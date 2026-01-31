@@ -16,6 +16,7 @@ use tracing::info;
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
 use crate::ws::{BroadcastEvent, EventSender, WsEvent};
+use tend_storage::watcher::SimpleFileWatcher;
 
 /// Status of the search index
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -421,12 +422,16 @@ pub struct UserState {
     pub garden: RwLock<GardenState>,
     /// Reference to global config
     config: Config,
+    /// Event sender for WebSocket broadcasts
+    event_sender: EventSender,
+    /// File watcher task handle (aborted on garden switch)
+    watcher_handle: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl UserState {
     /// Create a new UserState for the given username
     /// This creates the user's directory and loads their default garden
-    pub async fn new(username: String, config: &Config) -> anyhow::Result<Self> {
+    pub async fn new(username: String, config: &Config, event_sender: EventSender) -> anyhow::Result<Self> {
         // Ensure user directory exists with secure permissions
         ensure_user_dir(&username)?;
 
@@ -445,16 +450,81 @@ impl UserState {
             // Encrypted garden requires unlock - return error
             return Err(anyhow::anyhow!("UNLOCK_REQUIRED:default"));
         } else {
-            GardenState::new(garden_path, &config.git).await?
+            GardenState::new(garden_path.clone(), &config.git).await?
         };
 
         info!("Initialized state for user: {}", username);
+
+        // Start file watcher for the garden
+        let watcher_handle = Self::start_file_watcher(
+            &username,
+            &garden_path,
+            &garden.file_manager,
+            event_sender.clone(),
+        );
 
         Ok(Self {
             username,
             garden: RwLock::new(garden),
             config: config.clone(),
+            event_sender,
+            watcher_handle: RwLock::new(watcher_handle),
         })
+    }
+
+    /// Start a file watcher for the given garden path
+    fn start_file_watcher(
+        username: &str,
+        garden_path: &Path,
+        file_manager: &UnifiedFileManager,
+        event_sender: EventSender,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let pending_writes = match file_manager {
+            UnifiedFileManager::Plain(fm) => fm.pending_writes(),
+            UnifiedFileManager::Encrypted(efm) => efm.pending_writes(),
+        };
+
+        match SimpleFileWatcher::new(garden_path, pending_writes) {
+            Ok(watcher) => {
+                let mut rx = watcher.subscribe();
+                let username_for_log = username.to_string();
+                let username_for_task = username_for_log.clone();
+                let sender = event_sender;
+
+                let handle = tokio::spawn(async move {
+                    let username = username_for_task;
+                    // Keep watcher alive by holding reference
+                    let _watcher = watcher;
+
+                    while let Ok(file_event) = rx.recv().await {
+                        // Convert file event to WsEvent
+                        let path_str = match &file_event {
+                            tend_storage::watcher::FileEvent::Created(p)
+                            | tend_storage::watcher::FileEvent::Modified(p)
+                            | tend_storage::watcher::FileEvent::Deleted(p) => {
+                                p.to_string_lossy().to_string()
+                            }
+                            tend_storage::watcher::FileEvent::Renamed { to, .. } => {
+                                to.to_string_lossy().to_string()
+                            }
+                        };
+
+                        // Broadcast to this user only
+                        let _ = sender.send(BroadcastEvent {
+                            username: Some(username.clone()),
+                            event: WsEvent::FileChanged { path: path_str },
+                        });
+                    }
+                });
+
+                info!("File watcher started for user: {}", username_for_log);
+                Some(handle)
+            }
+            Err(e) => {
+                tracing::warn!("Failed to start file watcher: {}", e);
+                None
+            }
+        }
     }
 
     /// Load the active garden path from user's gardens.json
@@ -617,11 +687,27 @@ impl UserState {
             new_data_dir.display()
         );
 
+        // Stop old file watcher
+        self.stop_file_watcher().await;
+
         let new_garden = GardenState::new(new_data_dir.clone(), &self.config.git).await?;
+
+        // Start new file watcher
+        let new_watcher = Self::start_file_watcher(
+            &self.username,
+            &new_data_dir,
+            &new_garden.file_manager,
+            self.event_sender.clone(),
+        );
 
         {
             let mut garden = self.garden.write().await;
             *garden = new_garden;
+        }
+
+        {
+            let mut handle = self.watcher_handle.write().await;
+            *handle = new_watcher;
         }
 
         info!("User {} garden switch complete: {}", self.username, garden_id);
@@ -650,6 +736,9 @@ impl UserState {
             new_data_dir.display()
         );
 
+        // Stop old file watcher
+        self.stop_file_watcher().await;
+
         let new_garden = GardenState::new_encrypted(
             new_data_dir.clone(),
             passphrase,
@@ -658,14 +747,36 @@ impl UserState {
         )
         .await?;
 
+        // Start new file watcher
+        let new_watcher = Self::start_file_watcher(
+            &self.username,
+            &new_data_dir,
+            &new_garden.file_manager,
+            self.event_sender.clone(),
+        );
+
         {
             let mut garden = self.garden.write().await;
             *garden = new_garden;
         }
 
+        {
+            let mut handle = self.watcher_handle.write().await;
+            *handle = new_watcher;
+        }
+
         info!("User {} encrypted garden switch complete: {}", self.username, garden_id);
 
         Ok(new_data_dir)
+    }
+
+    /// Stop the current file watcher
+    async fn stop_file_watcher(&self) {
+        let mut handle = self.watcher_handle.write().await;
+        if let Some(h) = handle.take() {
+            h.abort();
+            info!("File watcher stopped for user: {}", self.username);
+        }
     }
 }
 
@@ -720,7 +831,11 @@ impl AppState {
         }
 
         // Create new user state
-        let user_state = UserState::new(username.to_string(), &self.config).await?;
+        let user_state = UserState::new(
+            username.to_string(),
+            &self.config,
+            self.event_sender.clone(),
+        ).await?;
         let user_state = Arc::new(user_state);
 
         // Cache it
