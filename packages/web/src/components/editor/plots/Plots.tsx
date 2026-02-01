@@ -853,8 +853,10 @@ export function Plots({ page, readonly = false }: PlotsProps) {
           )}
 
           {/* Seed - editable content */}
+          {/* Key includes isCodeBlock to force remount when code block status changes */}
           <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''}`}>
             <Seed
+              key={`${block.uuid}-${isCodeBlock}`}
               block={block}
               isSelected={isSelected}
               onChange={(content) => handleBlockChange(block.uuid, content)}
