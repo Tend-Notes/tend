@@ -12,8 +12,11 @@ import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
 import { useUIStore } from '../../../stores/uiStore'
+import { useToastStore } from '../../../stores/toastStore'
 import { Seed, SeedBoundaryEvent } from './Seed'
 import { useBlockFlip } from './useBlockFlip'
+import { useGardenInfo } from '../../../hooks/useGardenInfo'
+import { BlockContextMenu } from '../../ui/BlockContextMenu'
 import { v4 as uuidv4 } from 'uuid'
 
 interface PlotsProps {
@@ -127,7 +130,12 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   void focusUuid
   const containerRef = useRef<HTMLDivElement>(null)
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; uuid: string } | null>(null)
   const pendingFocusRef = useRef<{ uuid: string; position: 'start' | 'end' | number } | null>(null)
+
+  // Garden info for encrypted garden checks
+  const { isEncrypted } = useGardenInfo()
+  const addToast = useToastStore((state) => state.addToast)
 
   // FLIP animation for block movements
   const { capturePositions } = useBlockFlip(containerRef)
@@ -673,6 +681,40 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   }, [flatBlockOrder, focusBlock])
 
   // ─────────────────────────────────────────────────────────────────────────
+  // BLOCK REFERENCE COPY
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const copyBlockReference = useCallback(async (uuid: string) => {
+    // Block references are disabled for encrypted gardens
+    if (isEncrypted) {
+      addToast('Block references disabled for encrypted gardens')
+      return
+    }
+
+    const reference = `((${uuid}))`
+    try {
+      await navigator.clipboard.writeText(reference)
+      addToast('Block reference copied')
+    } catch (err) {
+      console.error('Failed to copy block reference:', err)
+      addToast('Failed to copy')
+    }
+  }, [isEncrypted, addToast])
+
+  const handleBulletContextMenu = useCallback((e: React.MouseEvent, uuid: string) => {
+    // Block references are disabled for encrypted gardens
+    if (isEncrypted) return
+
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY, uuid })
+  }, [isEncrypted])
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(null)
+  }, [])
+
+  // ─────────────────────────────────────────────────────────────────────────
   // SEED BOUNDARY EVENT HANDLER
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -852,6 +894,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
                 e.stopPropagation()
                 if (hasChildren) handleToggleCollapse(block.uuid)
               }}
+              onContextMenu={(e) => handleBulletContextMenu(e, block.uuid)}
               className={`bullet mt-[0.55rem] ${
                 hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
               }`}
@@ -985,6 +1028,23 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     }
   }, [setInsertTextAtCursor])
 
+  // Keyboard shortcut: Alt+Shift+R to copy block reference
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Alt+Shift+R: Copy block reference for focused block
+      if (e.altKey && e.shiftKey && e.code === 'KeyR') {
+        e.preventDefault()
+        // Use selectedUuid (currently focused/selected block)
+        if (selectedUuid) {
+          copyBlockReference(selectedUuid)
+        }
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [selectedUuid, copyBlockReference])
+
   if (rootBlocks.length === 0) {
     return (
       <div className="outliner-editor max-w-3xl">
@@ -997,9 +1057,21 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const isFreeTextMode = page.properties?.freeText === 'true'
 
   return (
-    <div ref={containerRef} className={`outliner-editor max-w-3xl ${isFreeTextMode ? 'outliner-editor--free-text' : ''}`}>
-      {rootBlocks.map((block) => renderBlock(block))}
-    </div>
+    <>
+      <div ref={containerRef} className={`outliner-editor max-w-3xl ${isFreeTextMode ? 'outliner-editor--free-text' : ''}`}>
+        {rootBlocks.map((block) => renderBlock(block))}
+      </div>
+
+      {/* Block context menu for copying block references */}
+      {contextMenu && (
+        <BlockContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          uuid={contextMenu.uuid}
+          onClose={handleCloseContextMenu}
+        />
+      )}
+    </>
   )
 }
 

@@ -30,6 +30,7 @@ const shortcuts = [
   { category: 'Links', items: [
     { keys: ['[['], description: 'Create wiki-link' },
     { keys: ['(('], description: 'Create block reference' },
+    { keys: ['Alt', 'Shift', 'R'], description: 'Copy block reference' },
   ]},
 ]
 

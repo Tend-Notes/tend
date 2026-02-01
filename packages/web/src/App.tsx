@@ -12,6 +12,7 @@ import { useTagStore } from './stores/tagStore'
 const CommandPalette = lazy(() => import('./components/command-palette/CommandPalette'))
 const SearchPanel = lazy(() => import('./components/search/SearchPanel'))
 const KeyboardHelp = lazy(() => import('./components/ui/KeyboardHelp'))
+import { Toasts } from './components/ui/Toasts'
 import { useUIStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
@@ -199,6 +200,8 @@ function App() {
       {/* Conflict resolution dialog */}
       <ConflictResolutionDialog />
 
+      {/* Toast notifications */}
+      <Toasts />
     </div>
   )
 }
