@@ -265,8 +265,8 @@ pub async fn create_sheet(
         )));
     }
 
-    // Create the page
-    let mut page = Page::new(&req.name);
+    // Create the page with correct content type
+    let mut page = Page::new_sheet(&req.name, &content_type_id, date);
 
     // Track cursor position from template {{cursor}} marker
     let mut cursor_position: Option<CursorPosition> = None;
