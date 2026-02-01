@@ -919,25 +919,26 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   }, [selectedUuid, flatBlockOrder])
 
   // Handle pending cursor position from template creation
-  // This effect runs once when the page loads and consumes the cursor position
-  const hasConsumedCursorRef = useRef(false)
+  // This effect runs when the page loads and consumes the cursor position
+  // We track the last page name we checked to avoid re-running on every render
+  const lastCheckedPageRef = useRef<string | null>(null)
   useEffect(() => {
-    // Skip if we've already consumed the cursor position for this page, or if blocks aren't loaded yet
-    if (hasConsumedCursorRef.current || flatBlockOrder.length === 0) return
+    // Skip if blocks aren't loaded yet
+    if (flatBlockOrder.length === 0) return
+
+    // Skip if we've already checked for cursor position on THIS page
+    if (lastCheckedPageRef.current === page.name) return
+
+    // Mark this page as checked (even if no cursor position)
+    lastCheckedPageRef.current = page.name
 
     // Check for pending cursor position (from template with {{cursor}} marker)
     const cursorPosition = consumePendingCursorPosition()
     if (cursorPosition) {
-      hasConsumedCursorRef.current = true
       // Focus the block at the specified offset
       focusBlock(cursorPosition.blockUuid, cursorPosition.offset)
     }
-  }, [flatBlockOrder.length, consumePendingCursorPosition, focusBlock])
-
-  // Reset the consumed cursor ref when page changes
-  useEffect(() => {
-    hasConsumedCursorRef.current = false
-  }, [page.name])
+  }, [flatBlockOrder.length, page.name, consumePendingCursorPosition, focusBlock])
 
   // Update last focused block when selection changes (backup for non-focusBlock selection changes)
   useEffect(() => {

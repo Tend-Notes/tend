@@ -85,9 +85,11 @@ function buildDecorations(view: EditorView): DecorationSet {
   const decorations: Range<Decoration>[] = []
   const state = view.state
   const cursorPos = state.selection.main.head
+  const hasFocus = view.hasFocus
 
   // Find all format spans containing the cursor (handles nested formatting)
-  const cursorFormats = findContainingFormats(state, cursorPos)
+  // Only relevant if editor has focus; when unfocused, all delimiters are hidden
+  const cursorFormats = hasFocus ? findContainingFormats(state, cursorPos) : []
 
   const tree = syntaxTree(state)
 
@@ -142,8 +144,8 @@ const hideDelimitersPlugin = ViewPlugin.fromClass(
     }
 
     update(update: ViewUpdate) {
-      // Rebuild decorations when document or selection changes
-      if (update.docChanged || update.selectionSet) {
+      // Rebuild decorations when document, selection, or focus changes
+      if (update.docChanged || update.selectionSet || update.focusChanged) {
         this.decorations = buildDecorations(update.view)
       }
     }
