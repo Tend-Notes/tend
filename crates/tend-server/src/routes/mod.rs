@@ -13,6 +13,7 @@ use crate::state::AppState;
 mod pages;
 mod journals;
 mod search;
+mod links;
 mod git;
 mod graph;
 mod gardens;
@@ -41,6 +42,9 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/search", get(search::search))
         .route("/search/status", get(search::status))
         .route("/search/rebuild", post(search::rebuild))
+        // Links
+        .route("/links/status", get(links::status))
+        .route("/links/rebuild", post(links::rebuild))
         // Tags
         .route("/tags", get(tags::list_tags))
         // Todos

@@ -51,6 +51,15 @@ pub async fn get_today(
             index.commit()?;
         }
 
+        // Update link index
+        {
+            let blocks: Vec<_> = new_page.blocks.values().cloned().collect();
+            let mut link_index = garden.link_index.write().await;
+            if let Err(e) = link_index.index_page(&new_page.name, &blocks) {
+                tracing::warn!("Failed to update link index for journal {}: {}", new_page.name, e);
+            }
+        }
+
         debug!("Created today's journal: {}", today);
         return Ok(Json(new_page));
     }
@@ -145,6 +154,15 @@ pub async fn update_journal(
         let mut index = search_index.write().await;
         index.index_page(&page)?;
         index.commit()?;
+    }
+
+    // Update link index
+    {
+        let blocks: Vec<_> = page.blocks.values().cloned().collect();
+        let mut link_index = garden.link_index.write().await;
+        if let Err(e) = link_index.index_page(&page.name, &blocks) {
+            tracing::warn!("Failed to update link index for journal {}: {}", page.name, e);
+        }
     }
 
     // Broadcast update to other clients (ignore send errors - no receivers is ok)
