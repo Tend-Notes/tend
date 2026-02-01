@@ -207,17 +207,28 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       const { uuid, position } = pendingFocusRef.current
       pendingFocusRef.current = null
 
-      requestAnimationFrame(() => {
+      // Poll for the block element to appear in the DOM
+      // This handles rapid block creation where React hasn't rendered yet
+      let attempts = 0
+      const maxAttempts = 10 // Give up after ~100ms
+
+      const tryFocus = () => {
         const blockEl = document.querySelector(`[data-block-id="${uuid}"]`)
         const editorEl = blockEl?.querySelector('[data-seed-editor]') as HTMLElement
-        if (!editorEl) return
 
-        const event = new CustomEvent('seed-focus', {
-          detail: { position },
-          bubbles: false,
-        })
-        editorEl.dispatchEvent(event)
-      })
+        if (editorEl) {
+          const event = new CustomEvent('seed-focus', {
+            detail: { position },
+            bubbles: false,
+          })
+          editorEl.dispatchEvent(event)
+        } else if (attempts < maxAttempts) {
+          attempts++
+          requestAnimationFrame(tryFocus)
+        }
+      }
+
+      requestAnimationFrame(tryFocus)
     }
   })
 
