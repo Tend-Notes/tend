@@ -5,6 +5,7 @@ members = [
     "crates/tend-storage",
     "crates/tend-search",
     "crates/tend-git",
+    "crates/tend-links",
     "crates/tend-server",
 ]
 
@@ -77,6 +78,7 @@ tend-core = { path = "crates/tend-core" }
 tend-storage = { path = "crates/tend-storage" }
 tend-search = { path = "crates/tend-search" }
 tend-git = { path = "crates/tend-git" }
+tend-links = { path = "crates/tend-links" }
 
 [profile.release]
 lto = "thin"  # "true" requires too much RAM for small servers

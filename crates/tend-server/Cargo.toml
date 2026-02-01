@@ -15,6 +15,7 @@ tend-core = { workspace = true }
 tend-storage = { workspace = true }
 tend-search = { workspace = true }
 tend-git = { workspace = true }
+tend-links = { workspace = true }
 
 # Web framework
 axum = { workspace = true }

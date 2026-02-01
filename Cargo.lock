@@ -4044,6 +4044,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tend-links"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tend-core",
+ "thiserror 2.0.18",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "tend-search"
 version = "0.1.0"
 dependencies = [
@@ -4071,6 +4085,7 @@ dependencies = [
  "serde_json",
  "tend-core",
  "tend-git",
+ "tend-links",
  "tend-search",
  "tend-storage",
  "thiserror 2.0.18",

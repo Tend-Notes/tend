@@ -9,6 +9,7 @@ use std::time::Instant;
 use chrono::NaiveDate;
 use tend_core::{ContentType, Page, PageMeta};
 use tend_git::BackupManager;
+use tend_links::LinkIndex;
 use tend_search::{index_exists, SearchIndex};
 use tend_storage::{EncryptedFileManager, FileManager, StorageError};
 use tokio::sync::RwLock;
@@ -196,6 +197,8 @@ pub struct GardenState {
     pub file_manager: UnifiedFileManager,
     /// Search index - None if search is disabled or not yet built
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
+    /// Link index for efficient backlink lookups
+    pub link_index: Arc<RwLock<LinkIndex>>,
     pub backup_manager: BackupManager,
     /// Whether this garden is encrypted
     pub encrypted: bool,
@@ -255,6 +258,18 @@ impl GardenState {
         // Initialize backup manager
         let backup_manager = BackupManager::new(&data_dir, git_config.auto_push);
 
+        // Initialize link index
+        let link_index_path = data_dir.join(".tend").join("link_index");
+        let link_index = LinkIndex::new(link_index_path)
+            .map_err(|e| anyhow::anyhow!("Failed to initialize link index: {}", e))?;
+        let link_index = Arc::new(RwLock::new(link_index));
+        info!(
+            "Link index initialized for {} garden: {} ({} entries)",
+            if encrypted { "encrypted" } else { "plain" },
+            data_dir.display(),
+            link_index.blocking_read().len()
+        );
+
         // Determine initial index status and open existing index if available
         let index_path = data_dir.join(".tend").join("search_index");
         let (search_index, index_status) = if !search_config.enabled {
@@ -296,6 +311,7 @@ impl GardenState {
             data_dir,
             file_manager,
             search_index,
+            link_index,
             backup_manager,
             encrypted,
             search_config,
@@ -413,6 +429,48 @@ impl GardenState {
             let mut status = self.index_status.write().await;
             *status = IndexStatus::Ready;
         }
+
+        Ok(())
+    }
+
+    /// Rebuild the link index from all pages and journals
+    pub async fn rebuild_link_index(&self) -> anyhow::Result<()> {
+        info!(
+            "Rebuilding link index for {} garden: {}",
+            if self.encrypted { "encrypted" } else { "plain" },
+            self.data_dir.display()
+        );
+
+        // Collect all pages with their blocks
+        let mut pages_iter: Vec<(String, Vec<tend_core::Block>)> = Vec::new();
+
+        // Collect regular pages
+        let pages = self.file_manager.list_pages().await?;
+        for page_meta in pages {
+            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
+                let blocks: Vec<_> = page.blocks.values().cloned().collect();
+                pages_iter.push((page.name, blocks));
+            }
+        }
+
+        // Collect journals
+        let journals = self.file_manager.list_journals().await?;
+        for journal_meta in journals {
+            if let Some(date) = journal_meta.journal_date {
+                if let Ok(page) = self.file_manager.read_journal(date).await {
+                    let blocks: Vec<_> = page.blocks.values().cloned().collect();
+                    pages_iter.push((page.name, blocks));
+                }
+            }
+        }
+
+        // Rebuild the index
+        let mut link_index = self.link_index.write().await;
+        link_index
+            .rebuild_all(pages_iter.into_iter())
+            .map_err(|e| anyhow::anyhow!("Failed to rebuild link index: {}", e))?;
+
+        info!("Link index rebuilt with {} entries", link_index.len());
 
         Ok(())
     }

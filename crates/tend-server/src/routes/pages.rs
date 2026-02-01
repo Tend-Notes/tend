@@ -65,6 +65,15 @@ pub async fn create_page(
         index.commit()?;
     }
 
+    // Update link index
+    {
+        let blocks: Vec<_> = page.blocks.values().cloned().collect();
+        let mut link_index = garden.link_index.write().await;
+        if let Err(e) = link_index.index_page(&page.name, &blocks) {
+            tracing::warn!("Failed to update link index for page {}: {}", page.name, e);
+        }
+    }
+
     debug!("Created page: {}", req.name);
     Ok(Json(page))
 }
@@ -225,6 +234,15 @@ pub async fn update_page(
         index.commit()?;
     }
 
+    // Update link index
+    {
+        let blocks: Vec<_> = page.blocks.values().cloned().collect();
+        let mut link_index = garden.link_index.write().await;
+        if let Err(e) = link_index.index_page(&page.name, &blocks) {
+            tracing::warn!("Failed to update link index for page {}: {}", page.name, e);
+        }
+    }
+
     // Broadcast update to other clients (ignore send errors - no receivers is ok)
     let _ = state.event_sender.send(BroadcastEvent {
         username: Some(user.username.clone()),
@@ -252,6 +270,14 @@ pub async fn delete_page(
         index.commit()?;
     }
 
+    // Remove from link index
+    {
+        let mut link_index = garden.link_index.write().await;
+        if let Err(e) = link_index.remove_page(&name) {
+            tracing::warn!("Failed to remove page {} from link index: {}", name, e);
+        }
+    }
+
     debug!("Deleted page: {}", name);
     Ok(Json(serde_json::json!({ "deleted": name })))
 }
@@ -268,87 +294,108 @@ pub struct BacklinkRef {
     pub journal_date: Option<String>,
 }
 
-/// Check if a block contains a reference to the given page name
-fn block_contains_reference(content: &str, page_name: &str, tag_name: Option<&str>) -> bool {
-    let content_lower = content.to_lowercase();
-
-    // Check for wiki-link reference [[page_name]] (case-insensitive)
-    let wiki_link = format!("[[{}]]", page_name.to_lowercase());
-    if content_lower.contains(&wiki_link) {
-        return true;
-    }
-
-    // If this is a tag page (tags/tagname), also check for #tagname references
-    if let Some(tag) = tag_name {
-        // Use regex to match #tagname with word boundaries (case-insensitive)
-        // Match at start of string or after whitespace, followed by # and the tag name
-        let tag_pattern = format!(r"(?i)(?:^|\s)#{}(?:\s|$|[^\w-])", regex::escape(tag));
-        if let Ok(re) = regex::Regex::new(&tag_pattern) {
-            if re.is_match(content) {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
-/// Get backlinks to a page
+/// Get backlinks to a page using the link index
+///
+/// This uses the hashed link index for O(1) lookup of backlinks, then loads
+/// only the pages that actually contain links (much faster than scanning all pages).
 pub async fn get_backlinks(
     State(state): State<Arc<AppState>>,
     user: AuthenticatedUser,
     Path(name): Path<String>,
 ) -> Result<Json<Vec<BacklinkRef>>, AppError> {
+    use std::collections::{HashMap, HashSet};
+    use tend_links::hash_page_name;
+
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
     let mut backlinks = Vec::new();
 
-    // Check if this is a tag page (tags/tagname)
-    let tag_name = if name.starts_with("tags/") {
-        Some(name.strip_prefix("tags/").unwrap())
+    // Determine the target name for the link index lookup
+    // For tag pages (tags/tagname), we look up the tag name directly
+    let lookup_name = if name.starts_with("tags/") {
+        name.strip_prefix("tags/").unwrap().to_string()
     } else {
-        None
+        name.clone()
     };
 
-    // Scan all pages for links
-    // TODO: This is inefficient - we should maintain a link index
+    // Query the link index for backlinks
+    let backlink_results = {
+        let link_index = garden.link_index.read().await;
+        link_index.get_backlinks(&lookup_name)
+    };
+
+    if backlink_results.is_empty() {
+        return Ok(Json(backlinks));
+    }
+
+    // Collect unique source hashes and their block UUIDs
+    let source_hashes: HashSet<String> = backlink_results
+        .iter()
+        .map(|r| r.source_hash.clone())
+        .collect();
+
+    // Build a map of source_hash -> block_uuids for efficient lookup
+    let mut source_blocks: HashMap<String, HashSet<String>> = HashMap::new();
+    for result in &backlink_results {
+        source_blocks
+            .entry(result.source_hash.clone())
+            .or_default()
+            .insert(result.block_uuid.to_string());
+    }
+
+    // Scan pages and load only those whose hash matches a source
     let pages = garden.file_manager.list_pages().await?;
     for page_meta in pages {
-        if page_meta.name == name {
+        let page_hash = hash_page_name(&page_meta.name);
+        if !source_hashes.contains(&page_hash) {
             continue;
         }
 
         if let Ok(page) = garden.file_manager.read_page(&page_meta.name).await {
+            let block_uuids = source_blocks.get(&page_hash);
             for block in page.blocks.values() {
-                if block_contains_reference(&block.content, &name, tag_name) {
-                    backlinks.push(BacklinkRef {
-                        page_name: page.name.clone(),
-                        page_title: page.title.clone(),
-                        block_uuid: block.uuid.to_string(),
-                        block_content: block.content.clone(),
-                        is_journal: false,
-                        journal_date: None,
-                    });
+                // Only include blocks that are in our backlink results
+                if let Some(uuids) = block_uuids {
+                    let block_uuid_str = block.uuid.to_string();
+                    if uuids.contains(&block_uuid_str) {
+                        backlinks.push(BacklinkRef {
+                            page_name: page.name.clone(),
+                            page_title: page.title.clone(),
+                            block_uuid: block_uuid_str,
+                            block_content: block.content.clone(),
+                            is_journal: false,
+                            journal_date: None,
+                        });
+                    }
                 }
             }
         }
     }
 
-    // Also check journals
+    // Also scan journals
     let journals = garden.file_manager.list_journals().await?;
     for journal_meta in journals {
+        let journal_hash = hash_page_name(&journal_meta.name);
+        if !source_hashes.contains(&journal_hash) {
+            continue;
+        }
+
         if let Some(date) = journal_meta.journal_date {
             if let Ok(page) = garden.file_manager.read_journal(date).await {
+                let block_uuids = source_blocks.get(&journal_hash);
                 for block in page.blocks.values() {
-                    if block_contains_reference(&block.content, &name, tag_name) {
-                        backlinks.push(BacklinkRef {
-                            page_name: page.name.clone(),
-                            page_title: page.title.clone(),
-                            block_uuid: block.uuid.to_string(),
-                            block_content: block.content.clone(),
-                            is_journal: true,
-                            journal_date: Some(date.format("%Y-%m-%d").to_string()),
-                        });
+                    if let Some(uuids) = block_uuids {
+                        let block_uuid_str = block.uuid.to_string();
+                        if uuids.contains(&block_uuid_str) {
+                            backlinks.push(BacklinkRef {
+                                page_name: page.name.clone(),
+                                page_title: page.title.clone(),
+                                block_uuid: block_uuid_str,
+                                block_content: block.content.clone(),
+                                is_journal: true,
+                                journal_date: Some(date.format("%Y-%m-%d").to_string()),
+                            });
+                        }
                     }
                 }
             }
