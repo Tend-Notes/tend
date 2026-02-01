@@ -202,10 +202,16 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   }, [setFocusedBlock, setLastFocusedBlockUuid, clearSelection])
 
   // Apply pending focus after render
+  // Track the current focus target to cancel stale polls
+  const currentFocusTargetRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (pendingFocusRef.current) {
       const { uuid, position } = pendingFocusRef.current
       pendingFocusRef.current = null
+
+      // Set current target - any previous poll will see this changed and stop
+      currentFocusTargetRef.current = uuid
 
       // Poll for the block element to appear in the DOM
       // This handles rapid block creation where React hasn't rendered yet
@@ -213,6 +219,11 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       const maxAttempts = 10 // Give up after ~100ms
 
       const tryFocus = () => {
+        // Cancel if a newer focus was requested
+        if (currentFocusTargetRef.current !== uuid) {
+          return
+        }
+
         const blockEl = document.querySelector(`[data-block-id="${uuid}"]`)
         const editorEl = blockEl?.querySelector('[data-seed-editor]') as HTMLElement
 
@@ -662,12 +673,12 @@ export function Plots({ page, readonly = false }: PlotsProps) {
   const handleBoundaryEvent = useCallback((uuid: string, event: SeedBoundaryEvent) => {
     switch (event.type) {
       case 'enter': {
-        if (event.cursorOffset === 0) {
-          // Cursor at start: create empty block BEFORE current, keep current content
+        if (event.cursorOffset === 0 && event.content.length > 0) {
+          // Cursor at start of non-empty block: create empty block BEFORE, keep current content
           const newUuid = handleCreateBlockBefore(uuid)
           focusBlock(newUuid, 'start')
         } else {
-          // Split block at cursor
+          // Split block at cursor (or create after for empty blocks)
           const contentBefore = event.content.substring(0, event.cursorOffset)
           const contentAfter = event.content.substring(event.cursorOffset)
 

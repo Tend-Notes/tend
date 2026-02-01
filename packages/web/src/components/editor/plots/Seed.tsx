@@ -403,6 +403,24 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       return EditorView.updateListener.of((update) => {
         if (update.docChanged && !isExternalUpdate.current) {
           const newContent = update.state.doc.toString()
+
+          // Auto-complete code fence: when user types ``` at start of block
+          // Expand to ```\n\n``` with cursor positioned to type language
+          if (newContent === '```') {
+            const view = update.view
+            const expandedContent = '```\n\n```'
+
+            // Update content and position cursor after opening ```
+            view.dispatch({
+              changes: { from: 0, to: newContent.length, insert: expandedContent },
+              selection: { anchor: 3 }, // After ```
+            })
+
+            contentRef.current = expandedContent
+            onChangeRef.current(expandedContent)
+            return // Don't fire onChange twice
+          }
+
           contentRef.current = newContent
           onChangeRef.current(newContent)
         }
