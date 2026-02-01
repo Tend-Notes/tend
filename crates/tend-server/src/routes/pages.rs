@@ -74,6 +74,14 @@ pub async fn create_page(
         }
     }
 
+    // Update block index (if available - not for encrypted gardens)
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.update_page(&page) {
+            tracing::warn!("Failed to update block index for page {}: {}", page.name, e);
+        }
+    }
+
     debug!("Created page: {}", req.name);
     Ok(Json(page))
 }
@@ -243,6 +251,14 @@ pub async fn update_page(
         }
     }
 
+    // Update block index (if available - not for encrypted gardens)
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.update_page(&page) {
+            tracing::warn!("Failed to update block index for page {}: {}", page.name, e);
+        }
+    }
+
     // Broadcast update to other clients (ignore send errors - no receivers is ok)
     let _ = state.event_sender.send(BroadcastEvent {
         username: Some(user.username.clone()),
@@ -275,6 +291,14 @@ pub async fn delete_page(
         let mut link_index = garden.link_index.write().await;
         if let Err(e) = link_index.remove_page(&name).await {
             tracing::warn!("Failed to remove page {} from link index: {}", name, e);
+        }
+    }
+
+    // Remove from block index (if available - not for encrypted gardens)
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.delete_page(&name) {
+            tracing::warn!("Failed to remove page {} from block index: {}", name, e);
         }
     }
 

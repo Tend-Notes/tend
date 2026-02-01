@@ -7,12 +7,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::NaiveDate;
+use tend_blocks::BlockIndex;
 use tend_core::{ContentType, Page, PageMeta};
 use tend_git::BackupManager;
 use tend_links::LinkIndex;
 use tend_search::{index_exists, SearchIndex};
 use tend_storage::{EncryptedFileManager, FileManager, StorageError};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
@@ -199,6 +200,8 @@ pub struct GardenState {
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
     /// Link index for efficient backlink lookups
     pub link_index: Arc<RwLock<LinkIndex>>,
+    /// Block index for block reference lookups - None for encrypted gardens
+    pub block_index: Option<Arc<Mutex<BlockIndex>>>,
     pub backup_manager: BackupManager,
     /// Whether this garden is encrypted
     pub encrypted: bool,
@@ -272,6 +275,31 @@ impl GardenState {
             link_entries
         );
 
+        // Initialize block index (only for unencrypted gardens)
+        let block_index = if encrypted {
+            info!(
+                "Block references disabled for encrypted garden: {}",
+                data_dir.display()
+            );
+            None
+        } else {
+            match BlockIndex::new(&data_dir) {
+                Ok(index) => {
+                    let block_count = index.len().unwrap_or(0);
+                    info!(
+                        "Block index initialized for garden: {} ({} blocks)",
+                        data_dir.display(),
+                        block_count
+                    );
+                    Some(Arc::new(Mutex::new(index)))
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize block index: {}", e);
+                    None
+                }
+            }
+        };
+
         // Determine initial index status and open existing index if available
         let index_path = data_dir.join(".tend").join("search_index");
         let (search_index, index_status) = if !search_config.enabled {
@@ -314,6 +342,7 @@ impl GardenState {
             file_manager,
             search_index,
             link_index,
+            block_index,
             backup_manager,
             encrypted,
             search_config,
@@ -474,6 +503,49 @@ impl GardenState {
             .map_err(|e| anyhow::anyhow!("Failed to rebuild link index: {}", e))?;
 
         info!("Link index rebuilt with {} entries", link_index.len());
+
+        Ok(())
+    }
+
+    /// Rebuild the block index from all pages and journals
+    pub async fn rebuild_block_index(&self) -> anyhow::Result<()> {
+        let Some(block_index) = &self.block_index else {
+            return Err(anyhow::anyhow!("Block index not available (encrypted garden)"));
+        };
+
+        info!(
+            "Rebuilding block index for garden: {}",
+            self.data_dir.display()
+        );
+
+        // Collect all pages
+        let mut all_pages: Vec<tend_core::Page> = Vec::new();
+
+        // Collect regular pages
+        let pages = self.file_manager.list_pages().await?;
+        for page_meta in pages {
+            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
+                all_pages.push(page);
+            }
+        }
+
+        // Collect journals
+        let journals = self.file_manager.list_journals().await?;
+        for journal_meta in journals {
+            if let Some(date) = journal_meta.journal_date {
+                if let Ok(page) = self.file_manager.read_journal(date).await {
+                    all_pages.push(page);
+                }
+            }
+        }
+
+        // Rebuild the index
+        let mut index = block_index.lock().await;
+        index
+            .rebuild(all_pages.into_iter())
+            .map_err(|e| anyhow::anyhow!("Failed to rebuild block index: {}", e))?;
+
+        info!("Block index rebuilt with {} blocks", index.len().unwrap_or(0));
 
         Ok(())
     }

@@ -14,6 +14,7 @@ mod pages;
 mod journals;
 mod search;
 mod links;
+mod blocks;
 mod git;
 mod graph;
 mod gardens;
@@ -46,6 +47,10 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // Links
         .route("/links/status", get(links::status))
         .route("/links/rebuild", post(links::rebuild))
+        // Blocks
+        .route("/blocks/{uuid}", get(blocks::get_block))
+        .route("/blocks/status", get(blocks::status))
+        .route("/blocks/rebuild", post(blocks::rebuild))
         // Tags
         .route("/tags", get(tags::list_tags))
         // Todos

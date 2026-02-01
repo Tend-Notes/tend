@@ -60,6 +60,14 @@ pub async fn get_today(
             }
         }
 
+        // Update block index (if available - not for encrypted gardens)
+        if let Some(block_index) = &garden.block_index {
+            let mut index = block_index.lock().await;
+            if let Err(e) = index.update_page(&new_page) {
+                tracing::warn!("Failed to update block index for journal {}: {}", new_page.name, e);
+            }
+        }
+
         debug!("Created today's journal: {}", today);
         return Ok(Json(new_page));
     }
@@ -162,6 +170,14 @@ pub async fn update_journal(
         let mut link_index = garden.link_index.write().await;
         if let Err(e) = link_index.index_page(&page.name, &blocks).await {
             tracing::warn!("Failed to update link index for journal {}: {}", page.name, e);
+        }
+    }
+
+    // Update block index (if available - not for encrypted gardens)
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.update_page(&page) {
+            tracing::warn!("Failed to update block index for journal {}: {}", page.name, e);
         }
     }
 

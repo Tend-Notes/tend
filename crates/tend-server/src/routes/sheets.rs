@@ -330,6 +330,14 @@ pub async fn create_sheet(
         index.commit()?;
     }
 
+    // Update block index (if available - not for encrypted gardens)
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.update_page(&page) {
+            tracing::warn!("Failed to update block index for sheet {}: {}", page.name, e);
+        }
+    }
+
     Ok(Json(CreateSheetResponse {
         page,
         cursor_position,
@@ -412,6 +420,14 @@ pub async fn update_sheet(
         index.commit()?;
     }
 
+    // Update block index (if available - not for encrypted gardens)
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.update_page(&page) {
+            tracing::warn!("Failed to update block index for sheet {}: {}", page.name, e);
+        }
+    }
+
     Ok(Json(page))
 }
 
@@ -434,6 +450,14 @@ pub async fn delete_sheet(
         let mut index = search_index.write().await;
         index.remove_page(&path.name)?;
         index.commit()?;
+    }
+
+    // Remove from block index (if available - not for encrypted gardens)
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.delete_page(&path.name) {
+            tracing::warn!("Failed to remove sheet {} from block index: {}", path.name, e);
+        }
     }
 
     Ok(Json(serde_json::json!({
