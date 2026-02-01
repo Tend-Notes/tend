@@ -456,7 +456,42 @@ export const usePageStore = create<PageState>()(
 
     deletePage: async (name: string) => {
       try {
-        await api.pages.delete(name)
+        // Check if this is a content type path (e.g., "person/John Smith" or "meeting/2026-01-23/Name")
+        // by looking for a matching content type directory
+        const contentTypes = useSettingsStore.getState().contentTypes
+        const slashIndex = name.indexOf('/')
+        let contentType = null
+        let sheetName = name
+        let sheetDate: string | undefined
+
+        if (slashIndex > 0) {
+          const possibleDir = name.slice(0, slashIndex)
+          contentType = contentTypes.find(ct => ct.directory === possibleDir && ct.id !== 'page' && ct.id !== 'journal')
+          if (contentType) {
+            const remainder = name.slice(slashIndex + 1)
+            // For saveByDate content types, the path may be: directory/YYYY-MM-DD/name
+            if (contentType.saveByDate) {
+              const dateMatch = remainder.match(/^(\d{4}-\d{2}-\d{2})\/(.+)$/)
+              if (dateMatch) {
+                sheetDate = dateMatch[1]
+                sheetName = dateMatch[2]
+              } else {
+                // No date in path - use remainder as name
+                sheetName = remainder
+              }
+            } else {
+              sheetName = remainder
+            }
+          }
+        }
+
+        // Use sheets API for content type paths, pages API for regular pages
+        if (contentType) {
+          await api.sheets.delete(contentType.id, sheetName, sheetDate)
+        } else {
+          await api.pages.delete(name)
+        }
+
         set((state) => {
           if (state.currentPageName === name) {
             state.currentPage = null
