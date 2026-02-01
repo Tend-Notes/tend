@@ -186,3 +186,11 @@ export interface CreateSheetResponse extends Page {
   /** Cursor position if template contained {{cursor}} marker */
   cursorPosition?: CursorPosition
 }
+
+// Block reference data from API
+export interface BlockRef {
+  uuid: string
+  pageName: string
+  content: string
+  hasChildren: boolean
+}

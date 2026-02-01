@@ -19,6 +19,7 @@ import { formattingKeymap } from '../extensions/formatting'
 import { taskStatus } from '../extensions/taskStatus'
 import { tagExtension } from '../extensions/tags'
 import { cursorMarkerExtension } from '../extensions/cursorMarker'
+import { blockReferenceExtension } from '../extensions/blockReference'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { useTagStore } from '../../../stores/tagStore'
@@ -76,6 +77,17 @@ export function useActions(): Extension[] {
     navigateToPage(target)
   }, [navigateToPage, navigateToJournal])
 
+  // Navigation callback for block references
+  // Navigates to the page containing the block and scrolls to the block
+  const handleBlockRefNavigate = useCallback((pageName: string, _blockUuid: string) => {
+    // Navigate to the page
+    // After navigation, the app will scroll to the block UUID via URL hash
+    // For now, just navigate to the page - scroll-to-block can be added later
+    navigateToPage(pageName)
+    // TODO: Add scroll-to-block logic using _blockUuid
+    // This could be done via URL hash (#blockUuid) or a separate mechanism
+  }, [navigateToPage])
+
   // Check if we're in template editing mode
   const isTemplateEditing = editingTemplate !== null
 
@@ -93,6 +105,9 @@ export function useActions(): Extension[] {
         getColors: getTagColors,
         onNavigate: handleWikilinkNavigate,
       }),
+      blockReferenceExtension({
+        onNavigate: handleBlockRefNavigate,
+      }),
     ]
 
     // Add cursor marker highlighting when editing templates
@@ -101,5 +116,5 @@ export function useActions(): Extension[] {
     }
 
     return extensions
-  }, [handleWikilinkNavigate, taskStatusSet, getTagColors, isTemplateEditing])
+  }, [handleWikilinkNavigate, handleBlockRefNavigate, taskStatusSet, getTagColors, isTemplateEditing])
 }

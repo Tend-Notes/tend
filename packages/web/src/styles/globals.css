@@ -316,7 +316,7 @@ code {
   padding: 0 2px;
 }
 
-/* Block reference styles */
+/* Block reference styles - basic (legacy) */
 .block-ref {
   color: var(--color-link);
   background-color: var(--color-bg-secondary);
@@ -327,6 +327,98 @@ code {
 
 .block-ref:hover {
   background-color: var(--color-bg-selection);
+}
+
+/* Block reference styles - inline widget */
+.block-reference {
+  display: inline-flex;
+  flex-direction: column;
+  background-color: var(--color-bg-secondary);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 0 2px;
+  vertical-align: baseline;
+  max-width: 100%;
+}
+
+.block-reference-loading {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.block-reference-loading::before {
+  content: "loading...";
+}
+
+.block-reference-missing {
+  color: var(--color-link-missing);
+  font-style: italic;
+  text-decoration: line-through;
+}
+
+.block-reference-disabled {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.block-reference-error {
+  color: var(--color-link-missing);
+  font-style: italic;
+}
+
+.block-reference-chain {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-right: 4px;
+  vertical-align: middle;
+  color: var(--color-link);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out);
+}
+
+.block-reference-chain:hover {
+  color: var(--base0D);
+  transform: scale(1.1);
+}
+
+.block-reference-content {
+  display: inline;
+  color: var(--color-text);
+}
+
+.block-reference-children {
+  display: flex;
+  align-items: center;
+  margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid var(--base02);
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-size: 0.85em;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.block-reference-children:hover {
+  color: var(--color-link);
+}
+
+.block-reference-children-chevron {
+  margin-right: 4px;
+  font-weight: bold;
+}
+
+.block-reference-children-text {
+  font-style: italic;
+}
+
+.block-reference-editable {
+  background-color: var(--color-bg-secondary);
+  border-radius: 2px;
+  padding: 0 2px;
+  color: var(--color-text-muted);
 }
 
 /* Tag styles */

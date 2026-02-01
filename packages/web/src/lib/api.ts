@@ -17,6 +17,7 @@ import type {
   GitImportResult,
   RemoteGardenInfo,
   CreateSheetResponse,
+  BlockRef,
 } from '../types'
 
 const API_BASE = '/api/v1'
@@ -479,4 +480,29 @@ export const user = {
     }).then((res) => {
       if (!res.ok) throw new Error('Failed to save state')
     }),
+}
+
+// Blocks API (for block references)
+export const blocks = {
+  /**
+   * Look up a block by UUID.
+   * Returns block data if found, null if not found (404).
+   * Throws on 403 (encrypted garden) or other errors.
+   */
+  lookup: async (uuid: string): Promise<BlockRef | null> => {
+    const res = await fetch(`${API_BASE}/blocks/${encodeURIComponent(uuid)}`, {
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+    if (res.status === 404) {
+      return null
+    }
+
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(`${res.status}: ${error.error || 'Request failed'}`)
+    }
+
+    return res.json()
+  },
 }
