@@ -920,8 +920,11 @@ export function Plots({ page, readonly = false }: PlotsProps) {
     )
   }
 
+  // Check if page is in free text mode (bullets hidden, no indentation)
+  const isFreeTextMode = page.properties?.freeText === 'true'
+
   return (
-    <div ref={containerRef} className="outliner-editor max-w-3xl">
+    <div ref={containerRef} className={`outliner-editor max-w-3xl ${isFreeTextMode ? 'outliner-editor--free-text' : ''}`}>
       {rootBlocks.map((block) => renderBlock(block))}
     </div>
   )

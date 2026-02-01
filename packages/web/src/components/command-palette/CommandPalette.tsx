@@ -80,7 +80,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [sheetError, setSheetError] = useState<string | null>(null)
   const [existingSheets, setExistingSheets] = useState<string[]>([])
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
-  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles } = usePageStore()
+  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty } = usePageStore()
   const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor } = useUIStore()
   const { contentTypes } = useSettingsStore()
 
@@ -298,44 +298,17 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     onOpenChange(false)
   }
 
-  // Convert page to free text (single block, no bullet hierarchy)
-  const handleConvertToFreeText = useCallback(() => {
+  // Toggle free text mode (hides bullets and indentation via CSS)
+  const handleToggleFreeTextMode = useCallback(async () => {
     if (!currentPage) return
 
-    // Flatten all blocks into a single text with newlines
-    const flattenBlocks = (uuids: string[], depth = 0): string[] => {
-      const lines: string[] = []
-      for (const uuid of uuids) {
-        const block = currentPage.blocks[uuid]
-        if (block) {
-          // Add content (with indentation preserved as spaces if desired)
-          lines.push(block.content)
-          // Recurse into children
-          if (block.children.length > 0) {
-            lines.push(...flattenBlocks(block.children, depth + 1))
-          }
-        }
-      }
-      return lines
-    }
-
-    const allText = flattenBlocks(currentPage.rootBlocks).join('\n')
-
-    // Create a single block with all the content
-    const { updateCurrentPage } = usePageStore.getState()
-    const newBlock = {
-      uuid: crypto.randomUUID(),
-      content: allText,
-      parentUuid: null,
-      children: [] as string[],
-      collapsed: false,
-      properties: {},
-      depth: 0,
-    }
-
-    updateCurrentPage([newBlock], [newBlock.uuid])
+    const currentlyEnabled = currentPage.properties?.freeText === 'true'
+    await updateCurrentPageProperty('freeText', currentlyEnabled ? null : 'true')
     onOpenChange(false)
-  }, [currentPage, onOpenChange])
+  }, [currentPage, updateCurrentPageProperty, onOpenChange])
+
+  // Check if free text mode is currently enabled
+  const isFreeTextEnabled = currentPage?.properties?.freeText === 'true'
 
   return (
     <Command.Dialog
@@ -523,10 +496,10 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </CommandItem>
               {currentPage && (
                 <CommandItem
-                  onSelect={handleConvertToFreeText}
-                  value="convert to free text remove bullets flatten"
+                  onSelect={handleToggleFreeTextMode}
+                  value="toggle free text mode bullets outline"
                 >
-                  Convert page to free text
+                  {isFreeTextEnabled ? 'Disable free text mode' : 'Enable free text mode'}
                 </CommandItem>
               )}
             </Command.Group>

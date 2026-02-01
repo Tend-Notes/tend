@@ -672,6 +672,21 @@ code {
   position: relative;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Free Text Mode
+   Pages with freeText:: true property hide bullets and indentation.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.outliner-editor--free-text .bullet {
+  display: none;
+}
+
+.outliner-editor--free-text .block-children {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
 /* Block container - subtle transitions for indent/outdent/reorder */
 .block-container {
   transition:

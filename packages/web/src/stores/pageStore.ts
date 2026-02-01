@@ -58,6 +58,8 @@ interface PageState {
   clearRecentFiles: () => void
   // Reset all state to initial values (for switching gardens)
   reset: () => void
+  // Update a property on the current page
+  updateCurrentPageProperty: (key: string, value: string | null) => Promise<void>
 }
 
 // Helper to build URL path for content
@@ -746,6 +748,31 @@ export const usePageStore = create<PageState>()(
         state.pendingDraftRecovery = null
         state.pendingConflict = null
       })
+    },
+
+    updateCurrentPageProperty: async (key: string, value: string | null) => {
+      const { currentPage } = get()
+      if (!currentPage) return
+
+      // Update the page properties
+      const newProperties = { ...currentPage.properties }
+      if (value === null) {
+        delete newProperties[key]
+      } else {
+        newProperties[key] = value
+      }
+
+      // Update local state immediately
+      set((state) => {
+        if (state.currentPage) {
+          state.currentPage.properties = newProperties
+        }
+      })
+
+      // Get all current blocks and trigger a save
+      // This will serialize properties back to the first block
+      const blocks = Object.values(currentPage.blocks)
+      await get().updateCurrentPage(blocks)
     },
   }))
 )
