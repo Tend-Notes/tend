@@ -164,16 +164,16 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       : `${creatingSheet.directory}/${sheetName.trim()}`
     const wikiLink = `[[${linkPath}]]`
 
-    // Invoke callback to insert link at cursor position
-    // Use explicit callback if provided, otherwise fall back to global insert
-    if (onSheetCreated) {
-      onSheetCreated(wikiLink)
-    } else if (insertTextAtCursor) {
-      // Add a space after the wiki-link for continued typing
-      insertTextAtCursor(wikiLink + ' ')
-    }
-
+    // Close dialog first, then invoke callback after dialog has closed
+    // This ensures view.focus() in the callback runs after dialog is removed from DOM
     onOpenChange(false)
+    setTimeout(() => {
+      if (onSheetCreated) {
+        onSheetCreated(wikiLink)
+      } else if (insertTextAtCursor) {
+        insertTextAtCursor(wikiLink + ' ')
+      }
+    }, 0)
   }, [creatingSheet, sheetName, useToday, sheetDate, onOpenChange, onSheetCreated, existingSheets, insertTextAtCursor])
 
   // Git: Commit now (auto-generated message)
