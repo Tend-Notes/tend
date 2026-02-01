@@ -386,6 +386,18 @@ export interface ContentType {
   template: string
 }
 
+// Templates API
+export const templates = {
+  get: (contentTypeId: string) =>
+    fetchJson<Page>(`${API_BASE}/templates/${encodeURIComponent(contentTypeId)}`),
+
+  update: (contentTypeId: string, blocks: BlockData[]) =>
+    fetchJson<Page>(`${API_BASE}/templates/${encodeURIComponent(contentTypeId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ blocks }),
+    }),
+}
+
 // Content Types API
 export const contentTypes = {
   list: () => fetchJson<ContentType[]>(`${API_BASE}/content-types`),

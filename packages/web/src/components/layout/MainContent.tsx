@@ -4,6 +4,7 @@ import { usePageStore } from '../../stores/pageStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useUIStore } from '../../stores/uiStore'
 import { OutlinerEditor } from '../editor/OutlinerEditor'
+import { TemplateEditor } from '../editor/TemplateEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { ActivityLog } from '../ui/ActivityLog'
 import { SaveStatus } from '../ui/SaveStatus'
@@ -84,7 +85,7 @@ function useIsMobile() {
 }
 
 export function MainContent() {
-  const { currentPage, isLoading, error } = usePageStore()
+  const { currentPage, isLoading, error, editingTemplate } = usePageStore()
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
   const isMobile = useIsMobile()
@@ -213,6 +214,19 @@ export function MainContent() {
     return (
       <main className="flex-1 flex items-center justify-center">
         <div className="text-base-03 text-sm">Select a page to begin</div>
+      </main>
+    )
+  }
+
+  // Render template editor when editing a template
+  if (editingTemplate) {
+    return (
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <TemplateEditor
+          contentTypeName={editingTemplate.contentTypeName}
+          page={editingTemplate.page}
+          hasUnsavedChanges={editingTemplate.hasUnsavedChanges}
+        />
       </main>
     )
   }

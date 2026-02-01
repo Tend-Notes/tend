@@ -19,6 +19,8 @@ import { v4 as uuidv4 } from 'uuid'
 interface PlotsProps {
   page: Page
   readonly?: boolean
+  /** Optional callback for block changes. If provided, used instead of updateCurrentPage. */
+  onBlocksChange?: (blocks: Block[], rootBlocksHint?: string[]) => void
 }
 
 // Code block metadata for blocks within a fenced code region
@@ -105,8 +107,11 @@ function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): M
   return result
 }
 
-export function Plots({ page, readonly = false }: PlotsProps) {
-  const updateCurrentPage = usePageStore((state) => state.updateCurrentPage)
+export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
+  const updateCurrentPageFromStore = usePageStore((state) => state.updateCurrentPage)
+
+  // Use onBlocksChange if provided (for template editing), otherwise use store's updateCurrentPage
+  const updateCurrentPage = onBlocksChange ?? updateCurrentPageFromStore
   const {
     setFocusedBlock,
     extendSelectionInDirection,

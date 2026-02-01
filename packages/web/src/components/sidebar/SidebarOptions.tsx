@@ -1044,6 +1044,7 @@ function BackupSection() {
 // Content Types section - synced with backend
 function ContentTypesSection() {
   const { contentTypes, setContentTypes, updateContentType, addContentType, removeContentType } = useSettingsStore()
+  const openTemplateEditor = usePageStore((state) => state.openTemplateEditor)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1108,6 +1109,10 @@ function ContentTypesSection() {
     removeContentType(id)
   }, [removeContentType])
 
+  const handleEditTemplate = useCallback((type: ContentType) => {
+    openTemplateEditor(type.id, type.name)
+  }, [openTemplateEditor])
+
   if (loading) {
     return <div className="text-xs text-base-04">Loading...</div>
   }
@@ -1126,6 +1131,7 @@ function ContentTypesSection() {
           onUpdate={(updates) => handleUpdate(type.id, updates)}
           onRemove={() => handleRemove(type.id)}
           onSave={handleSave}
+          onEditTemplate={() => handleEditTemplate(type)}
           isBuiltIn={type.id === 'page' || type.id === 'journal'}
           isSaving={saving}
         />
@@ -1158,6 +1164,7 @@ function ContentTypeRow({
   onUpdate,
   onRemove,
   onSave,
+  onEditTemplate,
   isBuiltIn,
   isSaving,
 }: {
@@ -1167,6 +1174,7 @@ function ContentTypeRow({
   onUpdate: (updates: Partial<ContentType>) => void
   onRemove: () => void
   onSave: () => void
+  onEditTemplate: () => void
   isBuiltIn: boolean
   isSaving: boolean
 }) {
@@ -1249,8 +1257,9 @@ function ContentTypeRow({
               <div className="flex items-center gap-2">
                 <label className="text-xs text-base-04 w-16">Template</label>
                 <button
+                  onClick={onEditTemplate}
                   className="text-xs text-base-0D hover:text-base-0C transition-colors"
-                  title="Edit template (coming soon)"
+                  title="Edit template"
                 >
                   Edit...
                 </button>

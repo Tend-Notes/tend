@@ -37,6 +37,14 @@ interface PageState {
     localRootBlocks: string[]
   } | null
 
+  // Template editing state
+  editingTemplate: {
+    contentTypeId: string
+    contentTypeName: string
+    page: Page
+    hasUnsavedChanges: boolean
+  } | null
+
   // Actions
   loadTodaysJournal: () => Promise<void>
   navigateToPage: (name: string, pushHistory?: boolean) => Promise<void>
@@ -60,6 +68,11 @@ interface PageState {
   reset: () => void
   // Update a property on the current page
   updateCurrentPageProperty: (key: string, value: string | null) => Promise<void>
+  // Template editing actions
+  openTemplateEditor: (contentTypeId: string, contentTypeName: string) => Promise<void>
+  updateTemplate: (blocks: Block[], rootBlocksHint?: string[]) => void
+  saveTemplate: () => Promise<void>
+  closeTemplateEditor: () => void
 }
 
 // Helper to build URL path for content
@@ -154,6 +167,7 @@ export const usePageStore = create<PageState>()(
     hasUnsavedChanges: false,
     pendingDraftRecovery: null,
     pendingConflict: null,
+    editingTemplate: null,
 
     loadTodaysJournal: async () => {
       set((state) => {
@@ -747,6 +761,7 @@ export const usePageStore = create<PageState>()(
         state.hasUnsavedChanges = false
         state.pendingDraftRecovery = null
         state.pendingConflict = null
+        state.editingTemplate = null
       })
     },
 
@@ -773,6 +788,103 @@ export const usePageStore = create<PageState>()(
       // This will serialize properties back to the first block
       const blocks = Object.values(currentPage.blocks)
       await get().updateCurrentPage(blocks)
+    },
+
+    // Template editing actions
+    openTemplateEditor: async (contentTypeId: string, contentTypeName: string) => {
+      set((state) => {
+        state.isLoading = true
+        state.error = null
+      })
+
+      try {
+        const page = await api.templates.get(contentTypeId)
+        set((state) => {
+          state.editingTemplate = {
+            contentTypeId,
+            contentTypeName,
+            page,
+            hasUnsavedChanges: false,
+          }
+          state.isLoading = false
+        })
+      } catch (e) {
+        set((state) => {
+          state.error = e instanceof Error ? e.message : 'Failed to load template'
+          state.isLoading = false
+        })
+      }
+    },
+
+    updateTemplate: (blocks: Block[], rootBlocksHint?: string[]) => {
+      const { editingTemplate } = get()
+      if (!editingTemplate) return
+
+      // Compute new root blocks
+      const blockMap: Record<string, Block> = {}
+      const newRootUuids = new Set<string>()
+
+      for (const block of blocks) {
+        blockMap[block.uuid] = block
+        if (!block.parentUuid) {
+          newRootUuids.add(block.uuid)
+        }
+      }
+
+      let finalRoots: string[]
+
+      if (rootBlocksHint) {
+        // Use the hint, but filter to only include valid root UUIDs
+        finalRoots = rootBlocksHint.filter(uuid => newRootUuids.has(uuid))
+        // Add any roots not in the hint at the end
+        for (const uuid of newRootUuids) {
+          if (!finalRoots.includes(uuid)) {
+            finalRoots.push(uuid)
+          }
+        }
+      } else {
+        // Build new rootBlocks list preserving order and inserting new roots smartly
+        const existingRoots = editingTemplate.page.rootBlocks.filter(uuid => newRootUuids.has(uuid))
+        const addedRoots = [...newRootUuids].filter(uuid => !editingTemplate.page.rootBlocks.includes(uuid))
+        finalRoots = [...existingRoots, ...addedRoots]
+      }
+
+      // Update template state
+      set((state) => {
+        if (state.editingTemplate) {
+          state.editingTemplate.page.blocks = blockMap
+          state.editingTemplate.page.rootBlocks = finalRoots
+          state.editingTemplate.hasUnsavedChanges = true
+        }
+      })
+    },
+
+    saveTemplate: async () => {
+      const { editingTemplate } = get()
+      if (!editingTemplate) return
+
+      try {
+        const apiBlocks = Object.values(editingTemplate.page.blocks).map(api.blockToApiFormat)
+        await api.templates.update(editingTemplate.contentTypeId, apiBlocks)
+
+        set((state) => {
+          if (state.editingTemplate) {
+            state.editingTemplate.hasUnsavedChanges = false
+          }
+        })
+
+        useActivityLogStore.getState().addEntry('file_save', `template:${editingTemplate.contentTypeId}`)
+      } catch (e) {
+        set((state) => {
+          state.error = e instanceof Error ? e.message : 'Failed to save template'
+        })
+      }
+    },
+
+    closeTemplateEditor: () => {
+      set((state) => {
+        state.editingTemplate = null
+      })
     },
   }))
 )
