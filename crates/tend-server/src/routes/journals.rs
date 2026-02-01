@@ -13,6 +13,7 @@ use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::routes::pages::UpdatePageRequest;
 use crate::state::AppState;
+use crate::ws::{BroadcastEvent, WsEvent};
 
 /// List all journals
 pub async fn list_journals(
@@ -145,6 +146,14 @@ pub async fn update_journal(
         index.index_page(&page)?;
         index.commit()?;
     }
+
+    // Broadcast update to other clients (ignore send errors - no receivers is ok)
+    let _ = state.event_sender.send(BroadcastEvent {
+        username: Some(user.username.clone()),
+        event: WsEvent::PageUpdated {
+            name: page.name.clone(),
+        },
+    });
 
     debug!("Updated journal: {} (version {})", date_str, page.version);
     Ok(Json(page))
