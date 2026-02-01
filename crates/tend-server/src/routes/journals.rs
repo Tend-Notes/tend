@@ -55,7 +55,7 @@ pub async fn get_today(
         {
             let blocks: Vec<_> = new_page.blocks.values().cloned().collect();
             let mut link_index = garden.link_index.write().await;
-            if let Err(e) = link_index.index_page(&new_page.name, &blocks) {
+            if let Err(e) = link_index.index_page(&new_page.name, &blocks).await {
                 tracing::warn!("Failed to update link index for journal {}: {}", new_page.name, e);
             }
         }
@@ -160,7 +160,7 @@ pub async fn update_journal(
     {
         let blocks: Vec<_> = page.blocks.values().cloned().collect();
         let mut link_index = garden.link_index.write().await;
-        if let Err(e) = link_index.index_page(&page.name, &blocks) {
+        if let Err(e) = link_index.index_page(&page.name, &blocks).await {
             tracing::warn!("Failed to update link index for journal {}: {}", page.name, e);
         }
     }
