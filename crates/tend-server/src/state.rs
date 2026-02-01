@@ -276,26 +276,28 @@ impl GardenState {
         );
 
         // Initialize block index (only for unencrypted gardens)
-        let block_index = if encrypted {
+        // Note: We'll populate this after construction if needed
+        let (block_index, needs_block_index_rebuild) = if encrypted {
             info!(
                 "Block references disabled for encrypted garden: {}",
                 data_dir.display()
             );
-            None
+            (None, false)
         } else {
             match BlockIndex::new(&data_dir) {
                 Ok(index) => {
                     let block_count = index.len().unwrap_or(0);
+                    let is_empty = index.is_empty().unwrap_or(true);
                     info!(
-                        "Block index initialized for garden: {} ({} blocks)",
+                        "Block index opened for garden: {} ({} blocks)",
                         data_dir.display(),
                         block_count
                     );
-                    Some(Arc::new(Mutex::new(index)))
+                    (Some(Arc::new(Mutex::new(index))), is_empty)
                 }
                 Err(e) => {
                     tracing::warn!("Failed to initialize block index: {}", e);
-                    None
+                    (None, false)
                 }
             }
         };
@@ -337,7 +339,7 @@ impl GardenState {
             (None, IndexStatus::NotBuilt)
         };
 
-        Ok(Self {
+        let state = Self {
             data_dir,
             file_manager,
             search_index,
@@ -348,7 +350,17 @@ impl GardenState {
             search_config,
             index_status: Arc::new(RwLock::new(index_status)),
             last_search_use: Arc::new(RwLock::new(None)),
-        })
+        };
+
+        // If block index exists but is empty, populate it from existing pages
+        if needs_block_index_rebuild {
+            info!("Populating empty block index from existing pages");
+            if let Err(e) = state.rebuild_block_index().await {
+                tracing::warn!("Failed to populate block index: {}", e);
+            }
+        }
+
+        Ok(state)
     }
 
     /// Check if the search index has expired based on TTL
