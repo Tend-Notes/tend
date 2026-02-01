@@ -829,6 +829,44 @@ export const usePageStore = create<PageState>()(
           state.isLoading = false
         })
       } catch (e) {
+        // If template doesn't exist (404), create an empty page structure
+        // The template will be created on first save via PUT
+        if (e instanceof Error && e.message.includes('404')) {
+          const emptyBlockUuid = crypto.randomUUID()
+          const emptyPage: Page = {
+            name: `template:${contentTypeId}`,
+            title: `${contentTypeName} Template`,
+            rootBlocks: [emptyBlockUuid],
+            blocks: {
+              [emptyBlockUuid]: {
+                uuid: emptyBlockUuid,
+                content: '',
+                parentUuid: null,
+                children: [],
+                collapsed: false,
+                properties: {},
+                depth: 0,
+              },
+            },
+            properties: {},
+            contentType: 'template',
+            isJournal: false,
+            journalDate: null,
+            createdAt: new Date().toISOString(),
+            modifiedAt: new Date().toISOString(),
+            version: 0,
+          }
+          set((state) => {
+            state.editingTemplate = {
+              contentTypeId,
+              contentTypeName,
+              page: emptyPage,
+              hasUnsavedChanges: false,
+            }
+            state.isLoading = false
+          })
+          return
+        }
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to load template'
           state.isLoading = false
