@@ -123,8 +123,16 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
                 }
             }
         }
-        // Empty line or other content - could be continuation of block content
-        // For now, we'll ignore non-bullet, non-property lines
+        // Continuation line - content that continues from the previous block
+        // This handles multiline content like code blocks where subsequent lines
+        // don't start with "- " but are part of the same block
+        else if let Some(ref mut block) = current_block {
+            // Append the line as continuation content
+            // Preserve the line exactly as-is (including leading whitespace)
+            block.content.push('\n');
+            block.content.push_str(line);
+        }
+        // Lines before any block that aren't properties are ignored
     }
 
     // Save the last block
@@ -480,5 +488,63 @@ aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa||0
         // Footer UUID should NOT be used since count doesn't match
         let footer_uuid = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
         assert!(!page.blocks.contains_key(&footer_uuid));
+    }
+
+    #[test]
+    fn test_parse_multiline_content() {
+        // Code blocks and other multiline content should be preserved
+        let content = r#"- ```js
+console.log("hello")
+```"#;
+
+        let page = parse_markdown(content, "Test").unwrap();
+
+        assert_eq!(page.blocks.len(), 1);
+        let block = page.blocks.values().next().unwrap();
+
+        // Content should include all lines
+        assert_eq!(block.content, "```js\nconsole.log(\"hello\")\n```");
+    }
+
+    #[test]
+    fn test_parse_multiline_code_block_with_blank_lines() {
+        // Code blocks with blank lines inside should preserve them
+        let content = r#"- ```rust
+fn main() {
+
+    println!("hello");
+}
+```"#;
+
+        let page = parse_markdown(content, "Test").unwrap();
+
+        assert_eq!(page.blocks.len(), 1);
+        let block = page.blocks.values().next().unwrap();
+
+        // Content should include all lines including blank line
+        assert_eq!(
+            block.content,
+            "```rust\nfn main() {\n\n    println!(\"hello\");\n}\n```"
+        );
+    }
+
+    #[test]
+    fn test_multiline_roundtrip() {
+        use crate::serializer::serialize_page;
+
+        // Create a page with multiline content
+        let mut page = Page::new("Test");
+        let mut block = Block::new("```js\nconsole.log(\"hello\")\n```".to_string());
+        block.uuid = Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa").unwrap();
+        page.add_block(block);
+
+        // Serialize and parse back
+        let serialized = serialize_page(&page);
+        let page2 = parse_markdown(&serialized, "Test").unwrap();
+
+        // Content should be preserved through roundtrip
+        assert_eq!(page2.blocks.len(), 1);
+        let block2 = page2.blocks.values().next().unwrap();
+        assert_eq!(block2.content, "```js\nconsole.log(\"hello\")\n```");
     }
 }
