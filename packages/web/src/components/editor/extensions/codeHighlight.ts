@@ -4,7 +4,7 @@
 // Uses lowlight (highlight.js compatible) to apply syntax highlighting
 // classes to code content within fenced code blocks.
 
-import { Extension } from '@codemirror/state'
+import { Extension, Range } from '@codemirror/state'
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view'
 import { createLowlight } from 'lowlight'
 
@@ -144,12 +144,38 @@ export function codeHighlightExtension(language: string): Extension {
       decorations: DecorationSet
 
       constructor(view: EditorView) {
-        this.decorations = highlightContent(view.state.doc.toString(), language)
+        this.decorations = this.buildDecorations(view, language)
+      }
+
+      buildDecorations(view: EditorView, lang: string): DecorationSet {
+        const content = view.state.doc.toString()
+        const docLength = view.state.doc.length
+
+        // Skip highlighting for very short content or empty code blocks
+        if (content.length < 7) return Decoration.none // Minimum: ```\n\n```
+
+        const decorations = highlightContent(content, lang)
+
+        // Validate all decorations are within document bounds
+        // Invalid ranges can cause CodeMirror rendering issues
+        try {
+          const validated: Range<Decoration>[] = []
+          const iter = decorations.iter()
+          while (iter.value) {
+            if (iter.from >= 0 && iter.to <= docLength && iter.from < iter.to) {
+              validated.push(iter.value.range(iter.from, iter.to))
+            }
+            iter.next()
+          }
+          return Decoration.set(validated, true)
+        } catch {
+          return Decoration.none
+        }
       }
 
       update(update: ViewUpdate) {
         if (update.docChanged) {
-          this.decorations = highlightContent(update.state.doc.toString(), language)
+          this.decorations = this.buildDecorations(update.view, language)
         }
       }
     },
