@@ -31,6 +31,9 @@ interface CodeBlockInfo {
 
 // Detect code fence regions by scanning block content in document order
 // Returns a map of block UUID to code block metadata
+// Supports two modes:
+// 1. Single-block: ``` at start, ``` at end, code in between (all in one block)
+// 2. Multi-block: Opening ``` on its own block, content blocks, closing ``` on its own block
 function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): Map<string, CodeBlockInfo> {
   const result = new Map<string, CodeBlockInfo>()
   let inCodeBlock = false
@@ -43,6 +46,22 @@ function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): M
     if (!block) continue
 
     const content = block.content.trim()
+
+    // Check for single-block code fence: starts with ```, ends with ```
+    // Pattern: ```lang followed by content and closing ```
+    // Handles: ```js\ncode\n``` or ```js\ncode```  (with or without trailing newline)
+    const singleBlockMatch = content.match(/^```([\w+#-]*)[\r\n]+([\s\S]*?)[\r\n]*```$/)
+    if (singleBlockMatch) {
+      result.set(uuid, {
+        isCodeBlock: true,
+        isStart: true,
+        isEnd: true,
+        language: singleBlockMatch[1] || '',
+      })
+      continue
+    }
+
+    // Multi-block detection: opening fence on its own line/block
     // Match opening fence: ``` optionally followed by language identifier
     // Language can include letters, numbers, hyphens, plus signs (e.g., c++, vue-template)
     const openMatch = content.match(/^```([\w+#-]*)$/)
@@ -812,7 +831,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
           )}
 
           {/* Seed - editable content */}
-          <div className="flex-1">
+          <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''}`}>
             <Seed
               block={block}
               isSelected={isSelected}
@@ -826,7 +845,7 @@ export function Plots({ page, readonly = false }: PlotsProps) {
                 clearSelection()
               }}
               readonly={readonly}
-              isCodeBlock={isCodeBlock && !isCodeStart && !isCodeEnd}
+              isCodeBlock={isCodeBlock}
               codeLanguage={codeLanguage}
             />
           </div>
