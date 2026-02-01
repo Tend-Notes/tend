@@ -69,7 +69,7 @@ pub async fn create_page(
     {
         let blocks: Vec<_> = page.blocks.values().cloned().collect();
         let mut link_index = garden.link_index.write().await;
-        if let Err(e) = link_index.index_page(&page.name, &blocks) {
+        if let Err(e) = link_index.index_page(&page.name, &blocks).await {
             tracing::warn!("Failed to update link index for page {}: {}", page.name, e);
         }
     }
@@ -238,7 +238,7 @@ pub async fn update_page(
     {
         let blocks: Vec<_> = page.blocks.values().cloned().collect();
         let mut link_index = garden.link_index.write().await;
-        if let Err(e) = link_index.index_page(&page.name, &blocks) {
+        if let Err(e) = link_index.index_page(&page.name, &blocks).await {
             tracing::warn!("Failed to update link index for page {}: {}", page.name, e);
         }
     }
@@ -273,7 +273,7 @@ pub async fn delete_page(
     // Remove from link index
     {
         let mut link_index = garden.link_index.write().await;
-        if let Err(e) = link_index.remove_page(&name) {
+        if let Err(e) = link_index.remove_page(&name).await {
             tracing::warn!("Failed to remove page {} from link index: {}", name, e);
         }
     }

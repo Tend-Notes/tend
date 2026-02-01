@@ -7,10 +7,10 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use tend_core::Block;
 use thiserror::Error;
+use tokio::fs;
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -124,12 +124,12 @@ impl LinkIndex {
     ///
     /// If the index file exists, it will be loaded. Otherwise, a new empty
     /// index will be created.
-    pub fn new(path: PathBuf) -> Result<Self> {
+    pub async fn new(path: PathBuf) -> Result<Self> {
         let index_file = path.join("links.json");
 
         let data = if index_file.exists() {
             info!(?index_file, "Loading existing link index");
-            let contents = fs::read_to_string(&index_file)?;
+            let contents = fs::read_to_string(&index_file).await?;
             serde_json::from_str(&contents)?
         } else {
             info!(?index_file, "Creating new link index");
@@ -165,11 +165,11 @@ impl LinkIndex {
     }
 
     /// Persist the index to disk
-    fn persist(&self) -> Result<()> {
-        fs::create_dir_all(&self.path)?;
+    async fn persist(&self) -> Result<()> {
+        fs::create_dir_all(&self.path).await?;
         let index_file = self.path.join("links.json");
         let contents = serde_json::to_string_pretty(&self.data)?;
-        fs::write(&index_file, contents)?;
+        fs::write(&index_file, contents).await?;
         debug!(?index_file, entries = self.data.entries.len(), "Persisted link index");
         Ok(())
     }
@@ -177,7 +177,7 @@ impl LinkIndex {
     /// Index a page, extracting all links from its blocks
     ///
     /// This will remove any existing links from this page before adding new ones.
-    pub fn index_page(&mut self, page_name: &str, blocks: &[Block]) -> Result<()> {
+    pub async fn index_page(&mut self, page_name: &str, blocks: &[Block]) -> Result<()> {
         let source_hash = hash_page_name(page_name);
         debug!(%page_name, %source_hash, blocks = blocks.len(), "Indexing page");
 
@@ -232,16 +232,16 @@ impl LinkIndex {
             self.data.entries.push(entry);
         }
 
-        self.persist()
+        self.persist().await
     }
 
     /// Remove all links originating from a page
-    pub fn remove_page(&mut self, page_name: &str) -> Result<()> {
+    pub async fn remove_page(&mut self, page_name: &str) -> Result<()> {
         let source_hash = hash_page_name(page_name);
         debug!(%page_name, %source_hash, "Removing page from link index");
 
         self.remove_page_internal(&source_hash);
-        self.persist()
+        self.persist().await
     }
 
     /// Internal method to remove links by source hash without persisting
@@ -290,7 +290,7 @@ impl LinkIndex {
     /// Rebuild the entire index from a collection of pages
     ///
     /// This clears the existing index and rebuilds it from scratch.
-    pub fn rebuild_all<I>(&mut self, pages: I) -> Result<()>
+    pub async fn rebuild_all<I>(&mut self, pages: I) -> Result<()>
     where
         I: Iterator<Item = (String, Vec<Block>)>,
     {
@@ -357,7 +357,7 @@ impl LinkIndex {
             "Rebuilt link index"
         );
 
-        self.persist()
+        self.persist().await
     }
 
     /// Get the total number of link entries in the index
@@ -411,24 +411,24 @@ mod tests {
         assert_eq!(hash1.len(), 64);
     }
 
-    #[test]
-    fn test_link_index_new() {
+    #[tokio::test]
+    async fn test_link_index_new() {
         let temp_dir = TempDir::new().unwrap();
-        let index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
         assert!(index.is_empty());
     }
 
-    #[test]
-    fn test_index_page_with_wiki_links() {
+    #[tokio::test]
+    async fn test_index_page_with_wiki_links() {
         let temp_dir = TempDir::new().unwrap();
-        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
 
         let blocks = vec![
             Block::new("Check out [[Target Page]] for more info"),
             Block::new("Also see [[Another Page]]"),
         ];
 
-        index.index_page("Source Page", &blocks).unwrap();
+        index.index_page("Source Page", &blocks).await.unwrap();
 
         // Should have 2 link entries
         assert_eq!(index.len(), 2);
@@ -440,14 +440,14 @@ mod tests {
         assert_eq!(backlinks[0].source_hash, hash_page_name("Source Page"));
     }
 
-    #[test]
-    fn test_index_page_with_tags() {
+    #[tokio::test]
+    async fn test_index_page_with_tags() {
         let temp_dir = TempDir::new().unwrap();
-        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
 
         let blocks = vec![Block::new("This is #project and #important")];
 
-        index.index_page("Notes", &blocks).unwrap();
+        index.index_page("Notes", &blocks).await.unwrap();
 
         assert_eq!(index.len(), 2);
 
@@ -456,36 +456,36 @@ mod tests {
         assert_eq!(backlinks[0].link_type, LinkType::Tag);
     }
 
-    #[test]
-    fn test_remove_page() {
+    #[tokio::test]
+    async fn test_remove_page() {
         let temp_dir = TempDir::new().unwrap();
-        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
 
         let blocks = vec![Block::new("Link to [[Target]]")];
-        index.index_page("Source", &blocks).unwrap();
+        index.index_page("Source", &blocks).await.unwrap();
         assert_eq!(index.len(), 1);
 
-        index.remove_page("Source").unwrap();
+        index.remove_page("Source").await.unwrap();
         assert_eq!(index.len(), 0);
 
         let backlinks = index.get_backlinks("Target");
         assert!(backlinks.is_empty());
     }
 
-    #[test]
-    fn test_reindex_page_replaces_links() {
+    #[tokio::test]
+    async fn test_reindex_page_replaces_links() {
         let temp_dir = TempDir::new().unwrap();
-        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
 
         // Initial index
         let blocks1 = vec![Block::new("Link to [[Old Target]]")];
-        index.index_page("Source", &blocks1).unwrap();
+        index.index_page("Source", &blocks1).await.unwrap();
         assert_eq!(index.len(), 1);
         assert_eq!(index.get_backlinks("Old Target").len(), 1);
 
         // Re-index with different links
         let blocks2 = vec![Block::new("Link to [[New Target]]")];
-        index.index_page("Source", &blocks2).unwrap();
+        index.index_page("Source", &blocks2).await.unwrap();
 
         // Should still have 1 link, but to new target
         assert_eq!(index.len(), 1);
@@ -493,30 +493,30 @@ mod tests {
         assert_eq!(index.get_backlinks("New Target").len(), 1);
     }
 
-    #[test]
-    fn test_persistence() {
+    #[tokio::test]
+    async fn test_persistence() {
         let temp_dir = TempDir::new().unwrap();
 
         // Create and populate index
         {
-            let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+            let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
             let blocks = vec![Block::new("Link to [[Target]]")];
-            index.index_page("Source", &blocks).unwrap();
+            index.index_page("Source", &blocks).await.unwrap();
         }
 
         // Load index and verify
         {
-            let index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+            let index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
             assert_eq!(index.len(), 1);
             let backlinks = index.get_backlinks("Target");
             assert_eq!(backlinks.len(), 1);
         }
     }
 
-    #[test]
-    fn test_rebuild_all() {
+    #[tokio::test]
+    async fn test_rebuild_all() {
         let temp_dir = TempDir::new().unwrap();
-        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
 
         let pages = vec![
             (
@@ -529,7 +529,7 @@ mod tests {
             ),
         ];
 
-        index.rebuild_all(pages.into_iter()).unwrap();
+        index.rebuild_all(pages.into_iter()).await.unwrap();
 
         assert_eq!(index.len(), 3);
         assert_eq!(index.get_backlinks("Page B").len(), 1);
@@ -537,13 +537,13 @@ mod tests {
         assert_eq!(index.get_backlinks("Page C").len(), 1);
     }
 
-    #[test]
-    fn test_case_insensitive_backlinks() {
+    #[tokio::test]
+    async fn test_case_insensitive_backlinks() {
         let temp_dir = TempDir::new().unwrap();
-        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
 
         let blocks = vec![Block::new("Link to [[My Page]]")];
-        index.index_page("Source", &blocks).unwrap();
+        index.index_page("Source", &blocks).await.unwrap();
 
         // Should find backlinks regardless of case
         assert_eq!(index.get_backlinks("My Page").len(), 1);
@@ -551,16 +551,16 @@ mod tests {
         assert_eq!(index.get_backlinks("MY PAGE").len(), 1);
     }
 
-    #[test]
-    fn test_multiple_links_to_same_target() {
+    #[tokio::test]
+    async fn test_multiple_links_to_same_target() {
         let temp_dir = TempDir::new().unwrap();
-        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
 
         let blocks = vec![
             Block::new("First link to [[Target]]"),
             Block::new("Second link to [[Target]]"),
         ];
-        index.index_page("Source", &blocks).unwrap();
+        index.index_page("Source", &blocks).await.unwrap();
 
         let backlinks = index.get_backlinks("Target");
         assert_eq!(backlinks.len(), 2);

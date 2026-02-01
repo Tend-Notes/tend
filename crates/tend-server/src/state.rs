@@ -261,13 +261,15 @@ impl GardenState {
         // Initialize link index
         let link_index_path = data_dir.join(".tend").join("link_index");
         let link_index = LinkIndex::new(link_index_path)
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to initialize link index: {}", e))?;
+        let link_entries = link_index.len();
         let link_index = Arc::new(RwLock::new(link_index));
         info!(
             "Link index initialized for {} garden: {} ({} entries)",
             if encrypted { "encrypted" } else { "plain" },
             data_dir.display(),
-            link_index.blocking_read().len()
+            link_entries
         );
 
         // Determine initial index status and open existing index if available
@@ -468,6 +470,7 @@ impl GardenState {
         let mut link_index = self.link_index.write().await;
         link_index
             .rebuild_all(pages_iter.into_iter())
+            .await
             .map_err(|e| anyhow::anyhow!("Failed to rebuild link index: {}", e))?;
 
         info!("Link index rebuilt with {} entries", link_index.len());
