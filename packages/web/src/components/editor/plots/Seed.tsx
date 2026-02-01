@@ -14,7 +14,7 @@
 
 import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState, useMemo } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
-import { EditorState, Prec, type Extension } from '@codemirror/state'
+import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Block } from '../../../types'
 import { useActions } from './Actions'
@@ -147,6 +147,9 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     const containerRef = useRef<HTMLDivElement>(null)
     const viewRef = useRef<EditorView | null>(null)
     const contentRef = useRef(block.content)
+
+    // Compartment for dynamically switching between code highlighting and normal formatting
+    const contentCompartmentRef = useRef(new Compartment())
 
     // Code highlighting extension (only for code content blocks)
     const codeHighlighting = useMemo(() => {
@@ -539,7 +542,8 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           mobileContentEditable,
           EditorView.lineWrapping,
           EditorView.editable.of(!readonly),
-          ...contentExtensions,
+          // Use compartment for content extensions so they can be reconfigured
+          contentCompartmentRef.current.of(contentExtensions),
         ],
       })
 
@@ -555,6 +559,20 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
         viewRef.current = null
       }
     }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Reconfigure content extensions when code block status changes
+    useEffect(() => {
+      const view = viewRef.current
+      if (!view) return
+
+      const contentExtensions = isCodeBlock
+        ? codeHighlighting
+        : actionExtensions
+
+      view.dispatch({
+        effects: contentCompartmentRef.current.reconfigure(contentExtensions),
+      })
+    }, [isCodeBlock, codeHighlighting, actionExtensions])
 
     // Sync content from props when it changes externally
     useEffect(() => {
