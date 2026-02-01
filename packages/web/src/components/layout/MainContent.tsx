@@ -6,7 +6,6 @@ import { useUIStore } from '../../stores/uiStore'
 import { OutlinerEditor } from '../editor/OutlinerEditor'
 import { TemplateEditor } from '../editor/TemplateEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
-import { ActivityLog } from '../ui/ActivityLog'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
 import { MobileToolbar } from '../ui/MobileToolbar'
@@ -274,9 +273,6 @@ export function MainContent() {
           )}
         </div>
       </div>
-
-      {/* Activity log at the bottom - desktop only */}
-      {!isMobile && <ActivityLog />}
 
       {/* Mobile toolbar - vertical strip on right edge */}
       {isMobile && (
