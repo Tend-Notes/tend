@@ -54,15 +54,33 @@ function createClassDecoration(className: string): Decoration {
   })
 }
 
+// Extract code content from fenced code block, returning offset and code
+function extractCodeContent(content: string): { code: string; offset: number } | null {
+  // Match fenced code block: ```lang\n...code...\n```
+  const match = content.match(/^```[\w+#-]*\r?\n([\s\S]*?)\r?\n```$/)
+  if (match) {
+    // Find where the code starts (after opening fence + newline)
+    const openingFenceEnd = content.indexOf('\n') + 1
+    return { code: match[1], offset: openingFenceEnd }
+  }
+  // No fence markers, treat entire content as code
+  return { code: content, offset: 0 }
+}
+
 // Parse highlighted content and create decorations
 function highlightContent(content: string, language: string): DecorationSet {
   const decorations: { from: number; to: number; decoration: Decoration }[] = []
 
+  // Extract just the code portion (excluding fence markers)
+  const extracted = extractCodeContent(content)
+  if (!extracted) return Decoration.none
+  const { code, offset } = extracted
+
   try {
-    // Use lowlight to parse the content
+    // Use lowlight to parse the code content
     const result = language && lowlight.registered(language)
-      ? lowlight.highlight(language, content)
-      : lowlight.highlightAuto(content)
+      ? lowlight.highlight(language, code)
+      : lowlight.highlightAuto(code)
 
     // Walk the HAST tree and collect decorations
     let pos = 0
@@ -107,8 +125,9 @@ function highlightContent(content: string, language: string): DecorationSet {
     return Decoration.none
   }
 
+  // Apply offset to position decorations correctly in the full content
   return Decoration.set(
-    decorations.map(d => d.decoration.range(d.from, d.to)),
+    decorations.map(d => d.decoration.range(d.from + offset, d.to + offset)),
     true
   )
 }
