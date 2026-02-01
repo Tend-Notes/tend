@@ -193,6 +193,9 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     onFocusRef.current = onFocus
     const onBlurRef = useRef(onBlur)
     onBlurRef.current = onBlur
+    // Track code block state for Enter key behavior
+    const isCodeBlockRef = useRef(isCodeBlock)
+    isCodeBlockRef.current = isCodeBlock
 
     // Expose methods via ref
     useImperativeHandle(
@@ -245,10 +248,14 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     const createBoundaryKeymap = useCallback(() => {
       return Prec.highest(
         keymap.of([
-          // Enter - split block
+          // Enter - split block (or insert newline in code blocks)
           {
             key: 'Enter',
             run: (view) => {
+              // In code blocks, Enter inserts a newline instead of creating new block
+              if (isCodeBlockRef.current) {
+                return false // Let CodeMirror handle it
+              }
               onBoundaryEventRef.current({
                 type: 'enter',
                 cursorOffset: view.state.selection.main.head,
