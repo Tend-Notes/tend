@@ -127,8 +127,20 @@ fn user_gardens_config_path(username: &str) -> PathBuf {
 }
 
 /// Load content types for the active garden (used by sheets routes)
+/// DEPRECATED: Use load_user_content_types for multi-tenant support
 pub fn load_content_types() -> Result<Vec<ContentType>, crate::error::AppError> {
     let config = load_gardens_config();
+    let garden = config
+        .gardens
+        .iter()
+        .find(|g| g.id == config.active)
+        .ok_or_else(|| crate::error::AppError::NotFound("Active garden not found".to_string()))?;
+    Ok(garden.content_types.clone())
+}
+
+/// Load content types for the active garden for a specific user (multi-tenant)
+pub fn load_user_content_types(username: &str) -> Result<Vec<ContentType>, crate::error::AppError> {
+    let config = load_user_gardens_config(username);
     let garden = config
         .gardens
         .iter()

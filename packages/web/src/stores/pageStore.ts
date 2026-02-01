@@ -922,6 +922,12 @@ export const usePageStore = create<PageState>()(
       if (!editingTemplate) return
 
       try {
+        // First, ensure the content type is saved to the server.
+        // This prevents 404 errors when creating sheets if the user edited a template
+        // for a newly-created content type without saving the content type config first.
+        const contentTypes = useSettingsStore.getState().contentTypes
+        await api.contentTypes.update(contentTypes)
+
         const apiBlocks = Object.values(editingTemplate.page.blocks).map(api.blockToApiFormat)
         await api.templates.update(editingTemplate.contentTypeId, apiBlocks)
 

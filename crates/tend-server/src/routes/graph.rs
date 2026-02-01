@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
-use crate::routes::gardens::load_content_types;
+use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 
 /// A node in the knowledge graph
@@ -64,7 +64,7 @@ pub async fn get_graph(
     let mut content_types_used: HashSet<String> = HashSet::new();
 
     // Get all content types for this garden
-    let content_types = load_content_types().unwrap_or_default();
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
 
     // Collect sheets from all content types
     for ct in &content_types {

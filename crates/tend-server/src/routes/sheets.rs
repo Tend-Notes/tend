@@ -17,7 +17,7 @@ use crate::error::AppError;
 use crate::routes::pages::BlockData;
 use crate::state::AppState;
 
-use super::gardens::load_content_types;
+use super::gardens::load_user_content_types;
 
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
@@ -189,9 +189,9 @@ pub struct UpdateSheetRequest {
     pub version: Option<u64>,
 }
 
-/// Look up a content type by ID from the active garden's config
-fn get_content_type(content_type_id: &str) -> Result<ContentType, AppError> {
-    let content_types = load_content_types()?;
+/// Look up a content type by ID from the active garden's config for a user
+fn get_content_type(content_type_id: &str, username: &str) -> Result<ContentType, AppError> {
+    let content_types = load_user_content_types(username)?;
 
     content_types
         .into_iter()
@@ -215,7 +215,7 @@ pub async fn list_sheets(
     user: AuthenticatedUser,
     Path(content_type_id): Path<String>,
 ) -> Result<Json<Vec<PageMeta>>, AppError> {
-    let content_type = get_content_type(&content_type_id)?;
+    let content_type = get_content_type(&content_type_id, &user.username)?;
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
     let sheets = garden.file_manager.list_sheets(&content_type).await?;
@@ -229,7 +229,7 @@ pub async fn get_sheet(
     Path(path): Path<SheetPath>,
     Query(query): Query<SheetQuery>,
 ) -> Result<Json<Page>, AppError> {
-    let content_type = get_content_type(&path.content_type)?;
+    let content_type = get_content_type(&path.content_type, &user.username)?;
     let date = parse_date(&query.date)?;
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
@@ -244,7 +244,7 @@ pub async fn create_sheet(
     Path(content_type_id): Path<String>,
     Json(req): Json<CreateSheetRequest>,
 ) -> Result<Json<CreateSheetResponse>, AppError> {
-    let content_type = get_content_type(&content_type_id)?;
+    let content_type = get_content_type(&content_type_id, &user.username)?;
     let date = parse_date(&req.date)?;
 
     // For save_by_date types, use today if no date provided
@@ -344,7 +344,7 @@ pub async fn update_sheet(
     Query(query): Query<SheetQuery>,
     Json(req): Json<UpdateSheetRequest>,
 ) -> Result<Json<Page>, AppError> {
-    let content_type = get_content_type(&path.content_type)?;
+    let content_type = get_content_type(&path.content_type, &user.username)?;
     let date = parse_date(&query.date)?;
 
     let user_state = state.get_user_state(&user.username).await?;
@@ -422,7 +422,7 @@ pub async fn delete_sheet(
     Path(path): Path<SheetPath>,
     Query(query): Query<SheetQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let content_type = get_content_type(&path.content_type)?;
+    let content_type = get_content_type(&path.content_type, &user.username)?;
     let date = parse_date(&query.date)?;
 
     let user_state = state.get_user_state(&user.username).await?;
