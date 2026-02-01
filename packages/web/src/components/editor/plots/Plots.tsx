@@ -771,10 +771,17 @@ export function Plots({ page, readonly = false }: PlotsProps) {
       isCodeEnd ? 'block-container--code-end' : '',
     ].filter(Boolean).join(' ')
 
+    // Code blocks need to break out of nesting indentation to be full width
+    // Each nesting level adds 36px (ml-6=24px + pl-3=12px)
+    const codeBlockStyle = isCodeBlock && block.depth > 0
+      ? { marginLeft: `calc(-${block.depth} * 36px)` }
+      : undefined
+
     return (
       <div
         key={block.uuid}
         className={containerClasses}
+        style={codeBlockStyle}
         data-block-id={block.uuid}
         data-code-language={isCodeBlock ? codeLanguage : undefined}
         onClick={(e) => {
