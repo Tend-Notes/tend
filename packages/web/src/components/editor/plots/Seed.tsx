@@ -252,9 +252,21 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
           {
             key: 'Enter',
             run: (view) => {
-              // In code blocks, Enter inserts a newline instead of creating new block
+              // In code blocks, Enter inserts newline UNLESS cursor is at very end
+              // (after closing ```), in which case exit the code block
               if (isCodeBlockRef.current) {
-                return false // Let CodeMirror handle it
+                const content = view.state.doc.toString()
+                const cursorPos = view.state.selection.main.head
+                // If cursor is at the very end, exit code block
+                if (cursorPos === content.length) {
+                  onBoundaryEventRef.current({
+                    type: 'enter',
+                    cursorOffset: cursorPos,
+                    content: content,
+                  })
+                  return true
+                }
+                return false // Let CodeMirror handle it (insert newline)
               }
               onBoundaryEventRef.current({
                 type: 'enter',
@@ -269,18 +281,40 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
             key: 'Shift-Enter',
             run: () => false,
           },
-          // Tab - indent
+          // Tab - indent block (or insert spaces in code blocks)
           {
             key: 'Tab',
-            run: () => {
+            run: (view) => {
+              // In code blocks, Tab inserts spaces instead of indenting block
+              if (isCodeBlockRef.current) {
+                view.dispatch(view.state.replaceSelection('  '))
+                return true
+              }
               onBoundaryEventRef.current({ type: 'tab' })
               return true
             },
           },
-          // Shift+Tab - outdent
+          // Shift+Tab - outdent block (or remove indent in code blocks)
           {
             key: 'Shift-Tab',
-            run: () => {
+            run: (view) => {
+              // In code blocks, Shift+Tab removes leading spaces on current line
+              if (isCodeBlockRef.current) {
+                const { state } = view
+                const line = state.doc.lineAt(state.selection.main.head)
+                const lineText = line.text
+                // Remove up to 2 leading spaces
+                if (lineText.startsWith('  ')) {
+                  view.dispatch({
+                    changes: { from: line.from, to: line.from + 2, insert: '' }
+                  })
+                } else if (lineText.startsWith(' ')) {
+                  view.dispatch({
+                    changes: { from: line.from, to: line.from + 1, insert: '' }
+                  })
+                }
+                return true
+              }
               onBoundaryEventRef.current({ type: 'shift-tab' })
               return true
             },
