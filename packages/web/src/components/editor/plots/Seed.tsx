@@ -149,9 +149,9 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
     const contentRef = useRef(block.content)
 
     // Code highlighting extension (only for code content blocks)
+    // TEMPORARILY DISABLED to debug rendering issue
     const codeHighlighting = useMemo(() => {
-      if (!isCodeBlock) return []
-      return [codeHighlightExtension(codeLanguage)]
+      return [] // Disabled: [codeHighlightExtension(codeLanguage)]
     }, [isCodeBlock, codeLanguage])
 
     // Track wikilink popup state
