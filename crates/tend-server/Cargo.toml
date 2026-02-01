@@ -45,6 +45,9 @@ directories = { workspace = true }
 # Date/time
 chrono = { workspace = true }
 
+# UUID
+uuid = { workspace = true }
+
 # Regex
 regex = { workspace = true }
 

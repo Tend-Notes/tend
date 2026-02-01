@@ -10,6 +10,7 @@ use axum::Json;
 use chrono::NaiveDate;
 use serde::Deserialize;
 use tend_core::{Block, ContentType, Page, PageMeta};
+use uuid::Uuid;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
@@ -17,6 +18,64 @@ use crate::routes::pages::BlockData;
 use crate::state::AppState;
 
 use super::gardens::load_content_types;
+
+/// Helper function to copy a block tree from a template page to a new page.
+/// Creates new UUIDs for all blocks while preserving the tree structure.
+fn copy_block_tree(
+    template: &Page,
+    template_uuid: Uuid,
+    new_parent_uuid: Option<Uuid>,
+    target: &mut Page,
+) {
+    if let Some(template_block) = template.blocks.get(&template_uuid) {
+        // Create a new block with a new UUID but same content
+        let new_uuid = Uuid::new_v4();
+        let mut new_block = Block::with_uuid(new_uuid, &template_block.content);
+        new_block.collapsed = template_block.collapsed;
+        new_block.properties = template_block.properties.clone();
+        new_block.parent_uuid = new_parent_uuid;
+
+        // Recursively copy children and collect their new UUIDs
+        let mut new_children = Vec::new();
+        for child_uuid in &template_block.children {
+            if template.blocks.contains_key(child_uuid) {
+                let child_new_uuid = copy_block_tree_inner(template, *child_uuid, Some(new_uuid), target);
+                new_children.push(child_new_uuid);
+            }
+        }
+        new_block.children = new_children;
+
+        target.add_block(new_block);
+    }
+}
+
+/// Inner recursive helper that returns the new UUID of the copied block
+fn copy_block_tree_inner(
+    template: &Page,
+    template_uuid: Uuid,
+    new_parent_uuid: Option<Uuid>,
+    target: &mut Page,
+) -> Uuid {
+    let template_block = template.blocks.get(&template_uuid).unwrap();
+
+    // Create a new block with a new UUID but same content
+    let new_uuid = Uuid::new_v4();
+    let mut new_block = Block::with_uuid(new_uuid, &template_block.content);
+    new_block.collapsed = template_block.collapsed;
+    new_block.properties = template_block.properties.clone();
+    new_block.parent_uuid = new_parent_uuid;
+
+    // Recursively copy children
+    let mut new_children = Vec::new();
+    for child_uuid in &template_block.children {
+        let child_new_uuid = copy_block_tree_inner(template, *child_uuid, Some(new_uuid), target);
+        new_children.push(child_new_uuid);
+    }
+    new_block.children = new_children;
+
+    target.add_block(new_block);
+    new_uuid
+}
 
 /// Path parameters for sheet routes
 #[derive(Debug, Deserialize)]
@@ -133,12 +192,35 @@ pub async fn create_sheet(
     let mut page = Page::new(&req.name);
 
     // Apply template if available
-    let initial_content = req.content
-        .or_else(|| if !content_type.template.is_empty() { Some(content_type.template.clone()) } else { None });
-
-    if let Some(content) = initial_content {
-        let block = Block::new(content);
+    // Priority: 1) Request content, 2) Template file, 3) Config template string
+    if let Some(content) = &req.content {
+        // User provided explicit content
+        let block = Block::new(content.clone());
         page.add_block(block);
+    } else {
+        // Try to load template file first
+        let template_path = garden
+            .file_manager
+            .root()
+            .join(".tend")
+            .join("templates")
+            .join(format!("{}.md", content_type_id));
+
+        if template_path.exists() {
+            // Use template file - copy its blocks with new UUIDs
+            if let Ok(template_content) = tokio::fs::read_to_string(&template_path).await {
+                if let Ok(template_page) = tend_core::parser::parse_markdown(&template_content, &content_type_id) {
+                    // Copy blocks from template with new UUIDs
+                    for root_uuid in &template_page.root_blocks {
+                        copy_block_tree(&template_page, *root_uuid, None, &mut page);
+                    }
+                }
+            }
+        } else if !content_type.template.is_empty() {
+            // Fall back to config.template string for backwards compat
+            let block = Block::new(content_type.template.clone());
+            page.add_block(block);
+        }
     }
 
     garden.file_manager.write_sheet(&content_type, &page, date).await?;

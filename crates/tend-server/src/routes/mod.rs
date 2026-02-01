@@ -19,6 +19,7 @@ mod graph;
 mod gardens;
 mod sheets;
 mod tags;
+mod templates;
 mod todos;
 mod import;
 mod user;
@@ -83,6 +84,10 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/sheets/{content_type}/{name}", get(sheets::get_sheet))
         .route("/sheets/{content_type}/{name}", put(sheets::update_sheet))
         .route("/sheets/{content_type}/{name}", delete(sheets::delete_sheet))
+        // Templates (content type template files)
+        .route("/templates/{content_type_id}", get(templates::get_template))
+        .route("/templates/{content_type_id}", put(templates::update_template))
+        .route("/templates/{content_type_id}", delete(templates::delete_template))
         // Import
         .route("/import/logseq", post(import::import_logseq))
         // Identity
