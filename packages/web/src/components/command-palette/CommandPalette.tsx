@@ -143,8 +143,8 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     }
   }, [])
 
-  // Actually create the sheet
-  const handleCreateSheet = useCallback(async () => {
+  // Insert wikilink for the sheet (lazy creation happens when link is clicked)
+  const handleCreateSheet = useCallback(() => {
     if (!creatingSheet || !sheetName.trim()) return
 
     // Check for name collision (case-insensitive)
@@ -154,33 +154,26 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       return
     }
 
-    try {
-      const dateOption = creatingSheet.saveByDate
-        ? (useToday ? new Date().toISOString().split('T')[0] : sheetDate)
-        : undefined
-      await api.sheets.create(creatingSheet.id, sheetName.trim(), { date: dateOption })
+    // Build the wiki link path based on content type
+    // Format: [[directory/name]] or [[directory/date/name]] for saveByDate types
+    const dateOption = creatingSheet.saveByDate
+      ? (useToday ? new Date().toISOString().split('T')[0] : sheetDate)
+      : undefined
+    const linkPath = creatingSheet.saveByDate && dateOption
+      ? `${creatingSheet.directory}/${dateOption}/${sheetName.trim()}`
+      : `${creatingSheet.directory}/${sheetName.trim()}`
+    const wikiLink = `[[${linkPath}]]`
 
-      // Build the wiki link path based on content type
-      // Format: [[directory/name]] or [[directory/date/name]] for saveByDate types
-      const linkPath = creatingSheet.saveByDate && dateOption
-        ? `${creatingSheet.directory}/${dateOption}/${sheetName.trim()}`
-        : `${creatingSheet.directory}/${sheetName.trim()}`
-      const wikiLink = `[[${linkPath}]]`
-
-      // Invoke callback to insert link at cursor position
-      // Use explicit callback if provided, otherwise fall back to global insert
-      if (onSheetCreated) {
-        onSheetCreated(wikiLink)
-      } else if (insertTextAtCursor) {
-        // Add a space after the wiki-link for continued typing
-        insertTextAtCursor(wikiLink + ' ')
-      }
-
-      onOpenChange(false)
-    } catch (err) {
-      console.error(`Failed to create ${creatingSheet.name}:`, err)
-      setSheetError(err instanceof Error ? err.message : `Failed to create ${creatingSheet.name}`)
+    // Invoke callback to insert link at cursor position
+    // Use explicit callback if provided, otherwise fall back to global insert
+    if (onSheetCreated) {
+      onSheetCreated(wikiLink)
+    } else if (insertTextAtCursor) {
+      // Add a space after the wiki-link for continued typing
+      insertTextAtCursor(wikiLink + ' ')
     }
+
+    onOpenChange(false)
   }, [creatingSheet, sheetName, useToday, sheetDate, onOpenChange, onSheetCreated, existingSheets, insertTextAtCursor])
 
   // Git: Commit now (auto-generated message)

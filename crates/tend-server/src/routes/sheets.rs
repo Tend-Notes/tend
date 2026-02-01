@@ -22,15 +22,6 @@ use super::gardens::load_user_content_types;
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
 
-// Debug logging for cursor position tracking
-fn debug_cursor(msg: &str, cursor_position: &Option<CursorPosition>) {
-    if let Some(pos) = cursor_position {
-        tracing::info!("[CURSOR DEBUG] {} - block_uuid: {}, offset: {}", msg, pos.block_uuid, pos.offset);
-    } else {
-        tracing::info!("[CURSOR DEBUG] {} - None", msg);
-    }
-}
-
 /// Cursor position information for template instantiation
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -279,12 +270,10 @@ pub async fn create_sheet(
 
     // Track cursor position from template {{cursor}} marker
     let mut cursor_position: Option<CursorPosition> = None;
-    tracing::info!("[CURSOR DEBUG] create_sheet called for content_type: {}, name: {}", content_type_id, req.name);
 
     // Apply template if available
     // Priority: 1) Request content, 2) Template file, 3) Config template string
     if let Some(content) = &req.content {
-        tracing::info!("[CURSOR DEBUG] Using request content: {:?}", content);
         // User provided explicit content - check for cursor marker
         let (processed_content, found_offset) = process_cursor_marker(content, true);
         if let Some(offset) = found_offset {
@@ -308,26 +297,16 @@ pub async fn create_sheet(
             .join(format!("{}.md", content_type_id));
 
         if template_path.exists() {
-            tracing::info!("[CURSOR DEBUG] Template file exists at: {:?}", template_path);
             // Use template file - copy its blocks with new UUIDs
             if let Ok(template_content) = tokio::fs::read_to_string(&template_path).await {
-                tracing::info!("[CURSOR DEBUG] Template content: {:?}", template_content);
-                tracing::info!("[CURSOR DEBUG] Template contains {{{{cursor}}}}: {}", template_content.contains(CURSOR_MARKER));
                 if let Ok(template_page) = tend_core::parser::parse_markdown(&template_content, &content_type_id) {
-                    tracing::info!("[CURSOR DEBUG] Parsed template page with {} root blocks", template_page.root_blocks.len());
-                    // Log each block's content to see if cursor marker survived parsing
-                    for (uuid, block) in &template_page.blocks {
-                        tracing::info!("[CURSOR DEBUG] Template block {}: {:?}", uuid, block.content);
-                    }
                     // Copy blocks from template with new UUIDs, tracking cursor position
                     for root_uuid in &template_page.root_blocks {
                         copy_block_tree(&template_page, *root_uuid, None, &mut page, &mut cursor_position);
                     }
-                    debug_cursor("After copy_block_tree", &cursor_position);
                 }
             }
         } else if !content_type.template.is_empty() {
-            tracing::info!("[CURSOR DEBUG] No template file, using config template string");
             // Fall back to config.template string for backwards compat
             // Also check for cursor marker here
             let (processed_content, found_offset) = process_cursor_marker(&content_type.template, true);
@@ -351,7 +330,6 @@ pub async fn create_sheet(
         index.commit()?;
     }
 
-    debug_cursor("Returning from create_sheet", &cursor_position);
     Ok(Json(CreateSheetResponse {
         page,
         cursor_position,

@@ -322,17 +322,13 @@ export const usePageStore = create<PageState>()(
             if (contentType) {
               // Create sheet - may return cursor position from template
               const response = await api.sheets.create(contentType.id, sheetName, { date: sheetDate })
-              console.log('[CURSOR DEBUG] pageStore: sheets.create response:', JSON.stringify(response, null, 2))
-              console.log('[CURSOR DEBUG] pageStore: response.cursorPosition:', response.cursorPosition)
               // Extract cursor position before treating response as Page
               cursorPosition = response.cursorPosition ?? null
-              console.log('[CURSOR DEBUG] pageStore: cursorPosition after extraction:', cursorPosition)
               newPage = response
             } else {
               newPage = await api.pages.create(name)
             }
 
-            console.log('[CURSOR DEBUG] pageStore: Setting pendingCursorPosition to:', cursorPosition)
             set((state) => {
               state.currentPage = newPage
               state.currentPageName = name
@@ -340,7 +336,6 @@ export const usePageStore = create<PageState>()(
               // Store cursor position to be consumed by editor
               state.pendingCursorPosition = cursorPosition
             })
-            console.log('[CURSOR DEBUG] pageStore: After set, pendingCursorPosition in store:', get().pendingCursorPosition)
             // Record this access in recent sheets
             recordSheetAccess(newPage)
             // Update browser history
@@ -993,13 +988,11 @@ export const usePageStore = create<PageState>()(
 
     consumePendingCursorPosition: () => {
       const { pendingCursorPosition } = get()
-      console.log('[CURSOR DEBUG] consumePendingCursorPosition called, current value:', pendingCursorPosition)
       if (pendingCursorPosition) {
         // Clear the pending position after consuming it
         set((state) => {
           state.pendingCursorPosition = null
         })
-        console.log('[CURSOR DEBUG] consumePendingCursorPosition: Cleared and returning:', pendingCursorPosition)
       }
       return pendingCursorPosition
     },
