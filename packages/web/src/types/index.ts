@@ -172,3 +172,17 @@ export interface RemoteGardenInfo {
   found: boolean
   name: string | null
 }
+
+// Cursor position info returned when creating a sheet from a template
+export interface CursorPosition {
+  /** UUID of the block containing the cursor marker */
+  blockUuid: string
+  /** Character offset within the block content */
+  offset: number
+}
+
+// Response from creating a sheet, which may include cursor position
+export interface CreateSheetResponse extends Page {
+  /** Cursor position if template contained {{cursor}} marker */
+  cursorPosition?: CursorPosition
+}

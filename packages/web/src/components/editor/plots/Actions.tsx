@@ -18,6 +18,7 @@ import { wikilinkExtension } from '../extensions/wikilink'
 import { formattingKeymap } from '../extensions/formatting'
 import { taskStatus } from '../extensions/taskStatus'
 import { tagExtension } from '../extensions/tags'
+import { cursorMarkerExtension } from '../extensions/cursorMarker'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
 import { useTagStore } from '../../../stores/tagStore'
@@ -57,6 +58,7 @@ function buildWikilinkHref(target: string): string {
 export function useActions(): Extension[] {
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
+  const editingTemplate = usePageStore((state) => state.editingTemplate)
   const taskStatusSet = useSettingsStore((state) => state.taskStatusSet)
   const getTagColors = useTagStore((state) => state.getTagColors)
 
@@ -74,8 +76,11 @@ export function useActions(): Extension[] {
     navigateToPage(target)
   }, [navigateToPage, navigateToJournal])
 
+  // Check if we're in template editing mode
+  const isTemplateEditing = editingTemplate !== null
+
   return useMemo(() => {
-    return [
+    const extensions = [
       markdownExtension(),
       hideDelimiters(),
       wikilinkExtension({
@@ -89,5 +94,12 @@ export function useActions(): Extension[] {
         onNavigate: handleWikilinkNavigate,
       }),
     ]
-  }, [handleWikilinkNavigate, taskStatusSet, getTagColors])
+
+    // Add cursor marker highlighting when editing templates
+    if (isTemplateEditing) {
+      extensions.push(cursorMarkerExtension())
+    }
+
+    return extensions
+  }, [handleWikilinkNavigate, taskStatusSet, getTagColors, isTemplateEditing])
 }

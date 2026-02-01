@@ -16,6 +16,7 @@ import type {
   RemoteResult,
   GitImportResult,
   RemoteGardenInfo,
+  CreateSheetResponse,
 } from '../types'
 
 const API_BASE = '/api/v1'
@@ -420,7 +421,7 @@ export const sheets = {
   },
 
   create: (contentTypeId: string, name: string, options?: { date?: string; content?: string }) =>
-    fetchJson<Page>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}`, {
+    fetchJson<CreateSheetResponse>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}`, {
       method: 'POST',
       body: JSON.stringify({ name, date: options?.date, content: options?.content }),
     }),

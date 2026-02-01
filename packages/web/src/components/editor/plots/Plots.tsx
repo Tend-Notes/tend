@@ -109,6 +109,7 @@ function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): M
 
 export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const updateCurrentPageFromStore = usePageStore((state) => state.updateCurrentPage)
+  const consumePendingCursorPosition = usePageStore((state) => state.consumePendingCursorPosition)
 
   // Use onBlocksChange if provided (for template editing), otherwise use store's updateCurrentPage
   const updateCurrentPage = onBlocksChange ?? updateCurrentPageFromStore
@@ -916,6 +917,27 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       setSelectedUuid(flatBlockOrder[0])
     }
   }, [selectedUuid, flatBlockOrder])
+
+  // Handle pending cursor position from template creation
+  // This effect runs once when the page loads and consumes the cursor position
+  const hasConsumedCursorRef = useRef(false)
+  useEffect(() => {
+    // Skip if we've already consumed the cursor position for this page, or if blocks aren't loaded yet
+    if (hasConsumedCursorRef.current || flatBlockOrder.length === 0) return
+
+    // Check for pending cursor position (from template with {{cursor}} marker)
+    const cursorPosition = consumePendingCursorPosition()
+    if (cursorPosition) {
+      hasConsumedCursorRef.current = true
+      // Focus the block at the specified offset
+      focusBlock(cursorPosition.blockUuid, cursorPosition.offset)
+    }
+  }, [flatBlockOrder.length, consumePendingCursorPosition, focusBlock])
+
+  // Reset the consumed cursor ref when page changes
+  useEffect(() => {
+    hasConsumedCursorRef.current = false
+  }, [page.name])
 
   // Update last focused block when selection changes (backup for non-focusBlock selection changes)
   useEffect(() => {

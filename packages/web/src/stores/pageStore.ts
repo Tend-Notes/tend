@@ -3,7 +3,7 @@
 
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { Page, Block } from '../types'
+import type { Page, Block, CursorPosition } from '../types'
 import * as api from '../lib/api'
 import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
@@ -45,6 +45,10 @@ interface PageState {
     hasUnsavedChanges: boolean
   } | null
 
+  // Pending cursor position from template creation
+  // This is consumed by the editor when it mounts to position the cursor
+  pendingCursorPosition: CursorPosition | null
+
   // Actions
   loadTodaysJournal: () => Promise<void>
   navigateToPage: (name: string, pushHistory?: boolean) => Promise<void>
@@ -73,6 +77,8 @@ interface PageState {
   updateTemplate: (blocks: Block[], rootBlocksHint?: string[]) => void
   saveTemplate: () => Promise<void>
   closeTemplateEditor: () => void
+  // Consume pending cursor position (called by editor on mount)
+  consumePendingCursorPosition: () => CursorPosition | null
 }
 
 // Helper to build URL path for content
@@ -168,6 +174,7 @@ export const usePageStore = create<PageState>()(
     pendingDraftRecovery: null,
     pendingConflict: null,
     editingTemplate: null,
+    pendingCursorPosition: null,
 
     loadTodaysJournal: async () => {
       set((state) => {
@@ -309,13 +316,25 @@ export const usePageStore = create<PageState>()(
         if (e instanceof Error && e.message.includes('404')) {
           try {
             // Create sheet or page based on content type
-            const newPage = contentType
-              ? await api.sheets.create(contentType.id, sheetName, { date: sheetDate })
-              : await api.pages.create(name)
+            let newPage: Page
+            let cursorPosition: CursorPosition | null = null
+
+            if (contentType) {
+              // Create sheet - may return cursor position from template
+              const response = await api.sheets.create(contentType.id, sheetName, { date: sheetDate })
+              // Extract cursor position before treating response as Page
+              cursorPosition = response.cursorPosition ?? null
+              newPage = response
+            } else {
+              newPage = await api.pages.create(name)
+            }
+
             set((state) => {
               state.currentPage = newPage
               state.currentPageName = name
               state.isLoading = false
+              // Store cursor position to be consumed by editor
+              state.pendingCursorPosition = cursorPosition
             })
             // Record this access in recent sheets
             recordSheetAccess(newPage)
@@ -762,6 +781,7 @@ export const usePageStore = create<PageState>()(
         state.pendingDraftRecovery = null
         state.pendingConflict = null
         state.editingTemplate = null
+        state.pendingCursorPosition = null
       })
     },
 
@@ -885,6 +905,17 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.editingTemplate = null
       })
+    },
+
+    consumePendingCursorPosition: () => {
+      const { pendingCursorPosition } = get()
+      if (pendingCursorPosition) {
+        // Clear the pending position after consuming it
+        set((state) => {
+          state.pendingCursorPosition = null
+        })
+      }
+      return pendingCursorPosition
     },
   }))
 )
