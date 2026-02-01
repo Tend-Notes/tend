@@ -923,18 +923,29 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // We track the last page name we checked to avoid re-running on every render
   const lastCheckedPageRef = useRef<string | null>(null)
   useEffect(() => {
+    console.log('[CURSOR DEBUG] Plots effect running - page.name:', page.name, 'flatBlockOrder.length:', flatBlockOrder.length, 'lastCheckedPage:', lastCheckedPageRef.current)
+
     // Skip if blocks aren't loaded yet
-    if (flatBlockOrder.length === 0) return
+    if (flatBlockOrder.length === 0) {
+      console.log('[CURSOR DEBUG] Plots effect: Skipping - no blocks yet')
+      return
+    }
 
     // Skip if we've already checked for cursor position on THIS page
-    if (lastCheckedPageRef.current === page.name) return
+    if (lastCheckedPageRef.current === page.name) {
+      console.log('[CURSOR DEBUG] Plots effect: Skipping - already checked this page')
+      return
+    }
 
     // Mark this page as checked (even if no cursor position)
     lastCheckedPageRef.current = page.name
+    console.log('[CURSOR DEBUG] Plots effect: Marked page as checked, calling consumePendingCursorPosition')
 
     // Check for pending cursor position (from template with {{cursor}} marker)
     const cursorPosition = consumePendingCursorPosition()
+    console.log('[CURSOR DEBUG] Plots effect: consumePendingCursorPosition returned:', cursorPosition)
     if (cursorPosition) {
+      console.log('[CURSOR DEBUG] Plots effect: Calling focusBlock with uuid:', cursorPosition.blockUuid, 'offset:', cursorPosition.offset)
       // Focus the block at the specified offset
       focusBlock(cursorPosition.blockUuid, cursorPosition.offset)
     }
