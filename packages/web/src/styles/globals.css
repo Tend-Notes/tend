@@ -583,17 +583,11 @@ code {
    - Vertical margins above/below the block group
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* All code block lines - base styles */
+/* All code block lines - base styles
+   Margin-left is set dynamically in Plots.tsx based on nesting depth */
 .block-container--code {
-  margin-left: 0 !important;
   padding-left: 0 !important;
   background-color: var(--base01);
-}
-
-/* Code blocks inside nested children - flush left */
-.block-children .block-container--code {
-  margin-left: calc(-24px - 12px) !important; /* Compensate for block-children ml-6 pl-3 */
-  padding-left: 0 !important;
 }
 
 /* Remove gap that would be left by hidden bullet */
