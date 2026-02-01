@@ -151,12 +151,14 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
         cancelSlashCommand(view, state)
         // Open command palette to create the sheet, with callback to insert link
         openCommandPaletteForContentType(ct, (link) => {
-          // Insert the link at cursor position
+          // Insert the link at cursor position and restore focus
           const pos = view.state.selection.main.head
           view.dispatch({
             changes: { from: pos, insert: link },
             selection: { anchor: pos + link.length },
           })
+          // Restore focus to the editor after command palette closes
+          view.focus()
         })
       }
     } else {
