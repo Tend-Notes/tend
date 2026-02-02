@@ -93,7 +93,14 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/templates/{content_type_id}", get(templates::get_template))
         .route("/templates/{content_type_id}", put(templates::update_template))
         .route("/templates/{content_type_id}", delete(templates::delete_template))
-        // Import
+        // Import (new zip-based API)
+        .route("/import/logseq/upload", post(import::import_logseq_zip))
+        .route("/import/errors", get(import::list_import_errors))
+        .route("/import/errors", delete(import::delete_all_import_errors))
+        .route("/import/errors/{name}", get(import::get_import_error))
+        .route("/import/errors/{name}", delete(import::delete_import_error))
+        .route("/import/errors/{name}/accept", post(import::accept_import_error))
+        // Import (legacy path-based API - for backward compatibility)
         .route("/import/logseq", post(import::import_logseq))
         // Identity
         .route("/whoami", get(whoami))

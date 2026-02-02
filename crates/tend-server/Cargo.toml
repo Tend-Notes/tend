@@ -60,3 +60,15 @@ scopeguard = "1.2"
 
 # HTTP client (for auth verification)
 reqwest = { workspace = true }
+
+# Multipart file uploads
+axum-extra = { version = "0.10", features = ["multipart"] }
+
+# Zip file handling
+zip = "2.2"
+
+# Tempfile for extraction
+tempfile = { workspace = true }
+
+# Streaming utilities
+tokio-stream = "0.1"
