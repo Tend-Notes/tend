@@ -283,6 +283,17 @@ code {
   background-color: var(--color-bg-secondary);
 }
 
+/* External link styles */
+.external-link {
+  color: var(--color-link);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.external-link:hover {
+  background-color: var(--color-bg-selection);
+}
+
 /* Text formatting styles */
 .fmt-bold {
   font-weight: 700;

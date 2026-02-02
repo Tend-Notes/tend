@@ -117,6 +117,8 @@ export function useActions(): Extension[] {
       }),
       blockReferenceExtension({
         onNavigate: handleBlockRefNavigate,
+        onLinkNavigate: handleWikilinkNavigate,
+        getTagColors,
       }),
     ]
 
