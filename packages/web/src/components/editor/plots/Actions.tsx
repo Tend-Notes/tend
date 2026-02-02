@@ -83,10 +83,20 @@ export function useActions(): Extension[] {
     // Navigate to the page
     // After navigation, the app will scroll to the block UUID via URL hash
     // For now, just navigate to the page - scroll-to-block can be added later
+
+    // Check if this is a journal date (YYYY-MM-DD format)
+    // The block API returns just the date for journals, not "journals/YYYY-MM-DD"
+    if (/^\d{4}-\d{2}-\d{2}$/.test(pageName)) {
+      navigateToJournal(pageName)
+      return
+    }
+
+    // Everything else: pages and sheets (directory/name paths)
+    // navigateToPage handles both regular pages and content type paths
     navigateToPage(pageName)
     // TODO: Add scroll-to-block logic using _blockUuid
     // This could be done via URL hash (#blockUuid) or a separate mechanism
-  }, [navigateToPage])
+  }, [navigateToPage, navigateToJournal])
 
   // Check if we're in template editing mode
   const isTemplateEditing = editingTemplate !== null
