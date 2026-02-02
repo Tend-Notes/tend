@@ -47,10 +47,10 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // Links
         .route("/links/status", get(links::status))
         .route("/links/rebuild", post(links::rebuild))
-        // Blocks
-        .route("/blocks/{uuid}", get(blocks::get_block))
+        // Blocks (status/rebuild must come before {uuid} wildcard)
         .route("/blocks/status", get(blocks::status))
         .route("/blocks/rebuild", post(blocks::rebuild))
+        .route("/blocks/{uuid}", get(blocks::get_block))
         // Tags
         .route("/tags", get(tags::list_tags))
         // Todos
