@@ -249,11 +249,15 @@ impl FileManager {
         // Atomic rename
         tokio::fs::rename(&tmp_path, path).await?;
 
-        // Remove from pending writes after a short delay (for watcher debounce)
+        // Remove from pending writes after a delay to ensure file watcher
+        // events are properly ignored. The delay needs to be long enough to:
+        // 1. Allow the file watcher debounce to process the event
+        // 2. Give the client time to update its state after save completes
+        // Using 1000ms provides a reasonable buffer.
         let pending_writes = Arc::clone(&self.pending_writes);
         let path_buf = path.to_path_buf();
         tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             let mut pending = pending_writes.write().await;
             pending.remove(&path_buf);
         });

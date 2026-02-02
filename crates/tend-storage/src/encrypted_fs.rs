@@ -277,11 +277,12 @@ impl EncryptedFileManager {
         // Atomic rename
         tokio::fs::rename(&tmp_path, path).await?;
 
-        // Remove from pending writes after a short delay
+        // Remove from pending writes after a delay to ensure file watcher
+        // events are properly ignored. Using 1000ms for consistency with fs.rs.
         let pending_writes = Arc::clone(&self.pending_writes);
         let path_buf = path.to_path_buf();
         tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             let mut pending = pending_writes.write().await;
             pending.remove(&path_buf);
         });
