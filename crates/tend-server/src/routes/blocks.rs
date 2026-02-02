@@ -10,6 +10,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
+use chrono::NaiveDate;
 use serde::Serialize;
 
 use crate::auth::AuthenticatedUser;
@@ -85,7 +86,14 @@ pub async fn get_block(
     drop(index); // Release lock before reading page
 
     // Fetch the actual content from the page
-    let page = garden.file_manager.read_page(&block_ref.page_name).await?;
+    // Detect if this is a journal by checking if page_name is a YYYY-MM-DD date
+    let page = if let Ok(date) = NaiveDate::parse_from_str(&block_ref.page_name, "%Y-%m-%d") {
+        // This is a journal entry
+        garden.file_manager.read_journal(date).await?
+    } else {
+        // Regular page
+        garden.file_manager.read_page(&block_ref.page_name).await?
+    };
 
     // Find the block in the page
     let uuid_parsed = uuid
