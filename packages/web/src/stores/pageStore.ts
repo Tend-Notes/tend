@@ -143,6 +143,36 @@ let pendingSaveData: {
   journalDate: string | null
 } | null = null
 
+// Track when the last successful save completed for the current page
+// Used to ignore file watcher events that are for our own saves
+let lastSaveTimestamp: number = 0
+
+// Grace period after a save during which file watcher events are ignored
+// This prevents race conditions where the file watcher triggers faster
+// than we can update hasUnsavedChanges
+const SAVE_GRACE_PERIOD_MS = 2000
+
+/**
+ * Check if a file watcher reload should be skipped.
+ * Returns true if:
+ * - There are unsaved changes in the editor
+ * - There's a pending debounced save
+ * - We just completed a save recently (within grace period)
+ */
+export function shouldSkipFileWatcherReload(): boolean {
+  // Check for unsaved changes
+  const hasUnsaved = usePageStore.getState().hasUnsavedChanges
+  if (hasUnsaved) return true
+
+  // Check for pending debounced save
+  if (pendingSaveData !== null) return true
+
+  // Check if we're within the save grace period
+  if (Date.now() - lastSaveTimestamp < SAVE_GRACE_PERIOD_MS) return true
+
+  return false
+}
+
 // Helper to record sheet access in the recent sheets store
 function recordSheetAccess(page: Page) {
   // Tag pages go to recentTags, not recentSheets
@@ -231,6 +261,10 @@ export const usePageStore = create<PageState>()(
     navigateToPage: async (name: string, pushHistory = true) => {
       // Flush any pending saves before navigating away
       await get().flushPendingSave()
+
+      // Reset save timestamp when navigating to prevent old timestamps
+      // from affecting the new page's file watcher handling
+      lastSaveTimestamp = 0
 
       set((state) => {
         state.isLoading = true
@@ -363,6 +397,10 @@ export const usePageStore = create<PageState>()(
     navigateToJournal: async (date: string, pushHistory = true) => {
       // Flush any pending saves before navigating away
       await get().flushPendingSave()
+
+      // Reset save timestamp when navigating to prevent old timestamps
+      // from affecting the new page's file watcher handling
+      lastSaveTimestamp = 0
 
       set((state) => {
         state.isLoading = true
@@ -616,6 +654,8 @@ export const usePageStore = create<PageState>()(
           }
           // Server save succeeded - clear the draft and pending save data
           pendingSaveData = null
+          // Record save timestamp to ignore file watcher events for our own save
+          lastSaveTimestamp = Date.now()
           await draftStore.deleteDraft(pageName)
           // Log the save activity and update sync status
           useActivityLogStore.getState().addEntry('file_save', pageName)
@@ -691,22 +731,28 @@ export const usePageStore = create<PageState>()(
       const { pendingConflict, currentPage } = get()
       if (!pendingConflict || !currentPage) return
 
-      // Force save our local changes (without version check)
+      // Store conflict data locally in case API fails - we need it to restore
+      const localConflict = { ...pendingConflict }
+      const localPage = { ...currentPage }
+
+      // Clear conflict optimistically
       set((state) => {
         state.pendingConflict = null
       })
 
       try {
-        const apiBlocks = pendingConflict.localBlocks.map(api.blockToApiFormat)
+        const apiBlocks = localConflict.localBlocks.map(api.blockToApiFormat)
         let updatedPage: Page
-        if (currentPage.isJournal && currentPage.journalDate) {
+        if (localPage.isJournal && localPage.journalDate) {
           // Don't send version - force overwrite
-          updatedPage = await api.journals.update(currentPage.journalDate, apiBlocks)
+          updatedPage = await api.journals.update(localPage.journalDate, apiBlocks)
         } else {
-          updatedPage = await api.pages.update(currentPage.name, apiBlocks)
+          updatedPage = await api.pages.update(localPage.name, apiBlocks)
         }
         // Update local state with new version
-        await draftStore.deleteDraft(currentPage.name)
+        // Record save timestamp to ignore file watcher events
+        lastSaveTimestamp = Date.now()
+        await draftStore.deleteDraft(localPage.name)
         set((state) => {
           state.hasUnsavedChanges = false
           if (state.currentPage) {
@@ -715,7 +761,9 @@ export const usePageStore = create<PageState>()(
           }
         })
       } catch (e) {
+        // Restore the conflict so user can try again
         set((state) => {
+          state.pendingConflict = localConflict
           state.error = e instanceof Error ? e.message : 'Failed to save changes'
         })
       }
@@ -725,15 +773,27 @@ export const usePageStore = create<PageState>()(
       const { pendingConflict, currentPage } = get()
       if (!pendingConflict || !currentPage) return
 
+      // Store for potential restoration
+      const localConflict = { ...pendingConflict }
+      const localPage = { ...currentPage }
+
       set((state) => {
         state.pendingConflict = null
       })
 
       // Reload the page from server
-      if (currentPage.isJournal && currentPage.journalDate) {
-        await get().navigateToJournal(currentPage.journalDate, false)
-      } else {
-        await get().navigateToPage(currentPage.name, false)
+      try {
+        if (localPage.isJournal && localPage.journalDate) {
+          await get().navigateToJournal(localPage.journalDate, false)
+        } else {
+          await get().navigateToPage(localPage.name, false)
+        }
+      } catch (e) {
+        // Restore the conflict so user can try again
+        set((state) => {
+          state.pendingConflict = localConflict
+          state.error = e instanceof Error ? e.message : 'Failed to reload page from server'
+        })
       }
     },
 
@@ -770,6 +830,8 @@ export const usePageStore = create<PageState>()(
             updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
           }
 
+          // Record save timestamp to ignore file watcher events for our own save
+          lastSaveTimestamp = Date.now()
           await draftStore.deleteDraft(pageName)
           // Log the save activity and update sync status
           useActivityLogStore.getState().addEntry('file_save', pageName)

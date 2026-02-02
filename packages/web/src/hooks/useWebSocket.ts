@@ -2,7 +2,7 @@
 // WebSocket hook for real-time updates from the server
 
 import { useEffect, useRef } from 'react'
-import { usePageStore } from '../stores/pageStore'
+import { usePageStore, shouldSkipFileWatcherReload } from '../stores/pageStore'
 import { useSyncStatusStore } from '../stores/syncStatusStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
@@ -130,10 +130,12 @@ export function useWebSocket() {
               }
 
               if (pageName && pageName === currentPageName) {
-                // Don't reload if we have unsaved changes (user is actively editing)
-                // This also helps avoid reload loops when we just saved
-                if (usePageStore.getState().hasUnsavedChanges) {
-                  console.log('File changed but we have local changes, skipping reload')
+                // Use centralized check that includes:
+                // - unsaved changes
+                // - pending debounced saves
+                // - recent save grace period
+                if (shouldSkipFileWatcherReload()) {
+                  console.log('File changed but skipping reload (local changes or recent save)')
                   break
                 }
 
@@ -155,9 +157,9 @@ export function useWebSocket() {
             case 'page_updated':
               // Another client updated this page
               if (data.name === currentPageName) {
-                // Don't reload if we have unsaved changes
-                if (usePageStore.getState().hasUnsavedChanges) {
-                  console.log('Page updated but we have local changes, skipping reload')
+                // Use centralized check - protects against race conditions
+                if (shouldSkipFileWatcherReload()) {
+                  console.log('Page updated but skipping reload (local changes or recent save)')
                   break
                 }
 
