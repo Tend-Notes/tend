@@ -1092,6 +1092,7 @@ pub struct TransformResult {
 ///
 /// Handles:
 /// - `{{query ...}}` blocks - Removed entirely
+/// - `#+BEGIN_QUERY ... #+END_QUERY` org-mode blocks - Removed entirely
 /// - `{{embed [[Page]]}}` - Converted to `[[Page]]`
 /// - `{{embed ((block-id))}}` - Converted to `((block-id))`
 /// - `{{cloze ...}}` - Stripped wrapper, kept content
@@ -1099,6 +1100,20 @@ pub struct TransformResult {
 pub fn transform_logseq_content(content: &str) -> TransformResult {
     let mut result = content.to_string();
     let mut transformations = Vec::new();
+
+    // Pattern for #+BEGIN_QUERY ... #+END_QUERY org-mode style blocks (case insensitive, multiline)
+    let org_query_regex =
+        Regex::new(r"(?is)#\+BEGIN_QUERY\s*\n[\s\S]*?#\+END_QUERY").unwrap();
+    let org_query_count = org_query_regex.find_iter(&result).count();
+    if org_query_count > 0 {
+        result = org_query_regex
+            .replace_all(&result, "<!-- Logseq query removed -->")
+            .to_string();
+        transformations.push(format!(
+            "Removed {} org-mode query block(s)",
+            org_query_count
+        ));
+    }
 
     // Pattern for {{query ...}} - can span multiple lines
     // Match balanced braces using a simple approach: match until closing }}
@@ -1239,6 +1254,36 @@ mod tests {
         );
         assert_eq!(result.transformations.len(), 1);
         assert!(result.transformations[0].contains("query"));
+    }
+
+    #[test]
+    fn test_transform_org_mode_query_block() {
+        let content = r#"Some text
+#+BEGIN_QUERY
+{
+  :title "Recent Tasks"
+  :query [:find (pull ?b [*])
+          :where
+          [?b :block/marker ?m]
+          [(contains? #{"TODO" "DOING"} ?m)]]
+}
+#+END_QUERY
+More text"#;
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "Some text\n<!-- Logseq query removed -->\nMore text"
+        );
+        assert_eq!(result.transformations.len(), 1);
+        assert!(result.transformations[0].contains("org-mode query"));
+    }
+
+    #[test]
+    fn test_transform_org_mode_query_block_case_insensitive() {
+        let content = "#+begin_query\n{:query []}\n#+end_query";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, "<!-- Logseq query removed -->");
+        assert!(result.transformations[0].contains("org-mode query"));
     }
 
     #[test]
