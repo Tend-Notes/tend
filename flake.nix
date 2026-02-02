@@ -299,6 +299,8 @@
                 TEND_BACKUP_INTERVAL_MINUTES = toString cfg.gitBackup.intervalMinutes;
                 TEND_AUTO_PUSH = if cfg.gitBackup.autoPush then "true" else "false";
                 RUST_LOG = "info";
+                # Git needs ssh for remote operations - systemd doesn't inherit PATH
+                GIT_SSH_COMMAND = "${pkgs.openssh}/bin/ssh";
               } // optionalAttrs (cfg.auth.verifyUrl != null) {
                 TEND_AUTH_VERIFY_URL = cfg.auth.verifyUrl;
               } // cfg.extraEnvironment;

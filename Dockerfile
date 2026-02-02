@@ -81,7 +81,7 @@ RUN cargo build --release --locked
 FROM alpine:3.21
 
 # Install runtime dependencies
-RUN apk add --no-cache ca-certificates git tzdata
+RUN apk add --no-cache ca-certificates git openssh-client tzdata
 
 # Create non-root user
 RUN addgroup -S tend && adduser -S tend -G tend
@@ -106,6 +106,8 @@ ENV TEND_PORT=3000
 ENV TEND_BASE_DIR=/data
 ENV TEND_STATIC_DIR=/app/static
 ENV RUST_LOG=info
+# Git needs ssh for remote operations
+ENV GIT_SSH_COMMAND=/usr/bin/ssh
 
 # Expose port
 EXPOSE 3000
