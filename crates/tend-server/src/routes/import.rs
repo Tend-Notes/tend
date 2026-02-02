@@ -26,7 +26,7 @@ use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 
 /// Maximum upload size: 500 MB
-const MAX_UPLOAD_SIZE: usize = 500 * 1024 * 1024;
+pub const MAX_UPLOAD_SIZE: usize = 500 * 1024 * 1024;
 
 /// Progress event sent as JSON lines during import
 #[derive(Debug, Serialize)]
