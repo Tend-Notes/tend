@@ -1102,8 +1102,9 @@ pub fn transform_logseq_content(content: &str) -> TransformResult {
     let mut transformations = Vec::new();
 
     // Pattern for #+BEGIN_QUERY ... #+END_QUERY org-mode style blocks (case insensitive, multiline)
+    // The content may start on the same line as BEGIN_QUERY or on the next line
     let org_query_regex =
-        Regex::new(r"(?is)#\+BEGIN_QUERY\s*\n[\s\S]*?#\+END_QUERY").unwrap();
+        Regex::new(r"(?is)#\+BEGIN_QUERY[\s\S]*?#\+END_QUERY").unwrap();
     let org_query_count = org_query_regex.find_iter(&result).count();
     if org_query_count > 0 {
         result = org_query_regex
@@ -1395,5 +1396,47 @@ More text"#;
         let result = transform_logseq_content(content);
         assert_eq!(result.content, content);
         assert!(result.transformations.is_empty());
+    }
+
+    #[test]
+    fn test_transform_org_mode_query_with_crlf() {
+        // Windows-style CRLF line endings
+        let content = "Some text\r\n#+BEGIN_QUERY\r\n{:title \"Test\"}\r\n#+END_QUERY\r\nMore text";
+        let result = transform_logseq_content(content);
+        assert!(
+            result.content.contains("<!-- Logseq query removed -->"),
+            "Failed to remove query with CRLF. Result: {:?}",
+            result.content
+        );
+    }
+
+    #[test]
+    fn test_transform_org_mode_query_no_newline_after_begin() {
+        // Content starts immediately after BEGIN_QUERY (with just space)
+        let content = "Some text\n#+BEGIN_QUERY {
+:title \"Test\"
+}
+#+END_QUERY
+More text";
+        let result = transform_logseq_content(content);
+        assert!(
+            result.content.contains("<!-- Logseq query removed -->"),
+            "Failed to remove query without newline. Result: {:?}",
+            result.content
+        );
+    }
+
+    #[test]
+    fn test_transform_org_mode_query_at_file_start() {
+        // Query block at the very start of file
+        let content = "#+BEGIN_QUERY
+{:title \"Test\"}
+#+END_QUERY
+More text";
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "<!-- Logseq query removed -->\nMore text"
+        );
     }
 }
