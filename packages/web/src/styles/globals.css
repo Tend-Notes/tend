@@ -329,16 +329,22 @@ code {
   background-color: var(--color-bg-selection);
 }
 
-/* Block reference styles - inline widget */
+/* Block reference styles - inline widget
+ * Design: Chain link icon replaces bullet, content has subtle background.
+ * Renders like a normal block but with visual distinction.
+ */
 .block-reference {
   display: inline-flex;
   flex-direction: column;
-  background-color: var(--color-bg-secondary);
-  border-radius: 4px;
-  padding: 2px 6px;
-  margin: 0 2px;
   vertical-align: baseline;
   max-width: 100%;
+}
+
+/* Main row - chain icon + content (like a block with bullet) */
+.block-reference-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .block-reference-loading {
@@ -366,15 +372,14 @@ code {
   font-style: italic;
 }
 
+/* Chain icon - in bullet position, clickable */
 .block-reference-chain {
   display: inline-block;
   width: 14px;
   height: 14px;
-  margin-right: 4px;
-  vertical-align: middle;
+  flex-shrink: 0;
   color: var(--color-link);
   cursor: pointer;
-  flex-shrink: 0;
   transition: transform var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
 }
@@ -384,15 +389,21 @@ code {
   transform: scale(1.1);
 }
 
+/* Content - subtle background like code blocks */
 .block-reference-content {
   display: inline;
   color: var(--color-text);
+  background-color: var(--color-bg-secondary);
+  border-radius: 3px;
+  padding: 1px 6px;
 }
 
+/* Children indicator bar */
 .block-reference-children {
   display: flex;
   align-items: center;
   margin-top: 2px;
+  margin-left: 22px; /* Align with content (icon width + gap) */
   padding-top: 2px;
   border-top: 1px solid var(--base02);
   cursor: pointer;
@@ -414,6 +425,7 @@ code {
   font-style: italic;
 }
 
+/* When editing (cursor inside) - muted appearance */
 .block-reference-editable {
   background-color: var(--color-bg-secondary);
   border-radius: 2px;

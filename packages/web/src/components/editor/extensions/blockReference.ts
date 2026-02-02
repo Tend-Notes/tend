@@ -187,10 +187,14 @@ class BlockReferenceWidget extends WidgetType {
       return
     }
 
-    // Successfully loaded
+    // Successfully loaded - render like a normal block with chain icon replacing bullet
     container.className = 'block-reference'
 
-    // Chain link icon (for navigation)
+    // Main row: chain icon (in bullet position) + content
+    const mainRow = document.createElement('span')
+    mainRow.className = 'block-reference-row'
+
+    // Chain link icon (replaces bullet - same position as bullet would be)
     const chainIcon = createChainIcon()
     chainIcon.addEventListener('mousedown', (e) => {
       e.preventDefault()
@@ -199,15 +203,17 @@ class BlockReferenceWidget extends WidgetType {
         this.onNavigate?.(entry.data.pageName, this.uuid)
       }
     })
-    container.appendChild(chainIcon)
+    mainRow.appendChild(chainIcon)
 
-    // Content text
+    // Content text with subtle background
     const contentSpan = document.createElement('span')
     contentSpan.className = 'block-reference-content'
     contentSpan.textContent = entry.data.content || '(empty)'
-    container.appendChild(contentSpan)
+    mainRow.appendChild(contentSpan)
 
-    // Children indicator (if block has children)
+    container.appendChild(mainRow)
+
+    // Children indicator (if block has children) - shown below the main row
     if (entry.data.hasChildren) {
       const childrenBar = document.createElement('div')
       childrenBar.className = 'block-reference-children'
@@ -326,17 +332,23 @@ function createBlockReferencePlugin(options: BlockReferenceOptions) {
 
 /**
  * Theme for block reference styling
+ *
+ * Design: Chain link icon replaces bullet, content has subtle background.
+ * Renders like a normal block but with visual distinction.
  */
 const blockReferenceTheme = EditorView.baseTheme({
+  // Container - inline-flex column to stack main row and children indicator
   '.block-reference': {
     display: 'inline-flex',
     flexDirection: 'column',
-    backgroundColor: 'var(--color-bg-secondary, #353b45)',
-    borderRadius: '4px',
-    padding: '2px 6px',
-    margin: '0 2px',
     verticalAlign: 'baseline',
     maxWidth: '100%',
+  },
+  // Main row - flex row with chain icon and content (like a block with bullet)
+  '.block-reference-row': {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '8px',
   },
   '.block-reference-loading': {
     color: 'var(--color-text-muted, #545862)',
@@ -358,28 +370,33 @@ const blockReferenceTheme = EditorView.baseTheme({
     color: 'var(--color-link-missing, #e06c75)',
     fontStyle: 'italic',
   },
+  // Chain icon - in bullet position, clickable
   '.block-reference-chain': {
     display: 'inline-block',
     width: '14px',
     height: '14px',
-    marginRight: '4px',
-    verticalAlign: 'middle',
+    flexShrink: '0',
     color: 'var(--color-link, #61afef)',
     cursor: 'pointer',
-    flexShrink: '0',
   },
   '.block-reference-chain:hover': {
     color: 'var(--base0D, #61afef)',
     transform: 'scale(1.1)',
   },
+  // Content - subtle background like code blocks
   '.block-reference-content': {
     display: 'inline',
     color: 'var(--color-text, #abb2bf)',
+    backgroundColor: 'var(--color-bg-secondary, #353b45)',
+    borderRadius: '3px',
+    padding: '1px 6px',
   },
+  // Children indicator bar
   '.block-reference-children': {
     display: 'flex',
     alignItems: 'center',
     marginTop: '2px',
+    marginLeft: '22px', // Align with content (icon width + gap)
     paddingTop: '2px',
     borderTop: '1px solid var(--base02, #3e4451)',
     cursor: 'pointer',
@@ -396,6 +413,7 @@ const blockReferenceTheme = EditorView.baseTheme({
   '.block-reference-children-text': {
     fontStyle: 'italic',
   },
+  // When editing (cursor inside) - muted appearance
   '.block-reference-editable': {
     backgroundColor: 'var(--color-bg-secondary, #353b45)',
     borderRadius: '2px',
