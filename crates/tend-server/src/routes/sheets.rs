@@ -22,6 +22,26 @@ use super::gardens::load_user_content_types;
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
 
+/// Build the full page name for a sheet including the directory path.
+/// This is used for block index storage and navigation.
+///
+/// Formats:
+/// - Non-date: `directory/name` (e.g., "person/John Smith")
+/// - SaveByDate: `directory/YYYY-MM-DD/name` (e.g., "meeting/2026-01-30/Standup")
+fn build_sheet_page_name(content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> String {
+    if content_type.save_by_date {
+        if let Some(d) = date {
+            format!("{}/{}/{}", content_type.directory, d.format("%Y-%m-%d"), name)
+        } else {
+            // Default to today if no date provided
+            let today = chrono::Local::now().date_naive();
+            format!("{}/{}/{}", content_type.directory, today.format("%Y-%m-%d"), name)
+        }
+    } else {
+        format!("{}/{}", content_type.directory, name)
+    }
+}
+
 /// Cursor position information for template instantiation
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -266,7 +286,11 @@ pub async fn create_sheet(
     }
 
     // Create the page with correct content type
-    let mut page = Page::new_sheet(&req.name, &content_type_id, date);
+    // Use the full path as the page name for block index storage
+    let full_page_name = build_sheet_page_name(&content_type, &req.name, date);
+    let mut page = Page::new_sheet(&full_page_name, &content_type_id, date);
+    // Keep the title as just the name (without directory) for display
+    page.title = req.name.clone();
 
     // Track cursor position from template {{cursor}} marker
     let mut cursor_position: Option<CursorPosition> = None;
@@ -358,12 +382,24 @@ pub async fn update_sheet(
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
+    // Build full page name for block index storage
+    let full_page_name = build_sheet_page_name(&content_type, &path.name, date);
+
     // Read existing sheet or create new
     let mut page = garden
         .file_manager
         .read_sheet(&content_type, &path.name, date)
         .await
-        .unwrap_or_else(|_| Page::new_sheet(&path.name, &content_type.id, date));
+        .unwrap_or_else(|_| {
+            let mut p = Page::new_sheet(&full_page_name, &content_type.id, date);
+            p.title = path.name.clone();
+            p
+        });
+
+    // Ensure page.name uses the full path format for block index
+    if !page.name.contains('/') {
+        page.name = full_page_name;
+    }
 
     // Version conflict check
     if let Some(expected_version) = req.version {

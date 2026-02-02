@@ -440,6 +440,18 @@ impl EncryptedFileManager {
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
 
+        // Set the full page name with directory path for block index storage
+        // Format: directory/name or directory/YYYY-MM-DD/name for saveByDate
+        page.name = if content_type.save_by_date {
+            if let Some(d) = date {
+                format!("{}/{}/{}", content_type.directory, d.format("%Y-%m-%d"), name)
+            } else {
+                format!("{}/{}", content_type.directory, name)
+            }
+        } else {
+            format!("{}/{}", content_type.directory, name)
+        };
+
         // Set content type
         page.content_type = content_type.id.clone();
 
@@ -466,8 +478,23 @@ impl EncryptedFileManager {
             return self.write_page(page).await;
         }
 
+        // Extract the sheet name from page.name, which may contain the full path
+        // Format: directory/name or directory/YYYY-MM-DD/name
+        let sheet_name = if page.name.starts_with(&content_type.directory) && page.name.contains('/') {
+            // Strip directory prefix and optional date
+            let without_dir = &page.name[content_type.directory.len() + 1..];
+            if content_type.save_by_date && without_dir.contains('/') {
+                // Format: YYYY-MM-DD/name - extract name after date
+                without_dir.splitn(2, '/').nth(1).unwrap_or(without_dir)
+            } else {
+                without_dir
+            }
+        } else {
+            &page.name
+        };
+
         self.ensure_content_type_dir(content_type, date).await?;
-        let path = self.sheet_path(content_type, &page.name, date);
+        let path = self.sheet_path(content_type, sheet_name, date);
         self.write_file(&path, page).await
     }
 

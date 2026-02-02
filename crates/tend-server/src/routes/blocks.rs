@@ -12,9 +12,11 @@ use axum::response::IntoResponse;
 use axum::Json;
 use chrono::NaiveDate;
 use serde::Serialize;
+use tend_core::Page;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
+use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 
 /// Response for a successful block lookup
@@ -86,10 +88,52 @@ pub async fn get_block(
     drop(index); // Release lock before reading page
 
     // Fetch the actual content from the page
-    // Detect if this is a journal by checking if page_name is a YYYY-MM-DD date
-    let page = if let Ok(date) = NaiveDate::parse_from_str(&block_ref.page_name, "%Y-%m-%d") {
+    // Determine content type by parsing the page_name format:
+    // - YYYY-MM-DD → journal
+    // - directory/name → sheet (non-date)
+    // - directory/YYYY-MM-DD/name → sheet (saveByDate)
+    // - anything else → regular page
+    let page: Page = if let Ok(date) = NaiveDate::parse_from_str(&block_ref.page_name, "%Y-%m-%d") {
         // This is a journal entry
         garden.file_manager.read_journal(date).await?
+    } else if block_ref.page_name.contains('/') {
+        // This is a sheet (custom content type)
+        // Parse the path to extract directory, optional date, and name
+        let parts: Vec<&str> = block_ref.page_name.splitn(3, '/').collect();
+
+        if parts.len() < 2 {
+            // Invalid format, fall back to page
+            garden.file_manager.read_page(&block_ref.page_name).await?
+        } else {
+            let directory = parts[0];
+
+            // Load content types to find the matching one by directory
+            let content_types = load_user_content_types(&user.username)?;
+            let content_type = content_types
+                .iter()
+                .find(|ct| ct.directory == directory && ct.id != "page" && ct.id != "journal");
+
+            match content_type {
+                Some(ct) => {
+                    // Check if this is a saveByDate content type with date in path
+                    if ct.save_by_date && parts.len() == 3 {
+                        // Format: directory/YYYY-MM-DD/name
+                        let date = NaiveDate::parse_from_str(parts[1], "%Y-%m-%d").ok();
+                        let name = parts[2];
+                        garden.file_manager.read_sheet(ct, name, date).await?
+                    } else {
+                        // Format: directory/name (non-date content type)
+                        // The remaining path after directory is the name
+                        let name = &block_ref.page_name[directory.len() + 1..];
+                        garden.file_manager.read_sheet(ct, name, None).await?
+                    }
+                }
+                None => {
+                    // No matching content type found, try as regular page
+                    garden.file_manager.read_page(&block_ref.page_name).await?
+                }
+            }
+        }
     } else {
         // Regular page
         garden.file_manager.read_page(&block_ref.page_name).await?
