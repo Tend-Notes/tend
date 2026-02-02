@@ -81,7 +81,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [existingSheets, setExistingSheets] = useState<string[]>([])
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty } = usePageStore()
-  const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor } = useUIStore()
+  const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
   const { contentTypes } = useSettingsStore()
 
   // Custom content types (excluding built-in page and journal)
@@ -575,6 +575,19 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   </CommandItem>
                 </>
               )}
+            </Command.Group>
+
+            {/* Import */}
+            <Command.Group heading="Import" className="mb-2">
+              <CommandItem
+                onSelect={() => {
+                  openImportDialog()
+                  onOpenChange(false)
+                }}
+                value="import from logseq"
+              >
+                Import from Logseq
+              </CommandItem>
             </Command.Group>
 
             {/* Help */}

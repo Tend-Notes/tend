@@ -4,6 +4,7 @@ import { Sidebar } from './components/sidebar/Sidebar'
 import { MainContent } from './components/layout/MainContent'
 import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
+import { LogseqImportDialog } from './components/ui/LogseqImportDialog'
 import { usePageStore } from './stores/pageStore'
 import { useRecentSheetsStore } from './stores/recentSheetsStore'
 import { useTagStore } from './stores/tagStore'
@@ -28,6 +29,8 @@ function App() {
   const commandPaletteOpen = useUIStore((state) => state.commandPaletteOpen)
   const openCommandPalette = useUIStore((state) => state.openCommandPalette)
   const closeCommandPalette = useUIStore((state) => state.closeCommandPalette)
+  const importDialogOpen = useUIStore((state) => state.importDialogOpen)
+  const closeImportDialog = useUIStore((state) => state.closeImportDialog)
     const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
@@ -199,6 +202,12 @@ function App() {
 
       {/* Conflict resolution dialog */}
       <ConflictResolutionDialog />
+
+      {/* Logseq import dialog */}
+      <LogseqImportDialog
+        open={importDialogOpen}
+        onOpenChange={(open) => !open && closeImportDialog()}
+      />
 
       {/* Toast notifications */}
       <Toasts />

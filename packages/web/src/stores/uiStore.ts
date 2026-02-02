@@ -26,6 +26,9 @@ interface UIState {
   /** Callback to invoke when a sheet is created (e.g., to insert a link) */
   onSheetCreated: ((link: string) => void) | null
 
+  // Import dialog
+  importDialogOpen: boolean
+
   // Editor integration
   /** Callback to insert text at the current cursor position in the editor */
   insertTextAtCursor: ((text: string) => void) | null
@@ -49,6 +52,8 @@ interface UIState {
   openCommandPaletteForContentType: (contentType: ContentType, onCreated?: (link: string) => void) => void
   closeCommandPalette: () => void
   clearPendingContentType: () => void
+  openImportDialog: () => void
+  closeImportDialog: () => void
   setInsertTextAtCursor: (fn: ((text: string) => void) | null) => void
   setLastFocusedBlockUuid: (uuid: string | null) => void
   reset: () => void
@@ -105,6 +110,11 @@ export const useUIStore = create<UIState>()(
       closeCommandPalette: () => set({ commandPaletteOpen: false, pendingContentType: null, onSheetCreated: null }),
       clearPendingContentType: () => set({ pendingContentType: null }),
 
+      // Import dialog
+      importDialogOpen: false,
+      openImportDialog: () => set({ importDialogOpen: true }),
+      closeImportDialog: () => set({ importDialogOpen: false }),
+
       // Editor integration
       insertTextAtCursor: null as ((text: string) => void) | null,
       setInsertTextAtCursor: (fn) => set({ insertTextAtCursor: fn }),
@@ -121,6 +131,7 @@ export const useUIStore = create<UIState>()(
         commandPaletteOpen: false,
         pendingContentType: null,
         onSheetCreated: null,
+        importDialogOpen: false,
         insertTextAtCursor: null,
         lastFocusedBlockUuid: null,
       }),
@@ -137,6 +148,7 @@ export const useUIStore = create<UIState>()(
         commandPaletteOpen: false,
         pendingContentType: null,
         onSheetCreated: null,
+        importDialogOpen: false,
         insertTextAtCursor: null,
         lastFocusedBlockUuid: null,
       }),

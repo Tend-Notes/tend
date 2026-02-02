@@ -1897,163 +1897,273 @@ function GardensSection() {
   )
 }
 
-// Import section
+// Import section with Import Errors management
 function ImportSection() {
-  const [sourcePath, setSourcePath] = useState('')
-  const [overwrite, setOverwrite] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<{
-    pagesImported: number
-    journalsImported: number
-    skipped: number
-    brokenLinks: { sourceFile: string; target: string }[]
-    warnings: string[]
-    dryRun: boolean
+  const { openImportDialog } = useUIStore()
+  const { contentTypes } = useSettingsStore()
+  const [view, setView] = useState<'main' | 'errors'>('main')
+  const [errors, setErrors] = useState<{ name: string; originalName: string; error: string; timestamp: string }[]>([])
+  const [loadingErrors, setLoadingErrors] = useState(false)
+  const [selectedError, setSelectedError] = useState<string | null>(null)
+  const [errorDetail, setErrorDetail] = useState<{
+    originalName: string
+    error: string
+    content: string
+    timestamp: string
+    source: string
   } | null>(null)
+  const [, setLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selectedContentType, setSelectedContentType] = useState<string>('page')
+  const [saving, setSaving] = useState(false)
 
-  const handleImport = async (dryRun: boolean) => {
-    if (!sourcePath.trim()) {
-      setError('Please enter a source path')
-      return
+  // Load import errors on mount and when view changes to errors
+  useEffect(() => {
+    if (view === 'errors') {
+      loadErrors()
     }
+  }, [view])
 
-    setLoading(true)
+  const loadErrors = async () => {
+    setLoadingErrors(true)
     setError(null)
-    setResult(null)
-
     try {
       const { importApi } = await import('../../lib/api')
-      const res = await importApi.logseq({
-        sourcePath: sourcePath.trim(),
-        overwrite,
-        dryRun,
-      })
-      setResult(res)
+      const result = await importApi.errors.list()
+      setErrors(result.errors)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Import failed')
+      setError(err instanceof Error ? err.message : 'Failed to load errors')
     } finally {
-      setLoading(false)
+      setLoadingErrors(false)
     }
   }
 
+  const loadErrorDetail = async (name: string) => {
+    setLoadingDetail(true)
+    setError(null)
+    try {
+      const { importApi } = await import('../../lib/api')
+      const detail = await importApi.errors.get(name)
+      setErrorDetail(detail)
+      setSelectedError(name)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load error detail')
+    } finally {
+      setLoadingDetail(false)
+    }
+  }
+
+  const handleDiscard = async (name: string) => {
+    setError(null)
+    try {
+      const { importApi } = await import('../../lib/api')
+      await importApi.errors.delete(name)
+      setErrors(errors.filter(e => e.name !== name))
+      if (selectedError === name) {
+        setSelectedError(null)
+        setErrorDetail(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to discard')
+    }
+  }
+
+  const handleDiscardAll = async () => {
+    if (!confirm('Discard all import errors? This cannot be undone.')) return
+    setError(null)
+    try {
+      const { importApi } = await import('../../lib/api')
+      await importApi.errors.deleteAll()
+      setErrors([])
+      setSelectedError(null)
+      setErrorDetail(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to discard all')
+    }
+  }
+
+  const handleSaveTo = async (name: string, contentType: string) => {
+    setSaving(true)
+    setError(null)
+    try {
+      const { importApi } = await import('../../lib/api')
+      await importApi.errors.accept(name, { contentType })
+      setErrors(errors.filter(e => e.name !== name))
+      if (selectedError === name) {
+        setSelectedError(null)
+        setErrorDetail(null)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // Content types available for saving (excluding journal which requires a date)
+  const saveableContentTypes = contentTypes.filter(ct => ct.id !== 'journal')
+
   return (
     <div className="space-y-3">
-      <p className="text-xs text-base-03">
-        Import an existing Logseq graph into this garden.
-      </p>
-
-      {/* Source path */}
-      <div className="space-y-1">
-        <label className="text-xs text-base-04">Logseq graph path</label>
-        <input
-          type="text"
-          value={sourcePath}
-          onChange={(e) => setSourcePath(e.target.value)}
-          placeholder="/path/to/logseq/graph"
-          className="w-full bg-base-01 border border-base-02 rounded px-2 py-1.5 text-xs text-base-05 focus:outline-none focus:border-base-04"
-        />
-        <p className="text-xs text-base-03">
-          The path to your Logseq graph directory on the server.
-        </p>
-      </div>
-
-      {/* Overwrite option */}
-      <SettingsRow label="Overwrite existing">
-        <Toggle checked={overwrite} onChange={setOverwrite} />
-      </SettingsRow>
-      <p className="text-xs text-base-03">
-        {overwrite
-          ? 'Existing files will be replaced.'
-          : 'Existing files will be skipped.'}
-      </p>
-
-      {/* Action buttons */}
-      <div className="flex gap-2">
+      {/* Tab selection */}
+      <div className="flex gap-1 border-b border-base-02 -mx-3 px-3">
         <button
-          onClick={() => handleImport(true)}
-          disabled={loading}
-          className="px-2 py-1 text-xs text-base-04 hover:text-base-05 border border-base-02 rounded transition-colors disabled:opacity-50"
+          onClick={() => setView('main')}
+          className={`px-2 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
+            view === 'main'
+              ? 'border-base-0D text-base-05'
+              : 'border-transparent text-base-04 hover:text-base-05'
+          }`}
         >
-          {loading ? 'Checking...' : 'Preview'}
+          Import
         </button>
         <button
-          onClick={() => handleImport(false)}
-          disabled={loading}
-          className="px-2 py-1 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
+          onClick={() => setView('errors')}
+          className={`px-2 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5 ${
+            view === 'errors'
+              ? 'border-base-0D text-base-05'
+              : 'border-transparent text-base-04 hover:text-base-05'
+          }`}
         >
-          {loading ? 'Importing...' : 'Import'}
+          Errors
+          {errors.length > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] bg-base-08/20 text-base-08 rounded-full">
+              {errors.length}
+            </span>
+          )}
         </button>
       </div>
 
-      {/* Error */}
-      {error && (
-        <p className="text-xs text-base-08">{error}</p>
-      )}
+      {view === 'main' ? (
+        // Main import view
+        <div className="space-y-3">
+          <p className="text-xs text-base-03">
+            Import notes from other tools into this garden.
+          </p>
 
-      {/* Results */}
-      <AnimatePresence>
-        {result && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden"
+          <button
+            onClick={() => openImportDialog()}
+            className="w-full flex items-center gap-2 px-3 py-2 text-left bg-base-01 border border-base-02 rounded hover:border-base-03 transition-colors"
           >
-            <div className="p-2 bg-base-01 border border-base-02 rounded space-y-2">
-              <p className="text-xs text-base-05 font-medium">
-                {result.dryRun ? 'Preview Results' : 'Import Complete'}
-              </p>
-              <div className="text-xs text-base-04 space-y-1">
-                <p>Pages: {result.pagesImported}</p>
-                <p>Journals: {result.journalsImported}</p>
-                {result.skipped > 0 && <p>Skipped: {result.skipped}</p>}
+            <svg className="w-5 h-5 text-base-0D flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+            </svg>
+            <div>
+              <p className="text-sm text-base-05">Import from Logseq</p>
+              <p className="text-xs text-base-03">Upload a Logseq graph zip file</p>
+            </div>
+          </button>
+        </div>
+      ) : (
+        // Import errors view
+        <div className="space-y-3">
+          {loadingErrors ? (
+            <p className="text-xs text-base-03">Loading errors...</p>
+          ) : errors.length === 0 ? (
+            <p className="text-xs text-base-03">No import errors.</p>
+          ) : selectedError && errorDetail ? (
+            // Error detail view
+            <div className="space-y-3">
+              {/* Back button */}
+              <button
+                onClick={() => {
+                  setSelectedError(null)
+                  setErrorDetail(null)
+                }}
+                className="flex items-center gap-1 text-xs text-base-04 hover:text-base-05 transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+                Back to list
+              </button>
+
+              {/* Error info */}
+              <div className="space-y-1">
+                <p className="text-sm text-base-05 font-medium">{errorDetail.originalName}</p>
+                <p className="text-xs text-base-08">{errorDetail.error}</p>
+                <p className="text-xs text-base-03">
+                  {new Date(errorDetail.timestamp).toLocaleString()}
+                </p>
               </div>
 
-              {/* Warnings */}
-              {result.warnings.length > 0 && (
-                <div className="pt-2 border-t border-base-02">
-                  <p className="text-xs text-base-09 font-medium mb-1">Warnings</p>
-                  <ul className="text-xs text-base-04 space-y-0.5">
-                    {result.warnings.slice(0, 5).map((w, i) => (
-                      <li key={i}>• {w}</li>
-                    ))}
-                    {result.warnings.length > 5 && (
-                      <li className="text-base-03">...and {result.warnings.length - 5} more</li>
-                    )}
-                  </ul>
-                </div>
-              )}
+              {/* Content preview */}
+              <div className="bg-base-01 border border-base-02 rounded p-2 max-h-40 overflow-y-auto">
+                <pre className="text-xs text-base-04 whitespace-pre-wrap font-mono">
+                  {errorDetail.content || '(empty)'}
+                </pre>
+              </div>
 
-              {/* Broken links */}
-              {result.brokenLinks.length > 0 && (
-                <div className="pt-2 border-t border-base-02">
-                  <p className="text-xs text-base-08 font-medium mb-1">
-                    Broken Links ({result.brokenLinks.length})
-                  </p>
-                  <ul className="text-xs text-base-04 space-y-0.5 max-h-24 overflow-y-auto">
-                    {result.brokenLinks.slice(0, 10).map((link, i) => (
-                      <li key={i}>
-                        <span className="text-base-03">{link.sourceFile}:</span>{' '}
-                        <span className="text-base-08">[[{link.target}]]</span>
-                      </li>
-                    ))}
-                    {result.brokenLinks.length > 10 && (
-                      <li className="text-base-03">...and {result.brokenLinks.length - 10} more</li>
-                    )}
-                  </ul>
-                </div>
-              )}
-
-              {result.dryRun && (
-                <p className="text-xs text-base-03 italic">
-                  This was a preview. Click Import to apply changes.
-                </p>
-              )}
+              {/* Actions */}
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedContentType}
+                  onChange={(e) => setSelectedContentType(e.target.value)}
+                  className="flex-1 bg-base-01 border border-base-02 rounded px-2 py-1.5 text-xs text-base-05 focus:outline-none focus:border-base-04"
+                >
+                  {saveableContentTypes.map((ct) => (
+                    <option key={ct.id} value={ct.id}>
+                      Save to: {ct.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => handleSaveTo(selectedError, selectedContentType)}
+                  disabled={saving}
+                  className="px-2 py-1.5 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
+                >
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  onClick={() => handleDiscard(selectedError)}
+                  className="px-2 py-1.5 text-xs text-base-08 hover:bg-base-08/10 rounded transition-colors"
+                >
+                  Discard
+                </button>
+              </div>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          ) : (
+            // Error list view
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-base-04">{errors.length} failed import(s)</p>
+                <button
+                  onClick={handleDiscardAll}
+                  className="text-xs text-base-08 hover:text-base-09 transition-colors"
+                >
+                  Discard all
+                </button>
+              </div>
+
+              <div className="space-y-1 max-h-60 overflow-y-auto">
+                {errors.map((err) => (
+                  <button
+                    key={err.name}
+                    onClick={() => loadErrorDetail(err.name)}
+                    className="w-full flex items-start gap-2 p-2 text-left bg-base-01 border border-base-02 rounded hover:border-base-03 transition-colors"
+                  >
+                    <svg className="w-4 h-4 text-base-08 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-base-05 truncate">{err.originalName}</p>
+                      <p className="text-xs text-base-03 truncate">{err.error}</p>
+                    </div>
+                    <svg className="w-4 h-4 text-base-03 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Error message */}
+          {error && (
+            <p className="text-xs text-base-08">{error}</p>
+          )}
+        </div>
+      )}
     </div>
   )
 }

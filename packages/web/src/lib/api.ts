@@ -322,7 +322,7 @@ export const gardens = {
     }),
 }
 
-// Import types
+// Import types (legacy path-based)
 export interface ImportLogseqRequest {
   sourcePath: string
   overwrite?: boolean
@@ -343,13 +343,136 @@ export interface ImportResult {
   dryRun: boolean
 }
 
+// Import progress event types (for streaming response)
+export type ImportProgress =
+  | { type: 'started'; message: string }
+  | { type: 'extracting'; message: string }
+  | { type: 'processing'; current: number; total: number; file: string }
+  | { type: 'imported'; file: string; target: string }
+  | { type: 'skipped'; file: string; reason: string }
+  | { type: 'failed'; file: string; error: string }
+  | { type: 'completed'; pagesImported: number; journalsImported: number; skipped: number; failed: number; hasAssets: boolean }
+  | { type: 'error'; message: string }
+
+// Import error types
+export interface ImportErrorSummary {
+  name: string
+  originalName: string
+  error: string
+  timestamp: string
+}
+
+export interface ImportErrorList {
+  errors: ImportErrorSummary[]
+}
+
+export interface ImportError {
+  originalName: string
+  error: string
+  content: string
+  timestamp: string
+  source: string
+}
+
+export interface AcceptErrorRequest {
+  contentType: string
+  date?: string
+}
+
 // Import API
 export const importApi = {
+  // Legacy path-based import
   logseq: (req: ImportLogseqRequest) =>
     fetchJson<ImportResult>(`${API_BASE}/import/logseq`, {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+
+  // New zip-based import with streaming progress
+  uploadLogseqZip: async (
+    file: File,
+    options: { overwrite?: boolean; importAssets?: boolean },
+    onProgress: (progress: ImportProgress) => void
+  ): Promise<void> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (options.overwrite) formData.append('overwrite', 'true')
+    if (options.importAssets) formData.append('importAssets', 'true')
+
+    const response = await fetch(`${API_BASE}/import/logseq/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(`${response.status}: ${error.error || 'Upload failed'}`)
+    }
+
+    // Read streaming NDJSON response
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || '' // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const progress = JSON.parse(line) as ImportProgress
+            onProgress(progress)
+          } catch {
+            console.warn('Failed to parse progress line:', line)
+          }
+        }
+      }
+    }
+
+    // Process any remaining buffer content
+    if (buffer.trim()) {
+      try {
+        const progress = JSON.parse(buffer) as ImportProgress
+        onProgress(progress)
+      } catch {
+        console.warn('Failed to parse final progress line:', buffer)
+      }
+    }
+  },
+
+  // Import error management
+  errors: {
+    list: () => fetchJson<ImportErrorList>(`${API_BASE}/import/errors`),
+
+    get: (name: string) =>
+      fetchJson<ImportError>(`${API_BASE}/import/errors/${encodeURIComponent(name)}`),
+
+    delete: (name: string) =>
+      fetchJson<{ deleted: string }>(`${API_BASE}/import/errors/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      }),
+
+    deleteAll: () =>
+      fetchJson<{ deleted: number }>(`${API_BASE}/import/errors`, {
+        method: 'DELETE',
+      }),
+
+    accept: (name: string, req: AcceptErrorRequest) =>
+      fetchJson<{ saved: string; contentType: string; path: string }>(
+        `${API_BASE}/import/errors/${encodeURIComponent(name)}/accept`,
+        {
+          method: 'POST',
+          body: JSON.stringify(req),
+        }
+      ),
+  },
 }
 
 // Block data format for API requests
