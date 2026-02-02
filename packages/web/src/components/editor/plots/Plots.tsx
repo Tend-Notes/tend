@@ -827,6 +827,14 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     return match ? match[1].length : null
   }
 
+  // Detect if block content is purely a block reference ((uuid))
+  // Used to hide the bullet when the chain icon replaces it
+  const isBlockReference = (content: string): boolean => {
+    const trimmed = content.trim()
+    // Match exactly: ((uuid)) where uuid is 8-4-4-4-12 hex format
+    return /^\(\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)\)$/i.test(trimmed)
+  }
+
   const renderBlock = (block: Block) => {
     const blockChildren = block.children
       .map((childUuid) => page.blocks[childUuid])
@@ -846,8 +854,12 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     const isCodeEnd = codeInfo?.isEnd ?? false
     const codeLanguage = codeInfo?.language ?? ''
 
-    // Hide bullet for headers and code blocks
-    const hideBullet = isHeader || isCodeBlock
+    // Check if block is a block reference (content is purely ((uuid)))
+    // Hide bullet because the chain icon replaces it
+    const isBlockRef = isBlockReference(block.content)
+
+    // Hide bullet for headers, code blocks, and block references
+    const hideBullet = isHeader || isCodeBlock || isBlockRef
 
     // Build class names for the block container
     const containerClasses = [
@@ -858,6 +870,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       isCodeBlock ? 'block-container--code' : '',
       isCodeStart ? 'block-container--code-start' : '',
       isCodeEnd ? 'block-container--code-end' : '',
+      isBlockRef ? 'block-container--block-ref' : '',
     ].filter(Boolean).join(' ')
 
     // Code blocks need to break out of nesting indentation to be full width
@@ -887,7 +900,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         }}
       >
         <div className="block flex items-start py-0.5">
-          {/* Bullet - hidden for header and code blocks */}
+          {/* Bullet - hidden for headers, code blocks, and block references */}
           {!hideBullet && (
             <button
               onClick={(e) => {

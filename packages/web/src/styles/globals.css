@@ -343,12 +343,22 @@ code {
 /* Block reference styles - inline widget
  * Design: Chain link icon replaces bullet, content has subtle background.
  * Renders like a normal block but with visual distinction.
+ *
+ * When a block's content is purely a block reference ((uuid)), the bullet
+ * is hidden and the chain icon visually replaces it. The chain icon uses
+ * negative margin to move into the bullet's position.
  */
 .block-reference {
   display: inline-flex;
   flex-direction: column;
   vertical-align: baseline;
   max-width: 100%;
+}
+
+/* Block container for pure block references - no bullet */
+.block-container--block-ref .block {
+  /* Remove gap that would exist between bullet and content */
+  gap: 0;
 }
 
 /* Main row - chain icon + content (like a block with bullet) */
@@ -383,7 +393,10 @@ code {
   font-style: italic;
 }
 
-/* Chain icon - in bullet position, clickable */
+/* Chain icon - replaces bullet, clickable
+ * Positioned with negative margin to sit in the bullet's position
+ * The bullet would normally be 6px wide with some spacing
+ */
 .block-reference-chain {
   display: inline-block;
   width: 14px;
@@ -393,6 +406,9 @@ code {
   cursor: pointer;
   transition: transform var(--duration-fast) var(--ease-out),
               color var(--duration-fast) var(--ease-out);
+  /* Align vertically with the text baseline */
+  vertical-align: middle;
+  margin-top: -1px;
 }
 
 .block-reference-chain:hover {
