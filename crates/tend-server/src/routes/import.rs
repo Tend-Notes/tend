@@ -61,6 +61,11 @@ pub enum ImportProgress {
         file: String,
         error: String,
     },
+    /// Logseq-specific syntax was transformed
+    Transformed {
+        file: String,
+        transformations: Vec<String>,
+    },
     /// Import completed
     Completed {
         pages_imported: usize,
@@ -336,7 +341,7 @@ async fn process_import(
             .await;
 
         // Read file content
-        let content = match fs::read_to_string(&file_path).await {
+        let raw_content = match fs::read_to_string(&file_path).await {
             Ok(c) => c,
             Err(e) => {
                 save_import_error(
@@ -356,6 +361,20 @@ async fn process_import(
                 continue;
             }
         };
+
+        // Transform Logseq-specific syntax
+        let transform_result = transform_logseq_content(&raw_content);
+        let content = transform_result.content;
+
+        // Report transformations if any occurred
+        if !transform_result.transformations.is_empty() {
+            let _ = tx
+                .send(ImportProgress::Transformed {
+                    file: file_name.clone(),
+                    transformations: transform_result.transformations,
+                })
+                .await;
+        }
 
         // Determine destination path
         let dest_result = match target {
@@ -899,9 +918,19 @@ pub async fn import_logseq(
             }
 
             // Read content and extract links
-            let content = fs::read_to_string(&path)
+            let raw_content = fs::read_to_string(&path)
                 .await
                 .context(format!("Failed to read file: {}", path.display()))?;
+
+            // Transform Logseq-specific syntax
+            let transform_result = transform_logseq_content(&raw_content);
+            let content = transform_result.content;
+            if !transform_result.transformations.is_empty() {
+                for t in &transform_result.transformations {
+                    warnings.push(format!("{}: {}", file_name, t));
+                }
+            }
+
             extract_wiki_links(&content, file_name, &mut all_links);
 
             if !req.dry_run {
@@ -983,9 +1012,19 @@ pub async fn import_logseq(
             }
 
             // Read content and extract links
-            let content = fs::read_to_string(&path)
+            let raw_content = fs::read_to_string(&path)
                 .await
                 .context(format!("Failed to read file: {}", path.display()))?;
+
+            // Transform Logseq-specific syntax
+            let transform_result = transform_logseq_content(&raw_content);
+            let content = transform_result.content;
+            if !transform_result.transformations.is_empty() {
+                for t in &transform_result.transformations {
+                    warnings.push(format!("{}: {}", file_name, t));
+                }
+            }
+
             extract_wiki_links(&content, file_name, &mut all_links);
 
             if !req.dry_run {
@@ -1037,5 +1076,279 @@ fn extract_wiki_links(content: &str, source_file: &str, links: &mut Vec<(String,
         if !target.starts_with("((") && !target.starts_with("{{") {
             links.push((source_file.to_string(), target));
         }
+    }
+}
+
+/// Result of transforming Logseq-specific content
+#[derive(Debug)]
+pub struct TransformResult {
+    /// The transformed content
+    pub content: String,
+    /// List of transformations applied (for logging)
+    pub transformations: Vec<String>,
+}
+
+/// Transform Logseq-specific syntax that won't work in Tend
+///
+/// Handles:
+/// - `{{query ...}}` blocks - Removed entirely
+/// - `{{embed [[Page]]}}` - Converted to `[[Page]]`
+/// - `{{embed ((block-id))}}` - Converted to `((block-id))`
+/// - `{{cloze ...}}` - Stripped wrapper, kept content
+/// - Other `{{...}}` macros - Stripped with comment
+pub fn transform_logseq_content(content: &str) -> TransformResult {
+    let mut result = content.to_string();
+    let mut transformations = Vec::new();
+
+    // Pattern for {{query ...}} - can span multiple lines
+    // Match balanced braces using a simple approach: match until closing }}
+    let query_regex = Regex::new(r"(?s)\{\{query\s[^}]*\}\}").unwrap();
+    let query_count = query_regex.find_iter(&result).count();
+    if query_count > 0 {
+        result = query_regex
+            .replace_all(&result, "<!-- Logseq query removed -->")
+            .to_string();
+        transformations.push(format!("Removed {} query block(s)", query_count));
+    }
+
+    // Pattern for {{embed [[Page]]}} - convert to regular link
+    let embed_page_regex = Regex::new(r"\{\{embed\s+\[\[([^\]]+)\]\]\s*\}\}").unwrap();
+    let embed_page_count = embed_page_regex.find_iter(&result).count();
+    if embed_page_count > 0 {
+        result = embed_page_regex.replace_all(&result, "[[$1]]").to_string();
+        transformations.push(format!(
+            "Converted {} page embed(s) to links",
+            embed_page_count
+        ));
+    }
+
+    // Pattern for {{embed ((block-id))}} - convert to block reference
+    let embed_block_regex = Regex::new(r"\{\{embed\s+\(\(([^)]+)\)\)\s*\}\}").unwrap();
+    let embed_block_count = embed_block_regex.find_iter(&result).count();
+    if embed_block_count > 0 {
+        result = embed_block_regex
+            .replace_all(&result, "(($1))")
+            .to_string();
+        transformations.push(format!(
+            "Converted {} block embed(s) to references",
+            embed_block_count
+        ));
+    }
+
+    // Pattern for {{cloze content}} - keep content, strip wrapper
+    let cloze_regex = Regex::new(r"\{\{cloze\s+([^}]+)\}\}").unwrap();
+    let cloze_count = cloze_regex.find_iter(&result).count();
+    if cloze_count > 0 {
+        result = cloze_regex.replace_all(&result, "$1").to_string();
+        transformations.push(format!("Stripped {} cloze wrapper(s)", cloze_count));
+    }
+
+    // Pattern for {{video ...}} - convert to link or comment
+    let video_regex = Regex::new(r"\{\{video\s+([^}]+)\}\}").unwrap();
+    let video_count = video_regex.find_iter(&result).count();
+    if video_count > 0 {
+        result = video_regex
+            .replace_all(&result, "<!-- Video: $1 -->")
+            .to_string();
+        transformations.push(format!("Commented out {} video macro(s)", video_count));
+    }
+
+    // Pattern for {{youtube ...}} - convert to link
+    let youtube_regex = Regex::new(r"\{\{youtube\s+([^}]+)\}\}").unwrap();
+    let youtube_count = youtube_regex.find_iter(&result).count();
+    if youtube_count > 0 {
+        result = youtube_regex
+            .replace_all(&result, "[YouTube video]($1)")
+            .to_string();
+        transformations.push(format!(
+            "Converted {} YouTube macro(s) to links",
+            youtube_count
+        ));
+    }
+
+    // Pattern for {{tweet ...}} - convert to link
+    let tweet_regex = Regex::new(r"\{\{tweet\s+([^}]+)\}\}").unwrap();
+    let tweet_count = tweet_regex.find_iter(&result).count();
+    if tweet_count > 0 {
+        result = tweet_regex
+            .replace_all(&result, "[Tweet]($1)")
+            .to_string();
+        transformations.push(format!("Converted {} tweet macro(s) to links", tweet_count));
+    }
+
+    // Pattern for {{renderer ...}} - comment out
+    let renderer_regex = Regex::new(r"\{\{renderer\s+[^}]*\}\}").unwrap();
+    let renderer_count = renderer_regex.find_iter(&result).count();
+    if renderer_count > 0 {
+        result = renderer_regex
+            .replace_all(&result, "<!-- Logseq renderer removed -->")
+            .to_string();
+        transformations.push(format!("Removed {} renderer macro(s)", renderer_count));
+    }
+
+    // Pattern for {{cards ...}} - comment out
+    let cards_regex = Regex::new(r"\{\{cards\s+[^}]*\}\}").unwrap();
+    let cards_count = cards_regex.find_iter(&result).count();
+    if cards_count > 0 {
+        result = cards_regex
+            .replace_all(&result, "<!-- Logseq cards removed -->")
+            .to_string();
+        transformations.push(format!("Removed {} cards macro(s)", cards_count));
+    }
+
+    // Generic pattern for remaining {{...}} macros - comment them out
+    // This catches anything we haven't explicitly handled
+    let generic_macro_regex = Regex::new(r"\{\{([a-zA-Z][a-zA-Z0-9-_]*)\s*([^}]*)\}\}").unwrap();
+    let remaining_macros: Vec<String> = generic_macro_regex
+        .captures_iter(&result)
+        .map(|cap| cap[1].to_string())
+        .collect();
+    if !remaining_macros.is_empty() {
+        let unique_macros: std::collections::HashSet<_> = remaining_macros.iter().collect();
+        result = generic_macro_regex
+            .replace_all(&result, "<!-- Logseq macro {{$1}} removed -->")
+            .to_string();
+        transformations.push(format!(
+            "Removed {} other macro(s): {}",
+            remaining_macros.len(),
+            unique_macros
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    TransformResult {
+        content: result,
+        transformations,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_transform_query_block() {
+        let content = "Some text\n{{query (and [[Project]] (task todo))}}\nMore text";
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "Some text\n<!-- Logseq query removed -->\nMore text"
+        );
+        assert_eq!(result.transformations.len(), 1);
+        assert!(result.transformations[0].contains("query"));
+    }
+
+    #[test]
+    fn test_transform_embed_page() {
+        let content = "Check this: {{embed [[My Page]]}} for details";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, "Check this: [[My Page]] for details");
+        assert_eq!(result.transformations.len(), 1);
+        assert!(result.transformations[0].contains("page embed"));
+    }
+
+    #[test]
+    fn test_transform_embed_block() {
+        let content = "Reference: {{embed ((block-uuid-123))}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, "Reference: ((block-uuid-123))");
+        assert_eq!(result.transformations.len(), 1);
+        assert!(result.transformations[0].contains("block embed"));
+    }
+
+    #[test]
+    fn test_transform_cloze() {
+        let content = "The capital of France is {{cloze Paris}}.";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, "The capital of France is Paris.");
+        assert_eq!(result.transformations.len(), 1);
+        assert!(result.transformations[0].contains("cloze"));
+    }
+
+    #[test]
+    fn test_transform_youtube() {
+        let content = "Watch this: {{youtube https://youtube.com/watch?v=abc123}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "Watch this: [YouTube video](https://youtube.com/watch?v=abc123)"
+        );
+        assert_eq!(result.transformations.len(), 1);
+        assert!(result.transformations[0].contains("YouTube"));
+    }
+
+    #[test]
+    fn test_transform_tweet() {
+        let content = "See tweet: {{tweet https://twitter.com/user/status/123}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "See tweet: [Tweet](https://twitter.com/user/status/123)"
+        );
+    }
+
+    #[test]
+    fn test_transform_renderer() {
+        let content = "Task: {{renderer :todomaster}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, "Task: <!-- Logseq renderer removed -->");
+    }
+
+    #[test]
+    fn test_transform_cards() {
+        let content = "Study: {{cards [[Vocabulary]]}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, "Study: <!-- Logseq cards removed -->");
+    }
+
+    #[test]
+    fn test_transform_video() {
+        let content = "Video: {{video https://example.com/video.mp4}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "Video: <!-- Video: https://example.com/video.mp4 -->"
+        );
+    }
+
+    #[test]
+    fn test_transform_unknown_macro() {
+        let content = "Custom: {{myplugin some args}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "Custom: <!-- Logseq macro {{myplugin}} removed -->"
+        );
+        assert!(result.transformations[0].contains("myplugin"));
+    }
+
+    #[test]
+    fn test_no_transformation_needed() {
+        let content = "Regular markdown with [[wiki links]] and **bold**.";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, content);
+        assert!(result.transformations.is_empty());
+    }
+
+    #[test]
+    fn test_multiple_transformations() {
+        let content = "{{query something}}\n{{embed [[Page]]}}\n{{cloze answer}}";
+        let result = transform_logseq_content(content);
+        assert_eq!(
+            result.content,
+            "<!-- Logseq query removed -->\n[[Page]]\nanswer"
+        );
+        assert_eq!(result.transformations.len(), 3);
+    }
+
+    #[test]
+    fn test_preserves_regular_content() {
+        let content = "# Heading\n- List item\n- [[Link]] to page\n\nParagraph with **bold** and *italic*.";
+        let result = transform_logseq_content(content);
+        assert_eq!(result.content, content);
+        assert!(result.transformations.is_empty());
     }
 }
