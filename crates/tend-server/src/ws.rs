@@ -101,7 +101,15 @@ fn extract_username(headers: &HeaderMap, config: &crate::config::Config) -> Opti
     None
 }
 
-/// Verify authentication by forwarding cookies to the auth service
+/// Verify authentication by forwarding cookies to the auth service (e.g., Authelia)
+///
+/// Authelia's /api/verify endpoint requires specific headers to verify the request:
+/// - X-Original-URL: The full original request URL
+/// - X-Forwarded-Proto: The protocol (http/https)
+/// - X-Forwarded-Host: The original host
+/// - X-Forwarded-Uri: The URI path
+/// - X-Forwarded-Method: The HTTP method
+/// - Cookie: Session cookies
 async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
     // Extract cookie header to forward
     let cookie_header = headers
@@ -109,11 +117,25 @@ async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    // Also forward X-Forwarded-* headers that might be relevant
+    // Extract forwarded headers from the reverse proxy
     let forwarded_for = headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
+
+    let forwarded_proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("https");
+
+    let forwarded_host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    // Build X-Original-URL for Authelia
+    let original_url = format!("{}://{}/ws", forwarded_proto, forwarded_host);
 
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
@@ -126,11 +148,23 @@ async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
         }
     };
 
-    let mut request = client.get(verify_url).header("Cookie", cookie_header);
+    let mut request = client
+        .get(verify_url)
+        .header("Cookie", cookie_header)
+        .header("X-Original-URL", &original_url)
+        .header("X-Forwarded-Proto", forwarded_proto)
+        .header("X-Forwarded-Host", forwarded_host)
+        .header("X-Forwarded-Uri", "/ws")
+        .header("X-Forwarded-Method", "GET");
 
     if !forwarded_for.is_empty() {
         request = request.header("X-Forwarded-For", forwarded_for);
     }
+
+    debug!(
+        "Verifying WebSocket auth: url={}, original_url={}, host={}",
+        verify_url, original_url, forwarded_host
+    );
 
     match request.send().await {
         Ok(response) => {
@@ -139,7 +173,10 @@ async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
                 debug!("WebSocket auth verification succeeded");
                 true
             } else {
-                info!("WebSocket auth verification failed: status {}", status);
+                info!(
+                    "WebSocket auth verification failed: status {} for {}",
+                    status, original_url
+                );
                 false
             }
         }
