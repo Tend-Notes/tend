@@ -35,28 +35,33 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
   const popupRef = useRef<HTMLDivElement>(null)
   const contentTypes = useSettingsStore((s) => s.contentTypes)
 
-  // Load all available sheets for all content types
+  // Load all available sheets and wikilink targets
   useEffect(() => {
     let cancelled = false
 
     const load = async () => {
       try {
-        // Load sheets for all content types uniformly
-        const sheetResults = await Promise.all(
-          contentTypes.map(async (ct) => {
-            try {
-              const sheets = await api.sheets.list(ct.id)
-              return { contentType: ct, sheets }
-            } catch {
-              return { contentType: ct, sheets: [] }
-            }
-          })
-        )
+        // Load sheets for all content types and wikilink targets in parallel
+        const [sheetResults, wikilinkTargets] = await Promise.all([
+          Promise.all(
+            contentTypes.map(async (ct) => {
+              try {
+                const sheets = await api.sheets.list(ct.id)
+                return { contentType: ct, sheets }
+              } catch {
+                return { contentType: ct, sheets: [] }
+              }
+            })
+          ),
+          api.links.getWikilinkTargets().catch(() => ({ targets: [] })),
+        ])
 
         if (cancelled) return
 
-        // Build suggestion items
+        // Build suggestion items from existing sheets
         const suggestions: SuggestionItem[] = []
+        // Track existing sheet values to avoid duplicates with wikilink targets
+        const existingValues = new Set<string>()
 
         for (const { contentType, sheets } of sheetResults) {
           for (const sheet of sheets) {
@@ -67,21 +72,38 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
                 value: sheet.name,
                 subtitle: sheet.name !== sheet.title ? sheet.name : undefined,
               })
+              existingValues.add(sheet.name.toLowerCase())
             } else if (contentType.id === 'journal') {
               // Journals: use journals/ prefix
+              const value = `journals/${sheet.journalDate || sheet.name}`
               suggestions.push({
                 title: sheet.title,
-                value: `journals/${sheet.journalDate || sheet.name}`,
+                value,
                 subtitle: 'Journal',
               })
+              existingValues.add(value.toLowerCase())
             } else {
               // Custom content types: use directory prefix
+              const value = `${contentType.directory}/${sheet.name}`
               suggestions.push({
                 title: sheet.title,
-                value: `${contentType.directory}/${sheet.name}`,
+                value,
                 subtitle: contentType.name,
               })
+              existingValues.add(value.toLowerCase())
             }
+          }
+        }
+
+        // Add wikilink targets that don't already exist as sheets
+        // These are "phantom" pages that have been referenced but not created
+        for (const target of wikilinkTargets.targets) {
+          if (!existingValues.has(target.toLowerCase())) {
+            suggestions.push({
+              title: target,
+              value: target,
+              subtitle: 'Referenced',
+            })
           }
         }
 

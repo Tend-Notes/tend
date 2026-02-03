@@ -18,6 +18,13 @@ pub struct LinkIndexStatus {
     pub entries: usize,
 }
 
+/// Response for wikilink targets
+#[derive(Serialize)]
+pub struct WikilinkTargetsResponse {
+    /// All unique page names referenced by wikilinks
+    pub targets: Vec<String>,
+}
+
 /// Get link index status
 pub async fn status(
     State(state): State<Arc<AppState>>,
@@ -58,5 +65,22 @@ pub async fn rebuild(
     Ok(Json(RebuildResponse {
         entries,
         message: format!("Link index rebuilt with {} entries", entries),
+    }))
+}
+
+/// Get all unique wikilink targets
+///
+/// Returns all page names that have been referenced via wikilinks, including
+/// pages that don't exist yet. This is useful for autocomplete suggestions.
+pub async fn wikilink_targets(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<WikilinkTargetsResponse>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
+    let link_index = garden.link_index.read().await;
+
+    Ok(Json(WikilinkTargetsResponse {
+        targets: link_index.get_wikilink_targets(),
     }))
 }

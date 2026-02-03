@@ -48,6 +48,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // Links
         .route("/links/status", get(links::status))
         .route("/links/rebuild", post(links::rebuild))
+        .route("/links/wikilink-targets", get(links::wikilink_targets))
         // Blocks (status/rebuild must come before {uuid} wildcard)
         .route("/blocks/status", get(blocks::status))
         .route("/blocks/rebuild", post(blocks::rebuild))

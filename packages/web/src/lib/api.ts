@@ -121,6 +121,17 @@ export const search = {
     fetchJson<SearchResponse>(`${API_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 }
 
+// Links API
+export interface WikilinkTargetsResponse {
+  targets: string[]
+}
+
+export const links = {
+  /** Get all unique wikilink targets (pages referenced but not necessarily created) */
+  getWikilinkTargets: () =>
+    fetchJson<WikilinkTargetsResponse>(`${API_BASE}/links/wikilink-targets`),
+}
+
 // Graph API
 export const graph = {
   get: () => fetchJson<Graph>(`${API_BASE}/graph`),
