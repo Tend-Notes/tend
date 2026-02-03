@@ -72,7 +72,12 @@
         backend = pkgs.rustPlatform.buildRustPackage {
           pname = "tend-server";
           version = "0.1.0";
-          src = ./.;
+          # Exclude .cargo to avoid mold linker config (only available in dev shell)
+          src = pkgs.lib.cleanSourceWith {
+            src = ./.;
+            filter = path: type:
+              !(pkgs.lib.hasPrefix "${toString ./.}/.cargo" path);
+          };
           cargoLock.lockFile = ./Cargo.lock;
 
           inherit buildInputs;
