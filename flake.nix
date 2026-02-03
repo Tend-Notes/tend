@@ -137,6 +137,10 @@
             # Tools
             git
             jq
+
+            # Faster linking (see .cargo/config.toml)
+            mold
+            clang
           ];
 
           shellHook = ''
