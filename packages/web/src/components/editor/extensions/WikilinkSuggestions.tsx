@@ -163,9 +163,10 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
       } else if (e.key === 'Escape') {
         e.preventDefault()
         e.stopPropagation()
-        // Delete the [[ to dismiss the popup
+        // Just move cursor past the [[ to dismiss the popup without deleting content
+        // The popup will close automatically when cursor is no longer in a partial wikilink
         view.dispatch({
-          changes: { from: state.from, to: state.to, insert: '' },
+          selection: { anchor: state.from },
         })
         view.focus()
       } else if (e.key === 'Tab') {
