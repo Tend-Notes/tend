@@ -9,7 +9,7 @@ import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 import { useActivityLogStore } from './activityLogStore'
 import { useSyncStatusStore } from './syncStatusStore'
-import { useSettingsStore } from './settingsStore'
+import { useSettingsStore, type ContentType } from './settingsStore'
 import { useRecentSheetsStore } from './recentSheetsStore'
 
 interface PageState {
@@ -171,6 +171,35 @@ export function shouldSkipFileWatcherReload(): boolean {
   if (Date.now() - lastSaveTimestamp < SAVE_GRACE_PERIOD_MS) return true
 
   return false
+}
+
+// Helper to extract sheet name from full page name for custom content types
+// For saveByDate types: "meeting/2026-01-30/Standup" -> "Standup"
+// For non-saveByDate types: "person/John Smith" -> "John Smith"
+function extractSheetName(contentType: ContentType, pageName: string): string {
+  if (!pageName.startsWith(contentType.directory + '/')) {
+    return pageName
+  }
+  const withoutDir = pageName.slice(contentType.directory.length + 1)
+  if (contentType.saveByDate && withoutDir.includes('/')) {
+    // Format: YYYY-MM-DD/name -> return just name
+    const slashIndex = withoutDir.indexOf('/')
+    return withoutDir.slice(slashIndex + 1)
+  }
+  return withoutDir
+}
+
+// Helper to extract date from page name for saveByDate content types
+// "meeting/2026-01-30/Standup" -> "2026-01-30"
+function extractDateFromPageName(contentType: ContentType, pageName: string): string | undefined {
+  if (!contentType.saveByDate) return undefined
+  if (!pageName.startsWith(contentType.directory + '/')) return undefined
+  const withoutDir = pageName.slice(contentType.directory.length + 1)
+  if (withoutDir.includes('/')) {
+    // Format: YYYY-MM-DD/name -> return YYYY-MM-DD
+    return withoutDir.split('/')[0]
+  }
+  return undefined
 }
 
 // Helper to record sheet access in the recent sheets store
@@ -650,7 +679,16 @@ export const usePageStore = create<PageState>()(
             updatedPage = await api.pages.update(pageName, apiBlocks, version)
           } else {
             // Custom content type - use sheets API
-            updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
+            // Extract proper sheet name and date from full page name
+            const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
+            if (contentTypeObj) {
+              const sheetName = extractSheetName(contentTypeObj, pageName)
+              const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
+              updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
+            } else {
+              // Fallback: use journalDate if available, otherwise undefined
+              updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
+            }
           }
           // Server save succeeded - clear the draft and pending save data
           pendingSaveData = null
@@ -827,7 +865,16 @@ export const usePageStore = create<PageState>()(
             updatedPage = await api.pages.update(pageName, apiBlocks, version)
           } else {
             // Custom content type - use sheets API
-            updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
+            // Extract proper sheet name and date from full page name
+            const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
+            if (contentTypeObj) {
+              const sheetName = extractSheetName(contentTypeObj, pageName)
+              const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
+              updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
+            } else {
+              // Fallback: use journalDate if available, otherwise undefined
+              updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
+            }
           }
 
           // Record save timestamp to ignore file watcher events for our own save
