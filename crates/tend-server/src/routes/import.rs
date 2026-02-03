@@ -23,7 +23,7 @@ use anyhow::Context;
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::routes::gardens::load_user_content_types;
-use crate::state::AppState;
+use crate::state::{AppState, UserState};
 
 /// Maximum upload size: 500 MB
 pub const MAX_UPLOAD_SIZE: usize = 500 * 1024 * 1024;
@@ -209,6 +209,7 @@ pub async fn import_logseq_zip(
             overwrite,
             import_assets,
             tx_clone.clone(),
+            user_state,
         )
         .await
         {
@@ -243,6 +244,7 @@ async fn process_import(
     overwrite: bool,
     _import_assets: bool,
     tx: tokio::sync::mpsc::Sender<ImportProgress>,
+    user_state: Arc<UserState>,
 ) -> anyhow::Result<()> {
     let _ = tx
         .send(ImportProgress::Started {
@@ -314,6 +316,11 @@ async fn process_import(
     let mut journals_imported = 0;
     let mut skipped = 0;
     let mut failed = 0;
+
+    // Track imported files for link index update
+    // Pages are tracked by name, journals by date string (YYYY-MM-DD)
+    let mut imported_pages: Vec<String> = Vec::new();
+    let mut imported_journals: Vec<String> = Vec::new();
 
     // Logseq journal date patterns
     let journal_date_regex = Regex::new(r"^(\d{4})[-_](\d{2})[-_](\d{2})\.md$").unwrap();
@@ -460,12 +467,22 @@ async fn process_import(
                 let _ = tx
                     .send(ImportProgress::Imported {
                         file: file_name,
-                        target: dest_name,
+                        target: dest_name.clone(),
                     })
                     .await;
                 match target {
-                    ImportTarget::Page => pages_imported += 1,
-                    ImportTarget::Journal => journals_imported += 1,
+                    ImportTarget::Page => {
+                        // For pages, dest_name is the page name (without .md)
+                        imported_pages.push(dest_name);
+                        pages_imported += 1;
+                    }
+                    ImportTarget::Journal => {
+                        // For journals, dest_name is filename like "2024-01-15.md"
+                        // Extract the date string (YYYY-MM-DD)
+                        let date_str = dest_name.trim_end_matches(".md").to_string();
+                        imported_journals.push(date_str);
+                        journals_imported += 1;
+                    }
                 }
             }
             Err(e) => {
@@ -483,6 +500,45 @@ async fn process_import(
                     })
                     .await;
                 failed += 1;
+            }
+        }
+    }
+
+    // Update link index for all imported pages and journals
+    // This ensures tags and wiki-links are indexed for backlink queries
+    if !imported_pages.is_empty() || !imported_journals.is_empty() {
+        let garden = user_state.garden.read().await;
+        let mut link_index = garden.link_index.write().await;
+
+        // Index imported pages
+        for page_name in &imported_pages {
+            match garden.file_manager.read_page(page_name).await {
+                Ok(page) => {
+                    let blocks: Vec<_> = page.blocks.values().cloned().collect();
+                    if let Err(e) = link_index.index_page(&page.name, &blocks).await {
+                        tracing::warn!("Failed to update link index for imported page {}: {}", page_name, e);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to read imported page {} for indexing: {}", page_name, e);
+                }
+            }
+        }
+
+        // Index imported journals
+        for date_str in &imported_journals {
+            if let Ok(date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                match garden.file_manager.read_journal(date).await {
+                    Ok(page) => {
+                        let blocks: Vec<_> = page.blocks.values().cloned().collect();
+                        if let Err(e) = link_index.index_page(&page.name, &blocks).await {
+                            tracing::warn!("Failed to update link index for imported journal {}: {}", date_str, e);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to read imported journal {} for indexing: {}", date_str, e);
+                    }
+                }
             }
         }
     }
