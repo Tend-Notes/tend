@@ -1373,8 +1373,8 @@ function GardensSection() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newGardenName.trim(),
-          // Default path: base data dir + garden name
-          path: `~/.local/share/tend/${newGardenName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')}`,
+          // Let server determine path based on user's data directory
+          path: newGardenName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-'),
           passphrase: newGardenEncrypted ? newGardenPassphrase : undefined,
           // Search options for encrypted gardens
           search_enabled: newGardenEncrypted ? newGardenSearchEnabled : undefined,

@@ -345,8 +345,14 @@ pub async fn create_garden(
         return Err(AppError::BadRequest(format!("Garden '{}' already exists", req.name)));
     }
 
-    // Expand ~ in path and create the garden directory
-    let garden_path = expand_tilde(&req.path);
+    // Determine garden path:
+    // - If path starts with / or ~, use it as-is (expand ~ to home)
+    // - Otherwise, treat as relative to user's gardens directory
+    let garden_path = if req.path.starts_with('/') || req.path.starts_with('~') {
+        expand_tilde(&req.path)
+    } else {
+        user_gardens_root(&user.username).join(&req.path)
+    };
     if !garden_path.exists() {
         std::fs::create_dir_all(&garden_path)
             .map_err(|e| AppError::Internal(format!("Failed to create garden directory: {}", e)))?;
