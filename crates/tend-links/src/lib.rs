@@ -47,6 +47,10 @@ pub struct LinkEntry {
     pub source_hash: String,
     /// SHA-256 hash of the target page name (normalized)
     pub target_hash: String,
+    /// The actual target name (for wikilink suggestions)
+    /// Added in version 2 - may be None for entries from older indices
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_name: Option<String>,
     /// UUID of the block containing this link
     pub block_uuid: Uuid,
     /// Type of link (WikiLink or Tag)
@@ -94,7 +98,8 @@ struct LinkIndexData {
 }
 
 impl LinkIndexData {
-    const CURRENT_VERSION: u32 = 1;
+    // Version 2: Added target_name field to LinkEntry
+    const CURRENT_VERSION: u32 = 2;
 
     fn new() -> Self {
         Self {
@@ -194,6 +199,7 @@ impl LinkIndex {
                 new_entries.push(LinkEntry {
                     source_hash: source_hash.clone(),
                     target_hash,
+                    target_name: Some(target),
                     block_uuid: block.uuid,
                     link_type: LinkType::WikiLink,
                 });
@@ -205,6 +211,7 @@ impl LinkIndex {
                 new_entries.push(LinkEntry {
                     source_hash: source_hash.clone(),
                     target_hash,
+                    target_name: Some(tag),
                     block_uuid: block.uuid,
                     link_type: LinkType::Tag,
                 });
@@ -316,10 +323,11 @@ impl LinkIndex {
                     let entry = LinkEntry {
                         source_hash: source_hash.clone(),
                         target_hash: target_hash.clone(),
+                        target_name: Some(target),
                         block_uuid: block.uuid,
                         link_type: LinkType::WikiLink,
                     };
-                    self.target_index.entry(target_hash).or_default().push(idx);
+                    self.target_index.entry(entry.target_hash.clone()).or_default().push(idx);
                     self.source_index
                         .entry(source_hash.clone())
                         .or_default()
@@ -335,10 +343,11 @@ impl LinkIndex {
                     let entry = LinkEntry {
                         source_hash: source_hash.clone(),
                         target_hash: target_hash.clone(),
+                        target_name: Some(tag),
                         block_uuid: block.uuid,
                         link_type: LinkType::Tag,
                     };
-                    self.target_index.entry(target_hash).or_default().push(idx);
+                    self.target_index.entry(entry.target_hash.clone()).or_default().push(idx);
                     self.source_index
                         .entry(source_hash.clone())
                         .or_default()
@@ -368,6 +377,29 @@ impl LinkIndex {
     /// Check if the index is empty
     pub fn is_empty(&self) -> bool {
         self.data.entries.is_empty()
+    }
+
+    /// Get all unique wikilink target names
+    ///
+    /// Returns a list of all page names that have been referenced via wikilinks,
+    /// regardless of whether those pages actually exist. This is useful for
+    /// autocomplete suggestions.
+    ///
+    /// Only returns targets that have a stored name (entries from index version 2+).
+    pub fn get_wikilink_targets(&self) -> Vec<String> {
+        use std::collections::HashSet;
+
+        let mut targets: HashSet<String> = HashSet::new();
+
+        for entry in &self.data.entries {
+            if entry.link_type == LinkType::WikiLink {
+                if let Some(name) = &entry.target_name {
+                    targets.insert(name.clone());
+                }
+            }
+        }
+
+        targets.into_iter().collect()
     }
 }
 
@@ -564,5 +596,40 @@ mod tests {
 
         let backlinks = index.get_backlinks("Target");
         assert_eq!(backlinks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_wikilink_targets() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
+
+        // Index multiple pages with various wikilinks
+        let blocks1 = vec![Block::new("Link to [[Page A]] and [[Page B]]")];
+        index.index_page("Source 1", &blocks1).await.unwrap();
+
+        let blocks2 = vec![Block::new("Link to [[Page B]] and [[Page C]]")];
+        index.index_page("Source 2", &blocks2).await.unwrap();
+
+        // Get all unique wikilink targets
+        let mut targets = index.get_wikilink_targets();
+        targets.sort();
+
+        assert_eq!(targets.len(), 3);
+        assert_eq!(targets, vec!["Page A", "Page B", "Page C"]);
+    }
+
+    #[tokio::test]
+    async fn test_get_wikilink_targets_excludes_tags() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
+
+        // Index a page with both wikilinks and tags
+        let blocks = vec![Block::new("Link to [[My Page]] with #tag and #another-tag")];
+        index.index_page("Source", &blocks).await.unwrap();
+
+        // Should only return wikilink targets, not tags
+        let targets = index.get_wikilink_targets();
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains(&"My Page".to_string()));
     }
 }
