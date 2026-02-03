@@ -61,6 +61,7 @@ function findWikilinks(doc: string): WikilinkSpan[] {
 function findPartialWikilink(doc: string, cursorPos: number): { from: number; to: number; query: string } | null {
   // Look backwards from cursor for [[
   const textBefore = doc.slice(0, cursorPos)
+  const textAfter = doc.slice(cursorPos)
 
   // Find the last [[ that isn't closed
   let searchPos = textBefore.length
@@ -71,6 +72,20 @@ function findPartialWikilink(doc: string, cursorPos: number): { from: number; to
     // Check if this [[ is closed before cursor
     const textAfterOpen = textBefore.slice(openIdx)
     if (!textAfterOpen.includes(']]')) {
+      // Found [[ without ]] before cursor
+      // BUT: check if there's a ]] after cursor that would complete this wikilink
+      // If so, cursor is inside a COMPLETE wikilink - don't trigger popup
+      const closingIdx = textAfter.indexOf(']]')
+      if (closingIdx !== -1) {
+        // Check that there's no [[ between cursor and the ]]
+        // If there is, the ]] belongs to a different wikilink
+        const textToClosing = textAfter.slice(0, closingIdx)
+        if (!textToClosing.includes('[[')) {
+          // Cursor is inside a complete wikilink - don't trigger popup
+          return null
+        }
+      }
+
       // Found unclosed [[
       const query = textBefore.slice(openIdx + 2)
       // Don't trigger if query contains newlines or ]
