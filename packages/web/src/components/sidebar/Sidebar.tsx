@@ -188,16 +188,11 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                           // Journals use navigateToJournal with date
                           navPath = sheet.name
                           navAction = () => navigateToJournal(sheet.journalDate!)
-                        } else if (ct.id === 'page') {
-                          // Pages use navigateToPage with just the name
+                        } else {
+                          // Pages and custom content types: sheet.name already contains
+                          // the full path (e.g., "meetings/2024-01-12/John")
                           navPath = sheet.name
                           navAction = () => navigateToPage(sheet.name)
-                        } else {
-                          // Custom content types: directory/date/name for saveByDate, directory/name otherwise
-                          navPath = ct.saveByDate && sheet.journalDate
-                            ? `${ct.directory}/${sheet.journalDate}/${sheet.name}`
-                            : `${ct.directory}/${sheet.name}`
-                          navAction = () => navigateToPage(navPath)
                         }
 
                         return (
