@@ -13,7 +13,7 @@ export default defineConfig({
       devOptions: {
         enabled: false, // Don't use SW in dev mode
       },
-      includeAssets: ['icons/icon.svg'],
+      includeAssets: ['icons/icon.png'],
       manifest: {
         name: 'Tend',
         short_name: 'Tend',
@@ -23,9 +23,9 @@ export default defineConfig({
         display: 'standalone',
         icons: [
           {
-            src: 'icons/icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: 'icons/icon.png',
+            sizes: '512x512',
+            type: 'image/png',
             purpose: 'any maskable',
           },
         ],
