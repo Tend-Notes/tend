@@ -17,7 +17,11 @@ import { Seed, SeedBoundaryEvent } from './Seed'
 import { useBlockFlip } from './useBlockFlip'
 import { useGardenInfo } from '../../../hooks/useGardenInfo'
 import { BlockContextMenu } from '../../ui/BlockContextMenu'
+import { TaskMetadata } from '../TaskMetadata'
 import { v4 as uuidv4 } from 'uuid'
+
+// Regex to detect task blocks (TODO, DOING, DONE, NOW, LATER, NEVER)
+const TASK_STATUS_REGEX = /^(TODO|DOING|DONE|NOW|LATER|NEVER)(\s|$)/
 
 interface PlotsProps {
   page: Page
@@ -276,6 +280,23 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       const blocks = getAllBlocks().map((b) =>
         b.uuid === uuid ? { ...b, content } : b
       )
+      updateCurrentPage(blocks)
+    },
+    [getAllBlocks, updateCurrentPage]
+  )
+
+  const handleBlockPropertyChange = useCallback(
+    (uuid: string, key: string, value: string | null) => {
+      const blocks = getAllBlocks().map((b) => {
+        if (b.uuid !== uuid) return b
+        const newProperties = { ...b.properties }
+        if (value === null) {
+          delete newProperties[key]
+        } else {
+          newProperties[key] = value
+        }
+        return { ...b, properties: newProperties }
+      })
       updateCurrentPage(blocks)
     },
     [getAllBlocks, updateCurrentPage]
@@ -858,6 +879,9 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     // Hide bullet because the chain icon replaces it
     const isBlockRef = isBlockReference(block.content)
 
+    // Check if block is a task (TODO, DOING, DONE, NOW, LATER, NEVER)
+    const isTask = TASK_STATUS_REGEX.test(block.content)
+
     // Hide bullet for headers, code blocks, and block references
     const hideBullet = isHeader || isCodeBlock || isBlockRef
 
@@ -915,7 +939,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
           )}
 
           {/* Seed - editable content */}
-          <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''}`}>
+          <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''} ${isTask ? 'task-block-container' : ''}`}>
             <Seed
               block={block}
               isSelected={isSelected}
@@ -932,6 +956,14 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
               isCodeBlock={isCodeBlock}
               codeLanguage={codeLanguage}
             />
+            {/* Task metadata - shown below task content */}
+            {isTask && !readonly && (
+              <TaskMetadata
+                blockUuid={block.uuid}
+                properties={block.properties}
+                onPropertyChange={(key, value) => handleBlockPropertyChange(block.uuid, key, value)}
+              />
+            )}
           </div>
         </div>
 

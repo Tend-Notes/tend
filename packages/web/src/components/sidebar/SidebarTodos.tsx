@@ -5,13 +5,15 @@ import { useState, useEffect, useMemo } from 'react'
 import { todos as todosApi, type TaskItem } from '../../lib/api'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
+import { formatShortDate, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils'
+import { getPriorityDisplay } from '../ui/PriorityPickerPopover'
 
 interface SidebarTodosProps {
   onBack: () => void
 }
 
 type FilterMode = 'all' | 'active' | 'completed'
-type SortMode = 'status' | 'page'
+type SortMode = 'status' | 'page' | 'due' | 'priority'
 
 // Get color for a status keyword
 // Returns CSS variable name like 'base0A' (without hyphen, for use as --base0A)
@@ -105,6 +107,31 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
         if (pageCompare !== 0) return pageCompare
         return a.content.localeCompare(b.content)
       })
+    } else if (sort === 'due') {
+      // Sort by due date (soonest first, no date last)
+      sorted.sort((a, b) => {
+        // Tasks without due date go to the end
+        if (!a.dueDate && !b.dueDate) return a.content.localeCompare(b.content)
+        if (!a.dueDate) return 1
+        if (!b.dueDate) return -1
+        // Sort by due date (earlier = higher priority)
+        const dateCompare = a.dueDate.localeCompare(b.dueDate)
+        if (dateCompare !== 0) return dateCompare
+        return a.content.localeCompare(b.content)
+      })
+    } else if (sort === 'priority') {
+      // Sort by priority (highest first, no priority last)
+      sorted.sort((a, b) => {
+        // Tasks without priority go to the end
+        if (!a.priority && !b.priority) return a.content.localeCompare(b.content)
+        if (!a.priority) return 1
+        if (!b.priority) return -1
+        // Sort by priority (3 = high > 2 = medium > 1 = low)
+        const priorityA = parseInt(a.priority, 10)
+        const priorityB = parseInt(b.priority, 10)
+        if (priorityB !== priorityA) return priorityB - priorityA
+        return a.content.localeCompare(b.content)
+      })
     }
 
     return sorted
@@ -189,7 +216,27 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
                 : 'text-base-04 hover:text-base-05'
             }`}
           >
-            By Status
+            Status
+          </button>
+          <button
+            onClick={() => setSort('due')}
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              sort === 'due'
+                ? 'bg-base-02 text-base-05'
+                : 'text-base-04 hover:text-base-05'
+            }`}
+          >
+            Due
+          </button>
+          <button
+            onClick={() => setSort('priority')}
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              sort === 'priority'
+                ? 'bg-base-02 text-base-05'
+                : 'text-base-04 hover:text-base-05'
+            }`}
+          >
+            Priority
           </button>
           <button
             onClick={() => setSort('page')}
@@ -199,7 +246,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
                 : 'text-base-04 hover:text-base-05'
             }`}
           >
-            By Page
+            Page
           </button>
         </div>
       </div>
@@ -245,6 +292,11 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
             {sortedTasks.map((task) => {
               const color = getStatusColor(task.status)
               const isCompleted = isCompletedStatus(task.status)
+              const priorityInfo = task.priority ? getPriorityDisplay(task.priority) : null
+              // Urgency based on start date if set, otherwise due date
+              const urgencyDate = task.startDate || task.dueDate
+              const urgencyStyle = urgencyDate ? getUrgencyStyle(urgencyDate) : null
+              const daysFromDue = task.dueDate ? getDaysFromDue(task.dueDate) : null
 
               return (
                 <li key={task.uuid}>
@@ -269,9 +321,45 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
                       >
                         {task.content || '(empty)'}
                       </span>
+                      {/* Priority indicator */}
+                      {priorityInfo && (
+                        <span
+                          className="text-xs font-bold flex-shrink-0"
+                          style={{ color: priorityInfo.color }}
+                          title={`Priority: ${priorityInfo.label}`}
+                        >
+                          {priorityInfo.indicator}
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs text-base-04 mt-1 ml-0.5">
-                      {task.pageTitle}
+                    {/* Page title and due date */}
+                    <div className="flex items-center gap-2 mt-1 ml-0.5">
+                      <span className="text-xs text-base-04">
+                        {task.pageTitle}
+                      </span>
+                      {task.startDate && (
+                        <span
+                          className="text-xs"
+                          style={urgencyStyle?.style}
+                          title={`Start: ${task.startDate}`}
+                        >
+                          Start: {formatShortDate(task.startDate)}
+                        </span>
+                      )}
+                      {task.dueDate && (
+                        <span
+                          className="text-xs"
+                          style={!task.startDate ? urgencyStyle?.style : undefined}
+                          title={daysFromDue !== null && daysFromDue < 0
+                            ? `${Math.abs(daysFromDue)} day${Math.abs(daysFromDue) === 1 ? '' : 's'} overdue`
+                            : daysFromDue === 0
+                            ? 'Due today'
+                            : `Due in ${daysFromDue} day${daysFromDue === 1 ? '' : 's'}`
+                          }
+                        >
+                          Due: {formatShortDate(task.dueDate)}
+                        </span>
+                      )}
                     </div>
                   </button>
                 </li>
