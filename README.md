@@ -288,21 +288,43 @@ The frontend dev server (port 5173) and backend (port 3000) are different origin
 
 Tend is built with these excellent open source projects:
 
-**Backend**
-- [Axum](https://github.com/tokio-rs/axum) - Web framework (MIT)
-- [Tokio](https://tokio.rs) - Async runtime (MIT)
-- [Tantivy](https://github.com/quickwit-oss/tantivy) - Full-text search engine (MIT)
-- [Comrak](https://github.com/kivikakk/comrak) - Markdown parser (BSD-2-Clause)
+### Backend (Rust)
 
-**Frontend**
-- [React](https://react.dev) - UI framework (MIT)
-- [Zustand](https://github.com/pmndrs/zustand) - State management (MIT)
-- [cmdk](https://cmdk.paco.me) - Command palette (MIT)
-- [D3](https://d3js.org) - Graph visualization (ISC)
-- [Tailwind CSS](https://tailwindcss.com) - Styling (MIT)
+| Project | Purpose |
+|---------|---------|
+| [Axum](https://github.com/tokio-rs/axum) | Web framework - handles HTTP routes, WebSocket connections, and middleware |
+| [Tokio](https://tokio.rs) | Async runtime - powers concurrent file I/O, network requests, and background tasks |
+| [Tantivy](https://github.com/quickwit-oss/tantivy) | Full-text search engine - provides fast fuzzy search across all blocks |
+| [gix](https://github.com/Byron/gitoxide) | Pure Rust Git implementation - handles backup commits and push to remote |
+| [age](https://github.com/str4d/rage) | Modern encryption - encrypts garden files at rest with passphrase protection |
+| [notify](https://github.com/notify-rs/notify) | File system watcher - detects external changes for multi-client sync |
+| [Comrak](https://github.com/kivikakk/comrak) | CommonMark parser - renders markdown for backlinks and previews |
 
-**Theming**
-- [tinted-theming](https://github.com/tinted-theming/home) - Base16/Base24 color schemes (MIT)
+### Frontend (TypeScript/React)
+
+| Project | Purpose |
+|---------|---------|
+| [React](https://react.dev) | UI framework - component architecture and reactive rendering |
+| [CodeMirror 6](https://codemirror.net) | Text editor engine - powers the block editor with syntax highlighting, keybindings, and extensions |
+| [Zustand](https://github.com/pmndrs/zustand) | State management - lightweight global state for pages, UI, and sync |
+| [cmdk](https://cmdk.paco.me) | Command palette - the ⌘K interface for quick actions |
+| [D3](https://d3js.org) | Data visualization - renders the interactive knowledge graph |
+| [Framer Motion](https://www.framer.com/motion/) | Animation library - smooth transitions and micro-interactions |
+| [Tailwind CSS](https://tailwindcss.com) | Utility-first CSS - rapid styling without leaving the markup |
+| [highlight.js](https://highlightjs.org) | Syntax highlighting - colors code blocks in 190+ languages |
+
+### Theming
+
+| Project | Purpose |
+|---------|---------|
+| [tinted-theming](https://github.com/tinted-theming/home) | Base16/Base24 color schemes - 200+ community-created themes |
+
+### Build & Development
+
+| Project | Purpose |
+|---------|---------|
+| [Vite](https://vitejs.dev) | Frontend build tool - fast HMR development and optimized production builds |
+| [Nix](https://nixos.org) | Reproducible builds - hermetic packaging for Docker and NixOS deployment |
 
 ## License
 
