@@ -26,4 +26,6 @@ result
 # Environment
 .env
 .env.local
-CHANGELOG.md
+
+# Local notes
+ANONYMIZE-*.md

@@ -42,7 +42,7 @@ export function SaveStatus() {
         inline-flex items-center
         px-2 py-0.5
         text-[10px] font-medium
-        border rounded-full
+        border rounded
         bg-transparent
         cursor-pointer
         transition-colors
