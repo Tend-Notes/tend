@@ -18,37 +18,38 @@ interface ImportErrorEditorProps {
 }
 
 /**
- * Detects if a filename is a journal conflict file and extracts the date.
- * Patterns:
- * - 2024_01_12_2.md -> 2024-01-12 (underscore-separated date with conflict suffix)
- * - 2024-01-12_2.md -> 2024-01-12 (ISO date with conflict suffix)
- * - 2024_01_12.md -> 2024-01-12 (underscore-separated date)
- * - 20240112.md -> 2024-01-12 (compact date, no separators)
- * - 20240112_notes.md -> 2024-01-12 (compact date with suffix)
+ * Detects if a filename contains a date and extracts it.
+ * Scans the first ~10 characters for a date pattern:
+ * - YYYY (19xx or 20xx), then optionally any separator, then MM (01-12), then optionally any separator, then DD (01-31)
+ *
+ * Examples:
+ * - "2022_01_11 2" -> 2022-01-11
+ * - "2022-01-11_2" -> 2022-01-11
+ * - "2022 01 11 notes" -> 2022-01-11
+ * - "20220111_anything" -> 2022-01-11
+ * - "2022.01.11.md" -> 2022-01-11
  */
 function detectJournalDate(originalName: string): string | null {
   // Remove .md extension if present
   const baseName = originalName.replace(/\.md$/i, '')
 
-  // Pattern 1: YYYY_MM_DD or YYYY_MM_DD_N (underscore-separated with optional conflict suffix)
-  const underscorePattern = /^(\d{4})_(\d{2})_(\d{2})(?:_\d+)?$/
-  const underscoreMatch = baseName.match(underscorePattern)
-  if (underscoreMatch) {
-    return `${underscoreMatch[1]}-${underscoreMatch[2]}-${underscoreMatch[3]}`
-  }
+  // Look at the first ~10 characters for the date pattern
+  const prefix = baseName.slice(0, 12)
 
-  // Pattern 2: YYYY-MM-DD or YYYY-MM-DD_N (ISO date with optional conflict suffix)
-  const isoPattern = /^(\d{4})-(\d{2})-(\d{2})(?:_\d+)?$/
-  const isoMatch = baseName.match(isoPattern)
-  if (isoMatch) {
-    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
-  }
+  // Match: 4-digit year (19xx or 20xx), optional separator, 2-digit month, optional separator, 2-digit day
+  // Separators can be: underscore, dash, space, dot, or nothing
+  const pattern = /^(19\d{2}|20\d{2})[-_ .]?(\d{2})[-_ .]?(\d{2})/
+  const match = prefix.match(pattern)
 
-  // Pattern 3: YYYYMMDD or YYYYMMDD_* (compact date with optional suffix)
-  const compactPattern = /^(\d{4})(\d{2})(\d{2})(?:_.*)?$/
-  const compactMatch = baseName.match(compactPattern)
-  if (compactMatch) {
-    return `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`
+  if (match) {
+    const year = match[1]
+    const month = parseInt(match[2], 10)
+    const day = parseInt(match[3], 10)
+
+    // Validate month (01-12) and day (01-31)
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${match[2]}-${match[3]}`
+    }
   }
 
   return null
