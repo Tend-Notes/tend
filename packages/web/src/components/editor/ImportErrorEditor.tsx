@@ -23,6 +23,8 @@ interface ImportErrorEditorProps {
  * - 2024_01_12_2.md -> 2024-01-12 (underscore-separated date with conflict suffix)
  * - 2024-01-12_2.md -> 2024-01-12 (ISO date with conflict suffix)
  * - 2024_01_12.md -> 2024-01-12 (underscore-separated date)
+ * - 20240112.md -> 2024-01-12 (compact date, no separators)
+ * - 20240112_notes.md -> 2024-01-12 (compact date with suffix)
  */
 function detectJournalDate(originalName: string): string | null {
   // Remove .md extension if present
@@ -40,6 +42,13 @@ function detectJournalDate(originalName: string): string | null {
   const isoMatch = baseName.match(isoPattern)
   if (isoMatch) {
     return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
+  }
+
+  // Pattern 3: YYYYMMDD or YYYYMMDD_* (compact date with optional suffix)
+  const compactPattern = /^(\d{4})(\d{2})(\d{2})(?:_.*)?$/
+  const compactMatch = baseName.match(compactPattern)
+  if (compactMatch) {
+    return `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`
   }
 
   return null
