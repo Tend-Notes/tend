@@ -882,6 +882,8 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
     // Check if block is a task (TODO, DOING, DONE, NOW, LATER, NEVER)
     const isTask = TASK_STATUS_REGEX.test(block.content)
+    const taskStatusMatch = isTask ? block.content.match(TASK_STATUS_REGEX) : null
+    const isTaskCompleted = taskStatusMatch?.[1] === 'DONE' || taskStatusMatch?.[1] === 'NEVER'
 
     // Hide bullet for headers, code blocks, and block references
     const hideBullet = isHeader || isCodeBlock || isBlockRef
@@ -963,6 +965,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
                 blockUuid={block.uuid}
                 properties={block.properties}
                 onPropertyChange={(key, value) => handleBlockPropertyChange(block.uuid, key, value)}
+                isCompleted={isTaskCompleted}
               />
             )}
           </div>

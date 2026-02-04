@@ -296,8 +296,9 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
               const isCompleted = isCompletedStatus(task.status)
               const priorityInfo = task.priority ? getPriorityDisplay(task.priority) : null
               // Urgency based on start date if set, otherwise due date
+              // Completed tasks don't show urgency styling
               const urgencyDate = task.startDate || task.dueDate
-              const urgencyStyle = urgencyDate ? getUrgencyStyle(urgencyDate) : null
+              const urgencyStyle = urgencyDate && !isCompleted ? getUrgencyStyle(urgencyDate) : null
               const daysFromDue = task.dueDate ? getDaysFromDue(task.dueDate) : null
 
               return (

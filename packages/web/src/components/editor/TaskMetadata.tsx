@@ -10,9 +10,10 @@ interface TaskMetadataProps {
   blockUuid: string
   properties: Record<string, string>
   onPropertyChange: (key: string, value: string | null) => void
+  isCompleted?: boolean
 }
 
-export function TaskMetadata({ blockUuid: _, properties, onPropertyChange }: TaskMetadataProps) {
+export function TaskMetadata({ blockUuid: _, properties, onPropertyChange, isCompleted }: TaskMetadataProps) {
   void _ // blockUuid available for future use
   const [showDueDatePicker, setShowDueDatePicker] = useState(false)
   const [showStartDatePicker, setShowStartDatePicker] = useState(false)
@@ -24,8 +25,9 @@ export function TaskMetadata({ blockUuid: _, properties, onPropertyChange }: Tas
 
   const priorityInfo = getPriorityDisplay(priority)
   // Urgency based on start date if set, otherwise due date
+  // Completed tasks don't show urgency styling
   const urgencyDate = startDate || dueDate
-  const urgencyStyle = urgencyDate ? getUrgencyStyle(urgencyDate) : null
+  const urgencyStyle = urgencyDate && !isCompleted ? getUrgencyStyle(urgencyDate) : null
 
   // Prevent click events from propagating to the block container
   const stopPropagation = (e: React.MouseEvent) => {
