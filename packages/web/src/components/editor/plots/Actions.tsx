@@ -60,6 +60,7 @@ export function useActions(): Extension[] {
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
   const editingTemplate = usePageStore((state) => state.editingTemplate)
+  const setPendingScrollTarget = usePageStore((state) => state.setPendingScrollTarget)
   const taskStatusSet = useSettingsStore((state) => state.taskStatusSet)
   const getTagColors = useTagStore((state) => state.getTagColors)
 
@@ -79,10 +80,9 @@ export function useActions(): Extension[] {
 
   // Navigation callback for block references
   // Navigates to the page containing the block and scrolls to the block
-  const handleBlockRefNavigate = useCallback((pageName: string, _blockUuid: string) => {
-    // Navigate to the page
-    // After navigation, the app will scroll to the block UUID via URL hash
-    // For now, just navigate to the page - scroll-to-block can be added later
+  const handleBlockRefNavigate = useCallback((pageName: string, blockUuid: string) => {
+    // Set the scroll target before navigation
+    setPendingScrollTarget(blockUuid)
 
     // Check if this is a journal date (YYYY-MM-DD format)
     // The block API returns just the date for journals, not "journals/YYYY-MM-DD"
@@ -94,9 +94,7 @@ export function useActions(): Extension[] {
     // Everything else: pages and sheets (directory/name paths)
     // navigateToPage handles both regular pages and content type paths
     navigateToPage(pageName)
-    // TODO: Add scroll-to-block logic using _blockUuid
-    // This could be done via URL hash (#blockUuid) or a separate mechanism
-  }, [navigateToPage, navigateToJournal])
+  }, [navigateToPage, navigateToJournal, setPendingScrollTarget])
 
   // Check if we're in template editing mode
   const isTemplateEditing = editingTemplate !== null

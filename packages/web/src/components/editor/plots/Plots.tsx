@@ -117,6 +117,7 @@ function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): M
 export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const updateCurrentPageFromStore = usePageStore((state) => state.updateCurrentPage)
   const consumePendingCursorPosition = usePageStore((state) => state.consumePendingCursorPosition)
+  const consumePendingScrollTarget = usePageStore((state) => state.consumePendingScrollTarget)
 
   // Use onBlocksChange if provided (for template editing), otherwise use store's updateCurrentPage
   const updateCurrentPage = onBlocksChange ?? updateCurrentPageFromStore
@@ -1031,6 +1032,46 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       focusBlock(cursorPosition.blockUuid, cursorPosition.offset)
     }
   }, [flatBlockOrder.length, page.name, consumePendingCursorPosition, focusBlock])
+
+  // Handle pending scroll target from sidebar task click or block reference navigation
+  // Scrolls to and highlights the target block
+  const lastScrollTargetPageRef = useRef<string | null>(null)
+  useEffect(() => {
+    // Skip if blocks aren't loaded yet
+    if (flatBlockOrder.length === 0) {
+      return
+    }
+
+    // Skip if we've already checked for scroll target on THIS page
+    if (lastScrollTargetPageRef.current === page.name) {
+      return
+    }
+
+    // Mark this page as checked
+    lastScrollTargetPageRef.current = page.name
+
+    // Check for pending scroll target
+    const scrollTarget = consumePendingScrollTarget()
+    if (scrollTarget && flatBlockOrder.includes(scrollTarget)) {
+      // Scroll to and focus the block
+      requestAnimationFrame(() => {
+        const blockEl = document.querySelector(`[data-block-id="${scrollTarget}"]`)
+        if (blockEl) {
+          // Scroll block into view
+          blockEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+          // Add highlight effect
+          blockEl.classList.add('block-container--highlight')
+          setTimeout(() => {
+            blockEl.classList.remove('block-container--highlight')
+          }, 2000)
+
+          // Focus the block at the start
+          focusBlock(scrollTarget, 'start')
+        }
+      })
+    }
+  }, [flatBlockOrder, page.name, consumePendingScrollTarget, focusBlock])
 
   // Update last focused block when selection changes (backup for non-focusBlock selection changes)
   useEffect(() => {

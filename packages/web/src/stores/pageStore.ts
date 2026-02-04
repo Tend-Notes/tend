@@ -49,6 +49,10 @@ interface PageState {
   // This is consumed by the editor when it mounts to position the cursor
   pendingCursorPosition: CursorPosition | null
 
+  // Pending scroll target - block UUID to scroll to after navigation
+  // Used when clicking tasks in sidebar or block references
+  pendingScrollTarget: string | null
+
   // Actions
   loadTodaysJournal: () => Promise<void>
   navigateToPage: (name: string, pushHistory?: boolean) => Promise<void>
@@ -79,6 +83,10 @@ interface PageState {
   closeTemplateEditor: () => void
   // Consume pending cursor position (called by editor on mount)
   consumePendingCursorPosition: () => CursorPosition | null
+  // Set pending scroll target (called before navigation)
+  setPendingScrollTarget: (uuid: string | null) => void
+  // Consume pending scroll target (called by editor after mount)
+  consumePendingScrollTarget: () => string | null
 }
 
 // Helper to build URL path for content
@@ -234,6 +242,7 @@ export const usePageStore = create<PageState>()(
     pendingConflict: null,
     editingTemplate: null,
     pendingCursorPosition: null,
+    pendingScrollTarget: null,
 
     loadTodaysJournal: async () => {
       set((state) => {
@@ -1104,6 +1113,23 @@ export const usePageStore = create<PageState>()(
         })
       }
       return pendingCursorPosition
+    },
+
+    setPendingScrollTarget: (uuid: string | null) => {
+      set((state) => {
+        state.pendingScrollTarget = uuid
+      })
+    },
+
+    consumePendingScrollTarget: () => {
+      const { pendingScrollTarget } = get()
+      if (pendingScrollTarget) {
+        // Clear the pending target after consuming it
+        set((state) => {
+          state.pendingScrollTarget = null
+        })
+      }
+      return pendingScrollTarget
     },
   }))
 )

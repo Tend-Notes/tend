@@ -835,6 +835,20 @@ code {
   border-radius: 3px;
 }
 
+/* Highlighted block (scroll target from sidebar/block reference navigation) */
+.block-container--highlight > .block {
+  animation: block-highlight 2s ease-out;
+}
+
+@keyframes block-highlight {
+  0% {
+    background-color: color-mix(in srgb, var(--base0A) 40%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
 /* Task block container - subtle box around task content */
 .task-block-container {
   border: 1px solid color-mix(in srgb, var(--base03) 30%, transparent);

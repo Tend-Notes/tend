@@ -40,7 +40,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
   const [filter, setFilter] = useState<FilterMode>('active')
   const [sort, setSort] = useState<SortMode>('status')
 
-  const { navigateToPage, navigateToJournal, currentPage } = usePageStore()
+  const { navigateToPage, navigateToJournal, currentPage, setPendingScrollTarget } = usePageStore()
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
 
   // Track current page version to trigger re-fetch on save
@@ -137,14 +137,16 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
     return sorted
   }, [filteredTasks, sort])
 
-  // Handle task click - navigate to the page
+  // Handle task click - navigate to the page and scroll to block
   const handleTaskClick = (task: TaskItem) => {
+    // Set scroll target before navigation
+    setPendingScrollTarget(task.uuid)
+
     if (task.isJournal && task.journalDate) {
       navigateToJournal(task.journalDate)
     } else {
       navigateToPage(task.pageName)
     }
-    // TODO: Scroll to and highlight the specific block
   }
 
   // Count by status
