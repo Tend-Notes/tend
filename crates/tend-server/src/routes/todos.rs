@@ -30,6 +30,12 @@ pub struct TaskItem {
     pub is_journal: bool,
     /// Journal date if applicable
     pub journal_date: Option<String>,
+    /// Due date (YYYY-MM-DD format)
+    pub due_date: Option<String>,
+    /// Start date (YYYY-MM-DD format)
+    pub start_date: Option<String>,
+    /// Priority level (1, 2, or 3)
+    pub priority: Option<String>,
 }
 
 /// List of all tasks across the garden
@@ -71,6 +77,9 @@ pub async fn list_todos(
                         page_title: page.title.clone(),
                         is_journal: false,
                         journal_date: None,
+                        due_date: block.properties.get("due_date").cloned(),
+                        start_date: block.properties.get("start_date").cloned(),
+                        priority: block.properties.get("priority").cloned(),
                     });
                 }
             }
@@ -95,6 +104,9 @@ pub async fn list_todos(
                             page_title: page.title.clone(),
                             is_journal: true,
                             journal_date: Some(date.to_string()),
+                            due_date: block.properties.get("due_date").cloned(),
+                            start_date: block.properties.get("start_date").cloned(),
+                            priority: block.properties.get("priority").cloned(),
                         });
                     }
                 }

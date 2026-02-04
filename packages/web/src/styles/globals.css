@@ -835,6 +835,15 @@ code {
   border-radius: 3px;
 }
 
+/* Task block container - subtle box around task content */
+.task-block-container {
+  border: 1px solid color-mix(in srgb, var(--base03) 30%, transparent);
+  background-color: color-mix(in srgb, var(--base07) 5%, transparent);
+  border-radius: 4px;
+  padding: 8px 16px;
+  margin: 2px 0;
+}
+
 /* Block */
 .block {
   display: flex;

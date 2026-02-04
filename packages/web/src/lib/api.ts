@@ -157,6 +157,9 @@ export interface TaskItem {
   pageTitle: string
   isJournal: boolean
   journalDate: string | null
+  dueDate: string | null
+  startDate: string | null
+  priority: string | null
 }
 
 // Task list from API
