@@ -6,6 +6,8 @@ import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { Page, Block } from '../../types'
 import { Plots } from './plots/Plots'
+import { DatePickerPopover } from '../ui/DatePickerPopover'
+import { formatShortDate } from '../../lib/dateUtils'
 
 interface ImportErrorEditorProps {
   errorName: string
@@ -83,6 +85,7 @@ export function ImportErrorEditor({
   )
   const [saving, setSaving] = useState(false)
   const [discarding, setDiscarding] = useState(false)
+  const [showDatePicker, setShowDatePicker] = useState(false)
 
   // All content types are saveable now (including journal with date picker)
   const saveableContentTypes = contentTypes
@@ -227,12 +230,28 @@ export function ImportErrorEditor({
             {selectedContentType === 'journal' && (
               <div className="flex items-center gap-3">
                 <label className="text-xs text-base-04">Journal date:</label>
-                <input
-                  type="date"
-                  value={journalDate}
-                  onChange={(e) => setJournalDate(e.target.value)}
-                  className="bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
-                />
+                <div className="relative">
+                  <button
+                    onClick={() => setShowDatePicker(!showDatePicker)}
+                    className="inline-flex items-center gap-2 px-3 py-2 bg-base-01 border border-base-02 rounded text-sm text-base-05 hover:bg-base-02 transition-colors"
+                  >
+                    {/* Calendar icon */}
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    <span>{formatShortDate(journalDate)}</span>
+                  </button>
+                  {showDatePicker && (
+                    <DatePickerPopover
+                      value={journalDate}
+                      onChange={(date) => {
+                        if (date) setJournalDate(date)
+                      }}
+                      onClose={() => setShowDatePicker(false)}
+                      label="Journal Date"
+                    />
+                  )}
+                </div>
                 {detectedJournalDate && journalDate === detectedJournalDate && (
                   <span className="text-xs text-base-0B">(auto-detected)</span>
                 )}
