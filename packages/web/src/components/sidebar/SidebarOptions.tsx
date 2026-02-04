@@ -1902,14 +1902,7 @@ function ImportSection() {
   const [loadingErrors, setLoadingErrors] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Load import errors on mount and when view changes to errors
-  useEffect(() => {
-    if (view === 'errors') {
-      loadErrors()
-    }
-  }, [view])
-
-  const loadErrors = async () => {
+  const loadErrors = useCallback(async () => {
     setLoadingErrors(true)
     setError(null)
     try {
@@ -1921,7 +1914,33 @@ function ImportSection() {
     } finally {
       setLoadingErrors(false)
     }
-  }
+  }, [])
+
+  // Load import errors on mount (for badge count) and when view changes to errors
+  useEffect(() => {
+    // Always load errors on mount so the badge shows the count
+    loadErrors()
+  }, [loadErrors])
+
+  // Reload errors when view changes to errors tab
+  useEffect(() => {
+    if (view === 'errors') {
+      loadErrors()
+    }
+  }, [view, loadErrors])
+
+  // Listen for import errors changes (from save/discard operations)
+  useEffect(() => {
+    const handleErrorsChanged = () => {
+      // Refresh the errors list
+      loadErrors()
+    }
+
+    window.addEventListener('import-errors-changed', handleErrorsChanged)
+    return () => {
+      window.removeEventListener('import-errors-changed', handleErrorsChanged)
+    }
+  }, [loadErrors])
 
   const handleOpenError = (name: string) => {
     // Open the full-page import error editor

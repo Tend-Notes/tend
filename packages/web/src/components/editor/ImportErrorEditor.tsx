@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Import error editor component - edits failed import files before saving
 
-import { useCallback, useState } from 'react'
+import { useCallback, useState, useMemo, useEffect } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { Page, Block } from '../../types'
@@ -15,6 +15,34 @@ interface ImportErrorEditorProps {
   page: Page
   fileName: string
   hasUnsavedChanges: boolean
+}
+
+/**
+ * Detects if a filename is a journal conflict file and extracts the date.
+ * Patterns:
+ * - 2024_01_12_2.md -> 2024-01-12 (underscore-separated date with conflict suffix)
+ * - 2024-01-12_2.md -> 2024-01-12 (ISO date with conflict suffix)
+ * - 2024_01_12.md -> 2024-01-12 (underscore-separated date)
+ */
+function detectJournalDate(originalName: string): string | null {
+  // Remove .md extension if present
+  const baseName = originalName.replace(/\.md$/i, '')
+
+  // Pattern 1: YYYY_MM_DD or YYYY_MM_DD_N (underscore-separated with optional conflict suffix)
+  const underscorePattern = /^(\d{4})_(\d{2})_(\d{2})(?:_\d+)?$/
+  const underscoreMatch = baseName.match(underscorePattern)
+  if (underscoreMatch) {
+    return `${underscoreMatch[1]}-${underscoreMatch[2]}-${underscoreMatch[3]}`
+  }
+
+  // Pattern 2: YYYY-MM-DD or YYYY-MM-DD_N (ISO date with optional conflict suffix)
+  const isoPattern = /^(\d{4})-(\d{2})-(\d{2})(?:_\d+)?$/
+  const isoMatch = baseName.match(isoPattern)
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`
+  }
+
+  return null
 }
 
 export function ImportErrorEditor({
@@ -32,12 +60,26 @@ export function ImportErrorEditor({
   const closeImportErrorEditor = usePageStore((state) => state.closeImportErrorEditor)
   const { contentTypes } = useSettingsStore()
 
-  const [selectedContentType, setSelectedContentType] = useState('page')
+  // Detect if this is a journal conflict file
+  const detectedJournalDate = useMemo(() => detectJournalDate(originalName), [originalName])
+
+  // Default to journal if we detected a journal date, otherwise page
+  const [selectedContentType, setSelectedContentType] = useState(() =>
+    detectedJournalDate ? 'journal' : 'page'
+  )
+  const [journalDate, setJournalDate] = useState(() => detectedJournalDate || '')
   const [saving, setSaving] = useState(false)
   const [discarding, setDiscarding] = useState(false)
 
-  // Content types available for saving (excluding journal which requires a date)
-  const saveableContentTypes = contentTypes.filter(ct => ct.id !== 'journal')
+  // Update journal date when detected date changes (e.g., on mount)
+  useEffect(() => {
+    if (detectedJournalDate && !journalDate) {
+      setJournalDate(detectedJournalDate)
+    }
+  }, [detectedJournalDate, journalDate])
+
+  // All content types are saveable now (including journal with date picker)
+  const saveableContentTypes = contentTypes
 
   // Handle close with unsaved changes confirmation
   const handleClose = useCallback(() => {
@@ -53,11 +95,13 @@ export function ImportErrorEditor({
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      await saveImportError(selectedContentType)
+      // Pass date for journal content type
+      const date = selectedContentType === 'journal' ? journalDate : undefined
+      await saveImportError(selectedContentType, date)
     } finally {
       setSaving(false)
     }
-  }, [saveImportError, selectedContentType])
+  }, [saveImportError, selectedContentType, journalDate])
 
   // Handle discard
   const handleDiscard = useCallback(async () => {
@@ -151,25 +195,50 @@ export function ImportErrorEditor({
           </div>
 
           {/* Content type and save controls */}
-          <div className="mb-6 flex items-center gap-3">
-            <select
-              value={selectedContentType}
-              onChange={(e) => setSelectedContentType(e.target.value)}
-              className="flex-1 bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
-            >
-              {saveableContentTypes.map((ct) => (
-                <option key={ct.id} value={ct.id}>
-                  Save as: {ct.name}
-                </option>
-              ))}
-            </select>
-            <button
-              onClick={handleSave}
-              disabled={saving || !fileName.trim()}
-              className="px-4 py-2 text-sm font-medium text-base-00 bg-base-0D hover:bg-base-0D/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {saving ? 'Saving...' : 'Save'}
-            </button>
+          <div className="mb-6 space-y-3">
+            <div className="flex items-center gap-3">
+              <select
+                value={selectedContentType}
+                onChange={(e) => setSelectedContentType(e.target.value)}
+                className="flex-1 bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
+              >
+                {saveableContentTypes.map((ct) => (
+                  <option key={ct.id} value={ct.id}>
+                    Save as: {ct.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                onClick={handleSave}
+                disabled={saving || !fileName.trim() || (selectedContentType === 'journal' && !journalDate)}
+                className="px-4 py-2 text-sm font-medium text-base-00 bg-base-0D hover:bg-base-0D/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+
+            {/* Date picker for journal content type */}
+            {selectedContentType === 'journal' && (
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-base-04">Journal date:</label>
+                <input
+                  type="date"
+                  value={journalDate}
+                  onChange={(e) => setJournalDate(e.target.value)}
+                  className="bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
+                />
+                {detectedJournalDate && journalDate === detectedJournalDate && (
+                  <span className="text-xs text-base-0B">(auto-detected)</span>
+                )}
+              </div>
+            )}
+
+            {/* Info message for journal merging */}
+            {selectedContentType === 'journal' && (
+              <p className="text-xs text-base-04 bg-base-01 border border-base-02 rounded px-3 py-2">
+                If a journal for this date already exists, the content will be appended to the existing journal.
+              </p>
+            )}
           </div>
 
           {/* Help text */}

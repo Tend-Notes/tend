@@ -1325,6 +1325,9 @@ export const usePageStore = create<PageState>()(
         set((state) => {
           state.editingImportError = null
         })
+
+        // Dispatch event to notify sidebar to refresh errors list
+        window.dispatchEvent(new CustomEvent('import-errors-changed'))
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to save import error'
@@ -1342,6 +1345,9 @@ export const usePageStore = create<PageState>()(
         set((state) => {
           state.editingImportError = null
         })
+
+        // Dispatch event to notify sidebar to refresh errors list
+        window.dispatchEvent(new CustomEvent('import-errors-changed'))
       } catch (e) {
         set((state) => {
           state.error = e instanceof Error ? e.message : 'Failed to discard import error'
