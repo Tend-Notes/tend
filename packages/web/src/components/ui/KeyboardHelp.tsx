@@ -8,6 +8,7 @@ interface KeyboardHelpProps {
 
 const shortcuts = [
   { category: 'Navigation', items: [
+    { keys: ['Alt', 'Shift', 'J'], description: 'Go to today\'s journal' },
     { keys: ['Alt', 'Shift', 'P'], description: 'Open command palette' },
     { keys: ['Alt', 'Shift', 'S'], description: 'Toggle sidebar' },
     { keys: ['Alt', 'Shift', 'F'], description: 'Search' },

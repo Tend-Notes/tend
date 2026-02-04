@@ -139,6 +139,13 @@ function App() {
         return
       }
 
+      // Alt + Shift + J - Navigate to today's journal (Home, works even when editing)
+      if (e.altKey && e.shiftKey && e.code === 'KeyJ') {
+        e.preventDefault()
+        navigateToJournal(new Date().toISOString().slice(0, 10))
+        return
+      }
+
       // Skip other shortcuts if we're editing
       if (isEditing) return
 
@@ -166,7 +173,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode])
+  }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode, navigateToJournal])
 
   return (
     <div className="flex h-screen w-full max-w-full overflow-hidden bg-base-00 text-base-05">
