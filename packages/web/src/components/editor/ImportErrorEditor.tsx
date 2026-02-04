@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Import error editor component - edits failed import files before saving
 
-import { useCallback, useState, useMemo, useEffect } from 'react'
+import { useCallback, useState, useMemo } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import type { Page, Block } from '../../types'
@@ -67,16 +67,12 @@ export function ImportErrorEditor({
   const [selectedContentType, setSelectedContentType] = useState(() =>
     detectedJournalDate ? 'journal' : 'page'
   )
-  const [journalDate, setJournalDate] = useState(() => detectedJournalDate || '')
+  // Default to today's date if not detected (consistent with CommandPalette date picker)
+  const [journalDate, setJournalDate] = useState(() =>
+    detectedJournalDate || new Date().toISOString().split('T')[0]
+  )
   const [saving, setSaving] = useState(false)
   const [discarding, setDiscarding] = useState(false)
-
-  // Update journal date when detected date changes (e.g., on mount)
-  useEffect(() => {
-    if (detectedJournalDate && !journalDate) {
-      setJournalDate(detectedJournalDate)
-    }
-  }, [detectedJournalDate, journalDate])
 
   // All content types are saveable now (including journal with date picker)
   const saveableContentTypes = contentTypes
