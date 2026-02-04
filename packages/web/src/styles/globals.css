@@ -283,6 +283,12 @@ code {
   background-color: var(--color-bg-secondary);
 }
 
+/* Wikilinks inside completed tasks should inherit strikethrough */
+.task-done-content .wiki-link,
+.task-content-struck .wiki-link {
+  text-decoration: line-through;
+}
+
 /* External link styles */
 .external-link {
   color: var(--color-link);
