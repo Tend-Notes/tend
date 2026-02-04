@@ -411,13 +411,9 @@ function ThemePicker({
   }, [activeTheme])
 
   const handleSelect = useCallback((theme: Base16Theme) => {
-    // Revert to active theme when selection is made
-    // (the selected theme will be applied through the settings store)
-    if (activeTheme) {
-      applyTheme(activeTheme)
-    }
+    applyTheme(theme)
     onSelect(theme.name)
-  }, [onSelect, activeTheme])
+  }, [onSelect])
 
   return (
     <motion.div
@@ -1900,22 +1896,11 @@ function GardensSection() {
 // Import section with Import Errors management
 function ImportSection() {
   const { openImportDialog } = useUIStore()
-  const { contentTypes } = useSettingsStore()
+  const openImportErrorEditor = usePageStore((state) => state.openImportErrorEditor)
   const [view, setView] = useState<'main' | 'errors'>('main')
   const [errors, setErrors] = useState<{ name: string; originalName: string; error: string; timestamp: string }[]>([])
   const [loadingErrors, setLoadingErrors] = useState(false)
-  const [selectedError, setSelectedError] = useState<string | null>(null)
-  const [errorDetail, setErrorDetail] = useState<{
-    originalName: string
-    error: string
-    content: string
-    timestamp: string
-    source: string
-  } | null>(null)
-  const [, setLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [selectedContentType, setSelectedContentType] = useState<string>('page')
-  const [saving, setSaving] = useState(false)
 
   // Load import errors on mount and when view changes to errors
   useEffect(() => {
@@ -1938,34 +1923,9 @@ function ImportSection() {
     }
   }
 
-  const loadErrorDetail = async (name: string) => {
-    setLoadingDetail(true)
-    setError(null)
-    try {
-      const { importApi } = await import('../../lib/api')
-      const detail = await importApi.errors.get(name)
-      setErrorDetail(detail)
-      setSelectedError(name)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load error detail')
-    } finally {
-      setLoadingDetail(false)
-    }
-  }
-
-  const handleDiscard = async (name: string) => {
-    setError(null)
-    try {
-      const { importApi } = await import('../../lib/api')
-      await importApi.errors.delete(name)
-      setErrors(errors.filter(e => e.name !== name))
-      if (selectedError === name) {
-        setSelectedError(null)
-        setErrorDetail(null)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to discard')
-    }
+  const handleOpenError = (name: string) => {
+    // Open the full-page import error editor
+    openImportErrorEditor(name)
   }
 
   const handleDiscardAll = async () => {
@@ -1975,33 +1935,10 @@ function ImportSection() {
       const { importApi } = await import('../../lib/api')
       await importApi.errors.deleteAll()
       setErrors([])
-      setSelectedError(null)
-      setErrorDetail(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to discard all')
     }
   }
-
-  const handleSaveTo = async (name: string, contentType: string) => {
-    setSaving(true)
-    setError(null)
-    try {
-      const { importApi } = await import('../../lib/api')
-      await importApi.errors.accept(name, { contentType })
-      setErrors(errors.filter(e => e.name !== name))
-      if (selectedError === name) {
-        setSelectedError(null)
-        setErrorDetail(null)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // Content types available for saving (excluding journal which requires a date)
-  const saveableContentTypes = contentTypes.filter(ct => ct.id !== 'journal')
 
   return (
     <div className="space-y-3">
@@ -2027,7 +1964,7 @@ function ImportSection() {
         >
           Errors
           {errors.length > 0 && (
-            <span className="px-1.5 py-0.5 text-[10px] bg-base-08/20 text-base-08 rounded-full">
+            <span className="px-1.5 py-0.5 text-[10px] bg-base-08/20 text-base-08 rounded">
               {errors.length}
             </span>
           )}
@@ -2061,67 +1998,6 @@ function ImportSection() {
             <p className="text-xs text-base-03">Loading errors...</p>
           ) : errors.length === 0 ? (
             <p className="text-xs text-base-03">No import errors.</p>
-          ) : selectedError && errorDetail ? (
-            // Error detail view
-            <div className="space-y-3">
-              {/* Back button */}
-              <button
-                onClick={() => {
-                  setSelectedError(null)
-                  setErrorDetail(null)
-                }}
-                className="flex items-center gap-1 text-xs text-base-04 hover:text-base-05 transition-colors"
-              >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                </svg>
-                Back to list
-              </button>
-
-              {/* Error info */}
-              <div className="space-y-1">
-                <p className="text-sm text-base-05 font-medium">{errorDetail.originalName}</p>
-                <p className="text-xs text-base-08">{errorDetail.error}</p>
-                <p className="text-xs text-base-03">
-                  {new Date(errorDetail.timestamp).toLocaleString()}
-                </p>
-              </div>
-
-              {/* Content preview */}
-              <div className="bg-base-01 border border-base-02 rounded p-2 max-h-40 overflow-y-auto">
-                <pre className="text-xs text-base-04 whitespace-pre-wrap font-mono">
-                  {errorDetail.content || '(empty)'}
-                </pre>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-2">
-                <select
-                  value={selectedContentType}
-                  onChange={(e) => setSelectedContentType(e.target.value)}
-                  className="flex-1 bg-base-01 border border-base-02 rounded px-2 py-1.5 text-xs text-base-05 focus:outline-none focus:border-base-04"
-                >
-                  {saveableContentTypes.map((ct) => (
-                    <option key={ct.id} value={ct.id}>
-                      Save to: {ct.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  onClick={() => handleSaveTo(selectedError, selectedContentType)}
-                  disabled={saving}
-                  className="px-2 py-1.5 text-xs text-base-06 bg-base-02 hover:bg-base-03 rounded transition-colors disabled:opacity-50"
-                >
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
-                <button
-                  onClick={() => handleDiscard(selectedError)}
-                  className="px-2 py-1.5 text-xs text-base-08 hover:bg-base-08/10 rounded transition-colors"
-                >
-                  Discard
-                </button>
-              </div>
-            </div>
           ) : (
             // Error list view
             <div className="space-y-2">
@@ -2139,7 +2015,7 @@ function ImportSection() {
                 {errors.map((err) => (
                   <button
                     key={err.name}
-                    onClick={() => loadErrorDetail(err.name)}
+                    onClick={() => handleOpenError(err.name)}
                     className="w-full flex items-start gap-2 p-2 text-left bg-base-01 border border-base-02 rounded hover:border-base-03 transition-colors"
                   >
                     <svg className="w-4 h-4 text-base-08 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

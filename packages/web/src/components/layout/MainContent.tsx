@@ -5,6 +5,7 @@ import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useUIStore } from '../../stores/uiStore'
 import { OutlinerEditor } from '../editor/OutlinerEditor'
 import { TemplateEditor } from '../editor/TemplateEditor'
+import { ImportErrorEditor } from '../editor/ImportErrorEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
@@ -84,7 +85,7 @@ function useIsMobile() {
 }
 
 export function MainContent() {
-  const { currentPage, isLoading, error, editingTemplate } = usePageStore()
+  const { currentPage, isLoading, error, editingTemplate, editingImportError } = usePageStore()
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
   const isMobile = useIsMobile()
@@ -225,6 +226,23 @@ export function MainContent() {
           contentTypeName={editingTemplate.contentTypeName}
           page={editingTemplate.page}
           hasUnsavedChanges={editingTemplate.hasUnsavedChanges}
+        />
+      </main>
+    )
+  }
+
+  // Render import error editor when editing an import error
+  if (editingImportError) {
+    return (
+      <main className="flex-1 flex flex-col overflow-hidden">
+        <ImportErrorEditor
+          errorName={editingImportError.errorName}
+          originalName={editingImportError.originalName}
+          error={editingImportError.error}
+          timestamp={editingImportError.timestamp}
+          page={editingImportError.page}
+          fileName={editingImportError.fileName}
+          hasUnsavedChanges={editingImportError.hasUnsavedChanges}
         />
       </main>
     )

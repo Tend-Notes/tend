@@ -391,6 +391,10 @@ export interface ImportError {
 export interface AcceptErrorRequest {
   contentType: string
   date?: string
+  /** Optional edited content (if not provided, uses stored content) */
+  content?: string
+  /** Optional custom name for the file (if not provided, uses original name) */
+  name?: string
 }
 
 // Import API

@@ -139,6 +139,10 @@ pub struct AcceptErrorRequest {
     pub content_type: String,
     /// Optional date for saveByDate content types
     pub date: Option<String>,
+    /// Optional edited content (if not provided, uses the stored content)
+    pub content: Option<String>,
+    /// Optional custom name for the file (if not provided, uses original name)
+    pub name: Option<String>,
 }
 
 /// Import a Logseq zip file via multipart upload
@@ -804,10 +808,13 @@ pub async fn accept_import_error(
         return Err(AppError::NotFound(format!("Import error not found: {}", name)));
     }
 
-    // Read content
-    let content = fs::read_to_string(&content_path)
+    // Read stored content (may be overridden by request)
+    let stored_content = fs::read_to_string(&content_path)
         .await
         .context("Failed to read content file")?;
+
+    // Use edited content if provided, otherwise use stored content
+    let content = req.content.unwrap_or(stored_content);
 
     // Read metadata to get original name for the new file
     let meta_content = fs::read_to_string(&meta_path)
@@ -827,14 +834,25 @@ pub async fn accept_import_error(
     // Ensure directory exists
     tokio::fs::create_dir_all(&dest_dir).await.context("Failed to create destination directory")?;
 
-    // Use a sanitized version of the original name
-    let file_name = meta.original_name
-        .trim_end_matches(".md")
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
-        .collect::<String>()
-        .replace(' ', "-");
-    let file_name = if file_name.is_empty() { name.clone() } else { file_name };
+    // Use custom name if provided, otherwise sanitize the original name
+    let file_name = if let Some(custom_name) = req.name {
+        // Sanitize the custom name
+        let sanitized = custom_name
+            .trim_end_matches(".md")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ' || *c == '/')
+            .collect::<String>();
+        if sanitized.is_empty() { name.clone() } else { sanitized }
+    } else {
+        // Use a sanitized version of the original name
+        let sanitized = meta.original_name
+            .trim_end_matches(".md")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
+            .collect::<String>()
+            .replace(' ', "-");
+        if sanitized.is_empty() { name.clone() } else { sanitized }
+    };
 
     let dest_path = dest_dir.join(format!("{}.md", file_name));
 

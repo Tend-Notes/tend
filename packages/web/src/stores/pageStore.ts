@@ -45,6 +45,17 @@ interface PageState {
     hasUnsavedChanges: boolean
   } | null
 
+  // Import error editing state
+  editingImportError: {
+    errorName: string
+    originalName: string
+    error: string
+    timestamp: string
+    page: Page
+    fileName: string
+    hasUnsavedChanges: boolean
+  } | null
+
   // Pending cursor position from template creation
   // This is consumed by the editor when it mounts to position the cursor
   pendingCursorPosition: CursorPosition | null
@@ -87,6 +98,13 @@ interface PageState {
   setPendingScrollTarget: (uuid: string | null) => void
   // Consume pending scroll target (called by editor after mount)
   consumePendingScrollTarget: () => string | null
+  // Import error editing actions
+  openImportErrorEditor: (errorName: string) => Promise<void>
+  updateImportError: (blocks: Block[], rootBlocksHint?: string[]) => void
+  updateImportErrorFileName: (fileName: string) => void
+  saveImportError: (contentType: string, date?: string) => Promise<void>
+  discardImportError: () => Promise<void>
+  closeImportErrorEditor: () => void
 }
 
 // Helper to build URL path for content
@@ -241,6 +259,7 @@ export const usePageStore = create<PageState>()(
     pendingDraftRecovery: null,
     pendingConflict: null,
     editingTemplate: null,
+    editingImportError: null,
     pendingCursorPosition: null,
     pendingScrollTarget: null,
 
@@ -934,6 +953,7 @@ export const usePageStore = create<PageState>()(
         state.pendingDraftRecovery = null
         state.pendingConflict = null
         state.editingTemplate = null
+        state.editingImportError = null
         state.pendingCursorPosition = null
       })
     },
@@ -1130,6 +1150,209 @@ export const usePageStore = create<PageState>()(
         })
       }
       return pendingScrollTarget
+    },
+
+    // Import error editing actions
+    openImportErrorEditor: async (errorName: string) => {
+      set((state) => {
+        state.isLoading = true
+        state.error = null
+      })
+
+      try {
+        const errorDetail = await api.importApi.errors.get(errorName)
+
+        // Parse the content into blocks
+        // For simplicity, we'll create one block per non-empty line
+        const lines = errorDetail.content.split('\n')
+        const blocks: Record<string, Block> = {}
+        const rootBlocks: string[] = []
+
+        for (const line of lines) {
+          const blockUuid = crypto.randomUUID()
+          blocks[blockUuid] = {
+            uuid: blockUuid,
+            content: line,
+            parentUuid: null,
+            children: [],
+            collapsed: false,
+            properties: {},
+            depth: 0,
+          }
+          rootBlocks.push(blockUuid)
+        }
+
+        // If no content, create an empty block
+        if (rootBlocks.length === 0) {
+          const blockUuid = crypto.randomUUID()
+          blocks[blockUuid] = {
+            uuid: blockUuid,
+            content: '',
+            parentUuid: null,
+            children: [],
+            collapsed: false,
+            properties: {},
+            depth: 0,
+          }
+          rootBlocks.push(blockUuid)
+        }
+
+        // Extract suggested filename from original name
+        const suggestedFileName = errorDetail.originalName
+          .replace(/\.md$/, '')
+          .replace(/[^a-zA-Z0-9\-_ ]/g, '-')
+
+        const page: Page = {
+          name: `import-error:${errorName}`,
+          title: errorDetail.originalName,
+          rootBlocks,
+          blocks,
+          properties: {},
+          contentType: 'import-error',
+          isJournal: false,
+          journalDate: null,
+          createdAt: errorDetail.timestamp,
+          modifiedAt: errorDetail.timestamp,
+          version: 0,
+        }
+
+        set((state) => {
+          state.editingImportError = {
+            errorName,
+            originalName: errorDetail.originalName,
+            error: errorDetail.error,
+            timestamp: errorDetail.timestamp,
+            page,
+            fileName: suggestedFileName,
+            hasUnsavedChanges: false,
+          }
+          state.isLoading = false
+        })
+      } catch (e) {
+        set((state) => {
+          state.error = e instanceof Error ? e.message : 'Failed to load import error'
+          state.isLoading = false
+        })
+      }
+    },
+
+    updateImportError: (blocks: Block[], rootBlocksHint?: string[]) => {
+      const { editingImportError } = get()
+      if (!editingImportError) return
+
+      // Compute new root blocks
+      const blockMap: Record<string, Block> = {}
+      const newRootUuids = new Set<string>()
+
+      for (const block of blocks) {
+        blockMap[block.uuid] = block
+        if (!block.parentUuid) {
+          newRootUuids.add(block.uuid)
+        }
+      }
+
+      let finalRoots: string[]
+
+      if (rootBlocksHint) {
+        // Use the hint, but filter to only include valid root UUIDs
+        finalRoots = rootBlocksHint.filter(uuid => newRootUuids.has(uuid))
+        // Add any roots not in the hint at the end
+        for (const uuid of newRootUuids) {
+          if (!finalRoots.includes(uuid)) {
+            finalRoots.push(uuid)
+          }
+        }
+      } else {
+        // Build new rootBlocks list preserving order and inserting new roots smartly
+        const existingRoots = editingImportError.page.rootBlocks.filter(uuid => newRootUuids.has(uuid))
+        const addedRoots = [...newRootUuids].filter(uuid => !editingImportError.page.rootBlocks.includes(uuid))
+        finalRoots = [...existingRoots, ...addedRoots]
+      }
+
+      // Update import error state
+      set((state) => {
+        if (state.editingImportError) {
+          state.editingImportError.page.blocks = blockMap
+          state.editingImportError.page.rootBlocks = finalRoots
+          state.editingImportError.hasUnsavedChanges = true
+        }
+      })
+    },
+
+    updateImportErrorFileName: (fileName: string) => {
+      set((state) => {
+        if (state.editingImportError) {
+          state.editingImportError.fileName = fileName
+          state.editingImportError.hasUnsavedChanges = true
+        }
+      })
+    },
+
+    saveImportError: async (contentType: string, date?: string) => {
+      const { editingImportError } = get()
+      if (!editingImportError) return
+
+      try {
+        // Serialize blocks back to markdown content with proper indentation for nested blocks
+        const serializeBlock = (uuid: string, indent: number): string => {
+          const block = editingImportError.page.blocks[uuid]
+          if (!block) return ''
+
+          const prefix = '  '.repeat(indent) + (indent > 0 ? '- ' : '')
+          const lines = [prefix + block.content]
+
+          // Recursively serialize children
+          for (const childUuid of block.children) {
+            lines.push(serializeBlock(childUuid, indent + 1))
+          }
+
+          return lines.join('\n')
+        }
+
+        const content = editingImportError.page.rootBlocks
+          .map(uuid => serializeBlock(uuid, 0))
+          .join('\n')
+
+        await api.importApi.errors.accept(editingImportError.errorName, {
+          contentType,
+          date,
+          content,
+          name: editingImportError.fileName,
+        })
+
+        useActivityLogStore.getState().addEntry('file_save', editingImportError.fileName)
+
+        set((state) => {
+          state.editingImportError = null
+        })
+      } catch (e) {
+        set((state) => {
+          state.error = e instanceof Error ? e.message : 'Failed to save import error'
+        })
+      }
+    },
+
+    discardImportError: async () => {
+      const { editingImportError } = get()
+      if (!editingImportError) return
+
+      try {
+        await api.importApi.errors.delete(editingImportError.errorName)
+
+        set((state) => {
+          state.editingImportError = null
+        })
+      } catch (e) {
+        set((state) => {
+          state.error = e instanceof Error ? e.message : 'Failed to discard import error'
+        })
+      }
+    },
+
+    closeImportErrorEditor: () => {
+      set((state) => {
+        state.editingImportError = null
+      })
     },
   }))
 )
