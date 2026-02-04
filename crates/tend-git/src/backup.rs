@@ -801,9 +801,8 @@ impl BackupManager {
 
     /// Set or update the remote repository URL
     pub fn set_remote(&self, url: &str) -> Result<RemoteResult, GitError> {
-        // Initialize git repo if it doesn't exist
         if !self.is_git_repo() {
-            self.init_repo()?;
+            return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
 
         info!("Setting remote to: {}", url);
