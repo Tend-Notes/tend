@@ -20,22 +20,29 @@ interface ImportErrorEditorProps {
 }
 
 /**
- * Detects if a filename contains a date and extracts it.
+ * Result of parsing a filename for date and title.
+ */
+interface ParsedFilename {
+  date: string | null
+  title: string
+}
+
+/**
+ * Parses a filename to extract both date and remaining title.
  * Scans the first ~10 characters for a date pattern:
  * - YYYY (19xx or 20xx), then optionally any separator, then MM (01-12), then optionally any separator, then DD (01-31)
  *
  * Examples:
- * - "2022_01_11 2" -> 2022-01-11
- * - "2022-01-11_2" -> 2022-01-11
- * - "2022 01 11 notes" -> 2022-01-11
- * - "20220111_anything" -> 2022-01-11
- * - "2022.01.11.md" -> 2022-01-11
+ * - "2023_01_12 John doe.md" -> { date: "2023-01-12", title: "John doe" }
+ * - "20230112_meeting notes.md" -> { date: "2023-01-12", title: "meeting notes" }
+ * - "2022-01-11_project.md" -> { date: "2022-01-11", title: "project" }
+ * - "My Document.md" -> { date: null, title: "My Document" }
  */
-function detectJournalDate(originalName: string): string | null {
+function parseFilenameForDateAndTitle(originalName: string): ParsedFilename {
   // Remove .md extension if present
   const baseName = originalName.replace(/\.md$/i, '')
 
-  // Look at the first ~10 characters for the date pattern
+  // Look at the first ~12 characters for the date pattern
   const prefix = baseName.slice(0, 12)
 
   // Match: 4-digit year (19xx or 20xx), optional separator, 2-digit month, optional separator, 2-digit day
@@ -50,11 +57,17 @@ function detectJournalDate(originalName: string): string | null {
 
     // Validate month (01-12) and day (01-31)
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return `${year}-${match[2]}-${match[3]}`
+      const date = `${year}-${match[2]}-${match[3]}`
+      // Extract title: everything after the date pattern
+      // The full match length tells us where the date ends
+      const afterDate = baseName.slice(match[0].length)
+      // Remove leading separators (space, underscore, dash, dot) from the title
+      const title = afterDate.replace(/^[-_ .]+/, '').trim()
+      return { date, title: title || baseName }
     }
   }
 
-  return null
+  return { date: null, title: baseName }
 }
 
 export function ImportErrorEditor({
@@ -72,16 +85,23 @@ export function ImportErrorEditor({
   const closeImportErrorEditor = usePageStore((state) => state.closeImportErrorEditor)
   const { contentTypes } = useSettingsStore()
 
-  // Detect if this is a journal conflict file
-  const detectedJournalDate = useMemo(() => detectJournalDate(originalName), [originalName])
+  // Parse the filename for both date and title
+  const parsedFilename = useMemo(() => parseFilenameForDateAndTitle(originalName), [originalName])
 
-  // Default to journal if we detected a journal date, otherwise page
+  // Default to journal if we detected a date, otherwise page
   const [selectedContentType, setSelectedContentType] = useState(() =>
-    detectedJournalDate ? 'journal' : 'page'
+    parsedFilename.date ? 'journal' : 'page'
   )
+
+  // Track whether the user has manually changed the title (to avoid overwriting their edits)
+  const [userEditedTitle, setUserEditedTitle] = useState(false)
+
+  // Title for saveByDate content types (separate from fileName which is used for non-dated)
+  const [sheetTitle, setSheetTitle] = useState(() => parsedFilename.title)
+
   // Default to today's date if not detected (consistent with CommandPalette date picker)
-  const [journalDate, setJournalDate] = useState(() =>
-    detectedJournalDate || new Date().toISOString().split('T')[0]
+  const [sheetDate, setSheetDate] = useState(() =>
+    parsedFilename.date || new Date().toISOString().split('T')[0]
   )
   const [saving, setSaving] = useState(false)
   const [discarding, setDiscarding] = useState(false)
@@ -89,6 +109,35 @@ export function ImportErrorEditor({
 
   // All content types are saveable now (including journal with date picker)
   const saveableContentTypes = contentTypes
+
+  // Get the currently selected content type config
+  const selectedContentTypeConfig = useMemo(
+    () => contentTypes.find(ct => ct.id === selectedContentType),
+    [contentTypes, selectedContentType]
+  )
+
+  // Determine if the selected content type uses date-based organization
+  const isSaveByDate = selectedContentTypeConfig?.saveByDate || selectedContentType === 'journal'
+
+  // When content type changes, update fileName/title appropriately
+  const handleContentTypeChange = useCallback((newContentType: string) => {
+    setSelectedContentType(newContentType)
+    // If switching to a saveByDate type and user hasn't edited, use parsed title
+    // If switching away from saveByDate and user hasn't edited, keep current behavior
+    if (!userEditedTitle) {
+      const newConfig = contentTypes.find(ct => ct.id === newContentType)
+      if (newConfig?.saveByDate || newContentType === 'journal') {
+        // Use the parsed title for dated content types
+        setSheetTitle(parsedFilename.title)
+      }
+    }
+  }, [contentTypes, parsedFilename.title, userEditedTitle])
+
+  // Handle title changes and mark as user-edited
+  const handleTitleChange = useCallback((newTitle: string) => {
+    setSheetTitle(newTitle)
+    setUserEditedTitle(true)
+  }, [])
 
   // Handle close with unsaved changes confirmation
   const handleClose = useCallback(() => {
@@ -104,13 +153,19 @@ export function ImportErrorEditor({
   const handleSave = useCallback(async () => {
     setSaving(true)
     try {
-      // Pass date for journal content type
-      const date = selectedContentType === 'journal' ? journalDate : undefined
-      await saveImportError(selectedContentType, date)
+      // For saveByDate content types (including journal), pass date
+      // Also update the fileName to be the title for saveByDate types
+      if (isSaveByDate) {
+        // Update the fileName to the title before saving
+        updateImportErrorFileName(sheetTitle)
+        await saveImportError(selectedContentType, sheetDate)
+      } else {
+        await saveImportError(selectedContentType)
+      }
     } finally {
       setSaving(false)
     }
-  }, [saveImportError, selectedContentType, journalDate])
+  }, [saveImportError, selectedContentType, sheetDate, sheetTitle, isSaveByDate, updateImportErrorFileName])
 
   // Handle discard
   const handleDiscard = useCallback(async () => {
@@ -189,26 +244,49 @@ export function ImportErrorEditor({
             </p>
           </div>
 
-          {/* Filename input */}
-          <div className="mb-6">
-            <label className="block text-xs text-base-04 mb-1">
-              File name (without .md extension)
-            </label>
-            <input
-              type="text"
-              value={fileName}
-              onChange={(e) => updateImportErrorFileName(e.target.value)}
-              className="w-full bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
-              placeholder="Enter file name..."
-            />
-          </div>
+          {/* Filename/Title input - different for saveByDate vs regular content types */}
+          {isSaveByDate ? (
+            <div className="mb-6">
+              <label className="block text-xs text-base-04 mb-1">
+                {selectedContentType === 'journal' ? 'Journal date' : `${selectedContentTypeConfig?.name || 'Sheet'} title`}
+              </label>
+              {selectedContentType === 'journal' ? (
+                /* Journal just needs date, no title */
+                <p className="text-sm text-base-05">
+                  Journals are named by date only.
+                </p>
+              ) : (
+                /* Other saveByDate types need a title */
+                <input
+                  type="text"
+                  value={sheetTitle}
+                  onChange={(e) => handleTitleChange(e.target.value)}
+                  className="w-full bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
+                  placeholder={`Enter ${selectedContentTypeConfig?.name?.toLowerCase() || 'sheet'} title...`}
+                />
+              )}
+            </div>
+          ) : (
+            <div className="mb-6">
+              <label className="block text-xs text-base-04 mb-1">
+                File name (without .md extension)
+              </label>
+              <input
+                type="text"
+                value={fileName}
+                onChange={(e) => updateImportErrorFileName(e.target.value)}
+                className="w-full bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
+                placeholder="Enter file name..."
+              />
+            </div>
+          )}
 
           {/* Content type and save controls */}
           <div className="mb-6 space-y-3">
             <div className="flex items-center gap-3">
               <select
                 value={selectedContentType}
-                onChange={(e) => setSelectedContentType(e.target.value)}
+                onChange={(e) => handleContentTypeChange(e.target.value)}
                 className="flex-1 bg-base-01 border border-base-02 rounded px-3 py-2 text-sm text-base-05 focus:outline-none focus:border-base-04"
               >
                 {saveableContentTypes.map((ct) => (
@@ -219,17 +297,19 @@ export function ImportErrorEditor({
               </select>
               <button
                 onClick={handleSave}
-                disabled={saving || !fileName.trim() || (selectedContentType === 'journal' && !journalDate)}
+                disabled={saving || (isSaveByDate ? (selectedContentType !== 'journal' && !sheetTitle.trim()) : !fileName.trim()) || (isSaveByDate && !sheetDate)}
                 className="px-4 py-2 text-sm font-medium text-base-00 bg-base-0D hover:bg-base-0D/80 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {saving ? 'Saving...' : 'Save'}
               </button>
             </div>
 
-            {/* Date picker for journal content type */}
-            {selectedContentType === 'journal' && (
+            {/* Date picker for any saveByDate content type (including journal) */}
+            {isSaveByDate && (
               <div className="flex items-center gap-3">
-                <label className="text-xs text-base-04">Journal date:</label>
+                <label className="text-xs text-base-04">
+                  {selectedContentType === 'journal' ? 'Journal date:' : `${selectedContentTypeConfig?.name || 'Sheet'} date:`}
+                </label>
                 <div className="relative">
                   <button
                     onClick={() => setShowDatePicker(!showDatePicker)}
@@ -239,29 +319,31 @@ export function ImportErrorEditor({
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
-                    <span>{formatShortDate(journalDate)}</span>
+                    <span>{formatShortDate(sheetDate)}</span>
                   </button>
                   {showDatePicker && (
                     <DatePickerPopover
-                      value={journalDate}
+                      value={sheetDate}
                       onChange={(date) => {
-                        if (date) setJournalDate(date)
+                        if (date) setSheetDate(date)
                       }}
                       onClose={() => setShowDatePicker(false)}
-                      label="Journal Date"
+                      label={selectedContentType === 'journal' ? 'Journal Date' : `${selectedContentTypeConfig?.name || 'Sheet'} Date`}
                     />
                   )}
                 </div>
-                {detectedJournalDate && journalDate === detectedJournalDate && (
+                {parsedFilename.date && sheetDate === parsedFilename.date && (
                   <span className="text-xs text-base-0B">(auto-detected)</span>
                 )}
               </div>
             )}
 
-            {/* Info message for journal merging */}
-            {selectedContentType === 'journal' && (
+            {/* Info message for dated content types */}
+            {isSaveByDate && (
               <p className="text-xs text-base-04 bg-base-01 border border-base-02 rounded px-3 py-2">
-                If a journal for this date already exists, the content will be appended to the existing journal.
+                {selectedContentType === 'journal'
+                  ? 'If a journal for this date already exists, the content will be appended to the existing journal.'
+                  : `This ${selectedContentTypeConfig?.name?.toLowerCase() || 'sheet'} will be saved in ${selectedContentTypeConfig?.directory || 'the content type directory'}/${sheetDate}/.`}
               </p>
             )}
           </div>
