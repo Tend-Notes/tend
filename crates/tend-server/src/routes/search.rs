@@ -112,12 +112,21 @@ pub async fn rebuild(
         }));
     }
 
-    // Build the index (this will block - consider spawning a task for large gardens)
+    // Rebuild the index - use in-place rebuild if a writer already exists,
+    // otherwise create a new index from scratch
     {
-        let mut garden = user_state.garden.write().await;
-        garden.build_index().await.map_err(|e| {
-            AppError::Internal(format!("Failed to build index: {}", e))
-        })?;
+        let garden = user_state.garden.read().await;
+        if garden.search_index.is_some() {
+            garden.rebuild_search_index().await.map_err(|e| {
+                AppError::Internal(format!("Failed to rebuild index: {}", e))
+            })?;
+        } else {
+            drop(garden);
+            let mut garden = user_state.garden.write().await;
+            garden.build_index().await.map_err(|e| {
+                AppError::Internal(format!("Failed to build index: {}", e))
+            })?;
+        }
     }
 
     // Return updated status

@@ -73,29 +73,26 @@ pub async fn reindex(
             .map_err(|e| AppError::Internal(format!("Failed to rebuild link index: {}", e)))?;
     }
 
-    // 2. Rebuild search index (requires write lock for build_index)
-    let search_docs = {
-        let mut garden = user_state.garden.write().await;
+    // 2. Rebuild search index in place (uses existing writer to avoid lock conflict)
+    let search_doc_count = {
+        let garden = user_state.garden.read().await;
         if garden.search_config.enabled {
             garden
-                .build_index()
+                .rebuild_search_index()
                 .await
                 .map_err(|e| AppError::Internal(format!("Failed to rebuild search index: {}", e)))?;
 
             garden
                 .search_index
                 .as_ref()
-                .map(|idx| {
-                    // We can't await inside map, so we'll get it after
-                    idx.clone()
-                })
+                .map(|idx| idx.clone())
         } else {
             None
         }
     };
 
-    // Get the doc count outside the write lock
-    let search_doc_count = if let Some(idx) = search_docs {
+    // Get the doc count outside the read lock
+    let search_doc_count = if let Some(idx) = search_doc_count {
         Some(idx.read().await.num_docs())
     } else {
         None
@@ -293,11 +290,11 @@ pub async fn stabilize(
             }
         }
 
-        // Rebuild search index
+        // Rebuild search index in place (uses existing writer to avoid lock conflict)
         {
-            let mut garden = user_state.garden.write().await;
+            let garden = user_state.garden.read().await;
             if garden.search_config.enabled {
-                if let Err(e) = garden.build_index().await {
+                if let Err(e) = garden.rebuild_search_index().await {
                     tracing::warn!("Failed to rebuild search index after stabilize: {}", e);
                 }
             }

@@ -476,6 +476,74 @@ impl GardenState {
         Ok(())
     }
 
+    /// Rebuild the search index in place using the existing writer
+    ///
+    /// Unlike `build_index()` which creates a new `SearchIndex` (and thus a new
+    /// `IndexWriter`), this method clears and repopulates the existing index.
+    /// This avoids the Tantivy lock conflict that occurs when a writer is already
+    /// held by the running server.
+    pub async fn rebuild_search_index(&self) -> anyhow::Result<()> {
+        if !self.search_config.enabled {
+            return Err(anyhow::anyhow!("Search is disabled for this garden"));
+        }
+
+        let search_index = self.search_index.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("Search index not initialized")
+        })?;
+
+        // Update status to building
+        {
+            let mut status = self.index_status.write().await;
+            *status = IndexStatus::Building;
+        }
+
+        info!(
+            "Rebuilding search index in place for {} garden: {}",
+            if self.encrypted { "encrypted" } else { "plain" },
+            self.data_dir.display()
+        );
+
+        let mut index = search_index.write().await;
+
+        // Clear all existing documents
+        index.clear()?;
+
+        // Re-index all pages
+        let pages = self.file_manager.list_pages().await?;
+        for page_meta in pages {
+            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
+                if let Err(e) = index.index_page(&page) {
+                    tracing::warn!("Failed to index page {}: {}", page_meta.name, e);
+                }
+            }
+        }
+
+        // Re-index all journals
+        let journals = self.file_manager.list_journals().await?;
+        for journal_meta in journals {
+            if let Some(date) = journal_meta.journal_date {
+                if let Ok(page) = self.file_manager.read_journal(date).await {
+                    if let Err(e) = index.index_page(&page) {
+                        tracing::warn!("Failed to index journal {}: {}", journal_meta.name, e);
+                    }
+                }
+            }
+        }
+
+        index.commit()?;
+        info!("Search index rebuilt with {} documents", index.num_docs());
+
+        drop(index);
+
+        // Update status to ready
+        {
+            let mut status = self.index_status.write().await;
+            *status = IndexStatus::Ready;
+        }
+
+        Ok(())
+    }
+
     /// Rebuild the link index from all pages and journals
     pub async fn rebuild_link_index(&self) -> anyhow::Result<()> {
         info!(

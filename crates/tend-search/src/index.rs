@@ -154,6 +154,15 @@ impl SearchIndex {
         Ok(())
     }
 
+    /// Remove all documents from the index
+    ///
+    /// This uses the existing writer to clear the index without releasing the
+    /// lock, so it is safe to call while the server is running.
+    pub fn clear(&mut self) -> Result<(), SearchError> {
+        self.writer.delete_all_documents()?;
+        Ok(())
+    }
+
     /// Remove a page from the index
     pub fn remove_page(&mut self, page_name: &str) -> Result<(), SearchError> {
         let schema = self.index.schema();
