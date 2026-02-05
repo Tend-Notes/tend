@@ -239,7 +239,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
       <div className="mt-1 w-full">
         <button
           onClick={() => setShowWorkLog(!showWorkLog)}
-          className="w-full flex items-center justify-between px-2 py-1 text-xs bg-base-01 hover:bg-base-02 rounded transition-colors text-base-04 hover:text-base-05"
+          className="w-full flex items-center justify-between px-2 py-1 text-xs border border-base-02 hover:border-base-03 rounded transition-colors text-base-04 hover:text-base-05"
         >
           <span>View entries ({workLog.length})</span>
           {/* Chevron icon - points down when collapsed, up when expanded */}
