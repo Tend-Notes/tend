@@ -5,6 +5,7 @@ import { MainContent } from './components/layout/MainContent'
 import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
 import { LogseqImportDialog } from './components/ui/LogseqImportDialog'
+import { WorkTimerBanner } from './components/ui/WorkTimerBanner'
 import { usePageStore } from './stores/pageStore'
 import { useRecentSheetsStore } from './stores/recentSheetsStore'
 import { useTagStore } from './stores/tagStore'
@@ -175,15 +176,20 @@ function App() {
   }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode, navigateToJournal])
 
   return (
-    <div className="flex h-screen w-full max-w-full overflow-hidden bg-base-00 text-base-05">
-      {/* Sidebar */}
-      <Sidebar
-        mode={sidebarMode}
-        onModeChange={setSidebarMode}
-      />
+    <div className="flex flex-col h-screen w-full max-w-full overflow-hidden bg-base-00 text-base-05">
+      {/* Work timer banner - shows at very top when active */}
+      <WorkTimerBanner />
 
-      {/* Main content area */}
-      <MainContent />
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar */}
+        <Sidebar
+          mode={sidebarMode}
+          onModeChange={setSidebarMode}
+        />
+
+        {/* Main content area */}
+        <MainContent />
+      </div>
 
       {/* Lazy-loaded overlays wrapped in Suspense */}
       <Suspense fallback={null}>

@@ -10,6 +10,7 @@ import { useUIStore } from '../stores/uiStore'
 import { useGitStore } from '../stores/gitStore'
 import { useRecentSheetsStore } from '../stores/recentSheetsStore'
 import { useTagStore, type TagMetadata } from '../stores/tagStore'
+import { useWorkSessionStore, type WorkSession } from '../stores/workSessionStore'
 import type { PageMeta } from '../types'
 
 // Debounce timeout for saving to server
@@ -90,6 +91,20 @@ export async function loadUserState(): Promise<void> {
       useTagStore.setState({ tags: state.tags as Record<string, TagMetadata> })
     }
 
+    // Apply to work session store
+    if (state.activeWorkSession !== undefined) {
+      const workSession = useWorkSessionStore.getState()
+      const existingSession = workSession.activeSession
+
+      // If there's a session from server but no local session, show continue prompt
+      if (state.activeWorkSession && !existingSession) {
+        workSession.setActiveSession(state.activeWorkSession as WorkSession)
+        workSession.setShowContinuePrompt(true)
+      } else if (state.activeWorkSession) {
+        workSession.setActiveSession(state.activeWorkSession as WorkSession)
+      }
+    }
+
   } catch {
     // State may not exist yet for new users
   } finally {
@@ -128,6 +143,7 @@ function buildState(): Record<string, unknown> {
   const ui = useUIStore.getState()
   const recentSheets = useRecentSheetsStore.getState()
   const tags = useTagStore.getState()
+  const workSession = useWorkSessionStore.getState()
 
   return {
     // UI
@@ -141,6 +157,8 @@ function buildState(): Record<string, unknown> {
     recentTags: recentSheets.recentTags,
     // Tags
     tags: tags.tags,
+    // Work session
+    activeWorkSession: workSession.activeSession,
   }
 }
 
@@ -207,6 +225,7 @@ let unsubGit: (() => void) | null = null
 let unsubUI: (() => void) | null = null
 let unsubRecentSheets: (() => void) | null = null
 let unsubTags: (() => void) | null = null
+let unsubWorkSession: (() => void) | null = null
 
 // beforeunload handler reference
 let beforeUnloadHandler: (() => void) | null = null
@@ -225,6 +244,7 @@ export function startSync(): void {
   unsubUI = useUIStore.subscribe(saveStateToServer)
   unsubRecentSheets = useRecentSheetsStore.subscribe(saveStateToServer)
   unsubTags = useTagStore.subscribe(saveStateToServer)
+  unsubWorkSession = useWorkSessionStore.subscribe(saveStateToServer)
 
   // Add beforeunload handler to flush pending saves when closing tab/browser
   beforeUnloadHandler = flushPendingSaves
@@ -240,6 +260,7 @@ export function stopSync(): void {
   if (unsubUI) { unsubUI(); unsubUI = null }
   if (unsubRecentSheets) { unsubRecentSheets(); unsubRecentSheets = null }
   if (unsubTags) { unsubTags(); unsubTags = null }
+  if (unsubWorkSession) { unsubWorkSession(); unsubWorkSession = null }
 
   if (beforeUnloadHandler) {
     window.removeEventListener('beforeunload', beforeUnloadHandler)

@@ -1525,6 +1525,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
                 properties={block.properties}
                 onPropertyChange={(key, value) => handleBlockPropertyChange(block.uuid, key, value)}
                 isCompleted={isTaskCompleted}
+                taskContent={block.content}
               />
             )}
           </div>

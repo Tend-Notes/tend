@@ -5,19 +5,33 @@ import { useState } from 'react'
 import { DatePickerPopover } from '../ui/DatePickerPopover'
 import { PriorityPickerPopover, getPriorityDisplay } from '../ui/PriorityPickerPopover'
 import { formatShortDate, getUrgencyStyle } from '../../lib/dateUtils'
+import { useWorkSessionStore } from '../../stores/workSessionStore'
+import { usePageStore } from '../../stores/pageStore'
 
 interface TaskMetadataProps {
   blockUuid: string
   properties: Record<string, string>
   onPropertyChange: (key: string, value: string | null) => void
   isCompleted?: boolean
+  taskContent?: string
 }
 
-export function TaskMetadata({ blockUuid: _, properties, onPropertyChange, isCompleted }: TaskMetadataProps) {
-  void _ // blockUuid available for future use
+export function TaskMetadata({ blockUuid, properties, onPropertyChange, isCompleted, taskContent }: TaskMetadataProps) {
   const [showDueDatePicker, setShowDueDatePicker] = useState(false)
   const [showStartDatePicker, setShowStartDatePicker] = useState(false)
   const [showPriorityPicker, setShowPriorityPicker] = useState(false)
+
+  const { activeSession, startSession } = useWorkSessionStore()
+  const currentPage = usePageStore((state) => state.currentPage)
+
+  // Check if this task is the currently active work session
+  const isActiveTask = activeSession?.blockUuid === blockUuid
+  const hasActiveSession = activeSession !== null
+
+  const handleStartTimer = () => {
+    if (!currentPage || !taskContent) return
+    startSession(blockUuid, currentPage.name, taskContent)
+  }
 
   const dueDate = properties.due_date || null
   const startDate = properties.start_date || null
@@ -138,6 +152,37 @@ export function TaskMetadata({ blockUuid: _, properties, onPropertyChange, isCom
           />
         )}
       </div>
+
+      {/* Work Timer - only show for incomplete tasks */}
+      {!isCompleted && (
+        <div className="relative">
+          {isActiveTask ? (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-base-0B">
+              <span className="w-2 h-2 rounded-full bg-base-0B animate-pulse" />
+              Working
+            </span>
+          ) : (
+            <button
+              onClick={handleStartTimer}
+              disabled={hasActiveSession}
+              className={`
+                inline-flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors
+                ${hasActiveSession
+                  ? 'text-base-03 cursor-not-allowed'
+                  : 'text-base-03 hover:text-base-0B hover:bg-base-01'
+                }
+              `}
+              title={hasActiveSession ? 'Stop current task first' : 'Start work timer'}
+            >
+              {/* Timer/clock icon */}
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Start
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }
