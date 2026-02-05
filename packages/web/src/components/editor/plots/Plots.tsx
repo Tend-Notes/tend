@@ -948,67 +948,243 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       }
 
       case 'paste-multiline': {
-        // Multi-line paste: replace current block content with first line,
-        // create new sibling blocks for remaining lines, focus last block at end.
-        const { lines } = event
+        // Multi-line paste with tree structure preservation.
+        // Parses indentation and list markers from raw pasted lines to reconstruct
+        // the tree hierarchy. The first line merges into the current block; subsequent
+        // lines become children/siblings based on their indentation.
+        const { lines, rawPastedLines } = event
         if (lines.length === 0) break
 
         const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
         const currentBlock = blocks.find((b) => b.uuid === uuid)
         if (!currentBlock) break
 
-        // Set current block to the first line
-        currentBlock.content = lines[0]
-
-        // Create new sibling blocks for lines[1..n]
-        const newBlocks: Block[] = []
-        for (let i = 1; i < lines.length; i++) {
-          newBlocks.push({
-            uuid: uuidv4(),
-            content: lines[i],
-            parentUuid: currentBlock.parentUuid,
-            children: [],
-            collapsed: false,
-            properties: {},
-            depth: currentBlock.depth,
-          })
+        // Parse indentation and strip list markers from raw pasted lines.
+        // rawPastedLines preserves the original clipboard indentation.
+        interface ParsedLine {
+          indent: number   // indent level (each 2 spaces = 1 level)
+          content: string  // text with list marker stripped
         }
 
-        if (newBlocks.length === 0) {
-          // Only one line - just update the current block content
-          updateCurrentPage(blocks)
-          focusBlock(uuid, lines[0].length)
+        const parseLine = (raw: string): ParsedLine => {
+          // Expand tabs to 2 spaces for consistent indent calculation
+          const expanded = raw.replace(/\t/g, '  ')
+          const stripped = expanded.replace(/^\s*/, '')
+          const leadingSpaces = expanded.length - stripped.length
+          const indent = Math.floor(leadingSpaces / 2)
+          // Strip list marker: -, *, or numbered (1., 2.) followed by space
+          const content = stripped.replace(/^[-*]\s+/, '').replace(/^\d+[.)]\s+/, '')
+          return { indent, content }
+        }
+
+        // Detect if the pasted content looks like a markdown list (has list markers)
+        const hasListMarkers = rawPastedLines.some((line) => /^\s*[-*]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line))
+
+        if (!hasListMarkers) {
+          // No list markers detected - fall back to flat sibling paste (original behavior).
+          // Use the merged lines (which include textBefore/textAfter).
+          currentBlock.content = lines[0]
+
+          const newBlocks: Block[] = []
+          for (let i = 1; i < lines.length; i++) {
+            newBlocks.push({
+              uuid: uuidv4(),
+              content: lines[i],
+              parentUuid: currentBlock.parentUuid,
+              children: [],
+              collapsed: false,
+              properties: {},
+              depth: currentBlock.depth,
+            })
+          }
+
+          if (newBlocks.length === 0) {
+            updateCurrentPage(blocks)
+            focusBlock(uuid, lines[0].length)
+            break
+          }
+
+          const newBlockUuids = newBlocks.map((b) => b.uuid)
+
+          if (currentBlock.parentUuid) {
+            const parent = blocks.find((b) => b.uuid === currentBlock.parentUuid)
+            if (parent) {
+              const afterIndex = parent.children.indexOf(uuid)
+              parent.children = [
+                ...parent.children.slice(0, afterIndex + 1),
+                ...newBlockUuids,
+                ...parent.children.slice(afterIndex + 1),
+              ]
+            }
+            updateCurrentPage([...blocks, ...newBlocks])
+          } else {
+            const afterIndex = page.rootBlocks.indexOf(uuid)
+            const newRootBlocks = [
+              ...page.rootBlocks.slice(0, afterIndex + 1),
+              ...newBlockUuids,
+              ...page.rootBlocks.slice(afterIndex + 1),
+            ]
+            updateCurrentPage([...blocks, ...newBlocks], newRootBlocks)
+          }
+
+          const lastNewBlock = newBlocks[newBlocks.length - 1]
+          focusBlock(lastNewBlock.uuid, lastNewBlock.content.length)
           break
         }
 
-        const newBlockUuids = newBlocks.map((b) => b.uuid)
+        // ── List-structured paste ──────────────────────────────────────────
+        // Parse all raw lines to get indent levels and stripped content
+        const parsed = rawPastedLines.map(parseLine)
 
-        // Insert new blocks as siblings after the current block
-        if (currentBlock.parentUuid) {
-          const parent = blocks.find((b) => b.uuid === currentBlock.parentUuid)
-          if (parent) {
-            const afterIndex = parent.children.indexOf(uuid)
-            parent.children = [
-              ...parent.children.slice(0, afterIndex + 1),
-              ...newBlockUuids,
-              ...parent.children.slice(afterIndex + 1),
-            ]
-          }
-          updateCurrentPage([...blocks, ...newBlocks])
+        // Determine the base indent (minimum indent in pasted content)
+        const baseIndent = Math.min(...parsed.map((p) => p.indent))
+
+        // Normalize indents relative to base
+        const normalized = parsed.map((p) => ({
+          indent: p.indent - baseIndent,
+          content: p.content,
+        }))
+
+        // First line: merge its stripped content with textBefore/textAfter context.
+        // The current block already exists at some position in the tree. Its content
+        // becomes textBefore + strippedFirstLine.
+        // textAfter goes to the last block in the pasted tree.
+        const { textBefore, textAfter } = event
+        const firstLineContent = textBefore + normalized[0].content
+        const lastLineIdx = normalized.length - 1
+
+        // Append textAfter to the last line's content
+        if (lastLineIdx > 0) {
+          normalized[lastLineIdx].content = normalized[lastLineIdx].content + textAfter
         } else {
-          // Current block is a root block
-          const afterIndex = page.rootBlocks.indexOf(uuid)
-          const newRootBlocks = [
-            ...page.rootBlocks.slice(0, afterIndex + 1),
-            ...newBlockUuids,
-            ...page.rootBlocks.slice(afterIndex + 1),
-          ]
-          updateCurrentPage([...blocks, ...newBlocks], newRootBlocks)
+          // Only one line pasted - textAfter goes on the first (and only) line
+          currentBlock.content = firstLineContent + textAfter
+          updateCurrentPage(blocks)
+          focusBlock(uuid, (firstLineContent + textAfter).length)
+          break
         }
 
+        // Set current block content to first line
+        currentBlock.content = firstLineContent
+
+        // Build tree of new blocks for lines[1..n].
+        //
+        // Use a stack to track the nesting hierarchy. The stack begins with a
+        // sentinel for currentBlock's PARENT (indent -1) and currentBlock itself
+        // at indent 0 (normalized). This way:
+        //   - Lines at indent 0 pop back to the sentinel and become siblings of
+        //     currentBlock (inserted into the parent's children list).
+        //   - Lines at indent 1+ become children of currentBlock or deeper blocks.
+        const SENTINEL_UUID = '__sentinel__'
+        const allNewBlocks: Block[] = []
+
+        // rootNewUuids: blocks at the same level as currentBlock (siblings)
+        const rootNewUuids: string[] = []
+
+        const stack: { uuid: string; indent: number }[] = [
+          { uuid: SENTINEL_UUID, indent: -1 },
+          { uuid: currentBlock.uuid, indent: normalized[0].indent },
+        ]
+
+        for (let i = 1; i < normalized.length; i++) {
+          const { indent, content } = normalized[i]
+
+          // Skip trailing empty lines (common clipboard artifact)
+          if (content === '' && i === normalized.length - 1 && textAfter === '') continue
+
+          // Pop stack until we find a parent at a strictly LOWER indent level
+          while (stack.length > 1 && stack[stack.length - 1].indent >= indent) {
+            stack.pop()
+          }
+
+          const parentEntry = stack[stack.length - 1]
+          const isSiblingOfCurrent = parentEntry.uuid === SENTINEL_UUID
+
+          // Resolve the actual parent block
+          let parentBlock: Block | undefined
+          if (parentEntry.uuid === currentBlock.uuid) {
+            parentBlock = currentBlock
+          } else if (parentEntry.uuid !== SENTINEL_UUID) {
+            parentBlock = allNewBlocks.find((b) => b.uuid === parentEntry.uuid)
+          }
+
+          // Determine depth and parentUuid
+          let newParentUuid: string | null
+          let newDepth: number
+
+          if (isSiblingOfCurrent) {
+            // Same level as currentBlock: sibling
+            newParentUuid = currentBlock.parentUuid
+            newDepth = currentBlock.depth
+          } else if (parentBlock) {
+            // Child of an existing (or newly created) block
+            newParentUuid = parentBlock.uuid
+            newDepth = parentBlock.depth + 1
+          } else {
+            // Fallback: same level as current block
+            newParentUuid = currentBlock.parentUuid
+            newDepth = currentBlock.depth
+          }
+
+          const newBlock: Block = {
+            uuid: uuidv4(),
+            content,
+            parentUuid: newParentUuid,
+            children: [],
+            collapsed: false,
+            properties: {},
+            depth: newDepth,
+          }
+
+          allNewBlocks.push(newBlock)
+
+          // Wire into parent's children array
+          if (isSiblingOfCurrent) {
+            rootNewUuids.push(newBlock.uuid)
+          } else if (parentBlock) {
+            parentBlock.children.push(newBlock.uuid)
+          }
+
+          stack.push({ uuid: newBlock.uuid, indent })
+        }
+
+        // Insert sibling blocks into the parent's children list (or rootBlocks).
+        // Blocks that are children of currentBlock or other new blocks are already
+        // wired via their parent's `children` array above.
+        if (rootNewUuids.length > 0) {
+          if (currentBlock.parentUuid) {
+            const parent = blocks.find((b) => b.uuid === currentBlock.parentUuid)
+            if (parent) {
+              const afterIndex = parent.children.indexOf(uuid)
+              parent.children = [
+                ...parent.children.slice(0, afterIndex + 1),
+                ...rootNewUuids,
+                ...parent.children.slice(afterIndex + 1),
+              ]
+            }
+          } else {
+            const afterIndex = page.rootBlocks.indexOf(uuid)
+            const newRootBlocks = [
+              ...page.rootBlocks.slice(0, afterIndex + 1),
+              ...rootNewUuids,
+              ...page.rootBlocks.slice(afterIndex + 1),
+            ]
+            updateCurrentPage([...blocks, ...allNewBlocks], newRootBlocks)
+            const lastBlock = allNewBlocks[allNewBlocks.length - 1]
+            focusBlock(lastBlock.uuid, lastBlock.content.length)
+            break
+          }
+        }
+
+        updateCurrentPage([...blocks, ...allNewBlocks])
+
         // Focus the last created block with cursor at end
-        const lastNewBlock = newBlocks[newBlocks.length - 1]
-        focusBlock(lastNewBlock.uuid, lastNewBlock.content.length)
+        if (allNewBlocks.length > 0) {
+          const lastBlock = allNewBlocks[allNewBlocks.length - 1]
+          focusBlock(lastBlock.uuid, lastBlock.content.length)
+        } else {
+          focusBlock(uuid, currentBlock.content.length)
+        }
         break
       }
     }
