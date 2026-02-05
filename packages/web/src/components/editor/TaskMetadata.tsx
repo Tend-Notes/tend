@@ -242,6 +242,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
           </svg>
+          <span>View entries</span>
           <span className="font-mono">{formatDuration(totalTimeWorked)}</span>
           <span className="text-base-03">({workLog.length})</span>
         </button>
@@ -251,27 +252,27 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
     {/* Expanded Work Log Panel - accordion style, inline below metadata */}
     {showWorkLog && workLog.length > 0 && (
       <div className="mt-2 ml-0.5 text-xs border-l-2 border-base-02 pl-3">
-        <table className="w-full max-w-md">
+        <table className="max-w-lg">
           <thead>
             <tr className="text-base-04 border-b border-base-02">
-              <th className="text-left py-1 pr-4 font-medium">Date</th>
-              <th className="text-right py-1 pr-4 font-medium">Duration</th>
+              <th className="text-left py-1 pr-2 font-medium w-16">Date</th>
+              <th className="text-right py-1 pr-3 font-medium w-14">Time</th>
               <th className="text-left py-1 font-medium">Notes</th>
             </tr>
           </thead>
           <tbody>
             {workLog.map((entry, i) => (
               <tr key={i} className="border-b border-base-01 last:border-0">
-                <td className="py-1 pr-4 text-base-04">{formatLogDate(entry.startedAt)}</td>
-                <td className="py-1 pr-4 text-right font-mono">{formatDuration(entry.durationMs)}</td>
+                <td className="py-1 pr-2 text-base-04 whitespace-nowrap">{formatLogDate(entry.startedAt)}</td>
+                <td className="py-1 pr-3 text-right font-mono whitespace-nowrap">{formatDuration(entry.durationMs)}</td>
                 <td className="py-1 text-base-05">{entry.notes || '-'}</td>
               </tr>
             ))}
           </tbody>
           <tfoot>
             <tr className="border-t border-base-02 font-medium">
-              <td className="py-1 pr-4 text-base-05">Total</td>
-              <td className="py-1 pr-4 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
+              <td className="py-1 pr-2 text-base-05">Total</td>
+              <td className="py-1 pr-3 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
               <td></td>
             </tr>
           </tfoot>
