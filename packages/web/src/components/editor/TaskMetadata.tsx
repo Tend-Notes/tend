@@ -236,10 +236,10 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
 
     {/* View entries bar - full width, expands to show work log */}
     {workLog.length > 0 && (
-      <div className="mt-1 w-full">
+      <div className="mt-1 w-full border border-base-02 rounded bg-base-02">
         <button
           onClick={() => setShowWorkLog(!showWorkLog)}
-          className="w-full flex items-center justify-between px-2 py-1 text-xs border border-base-02 hover:border-base-03 rounded transition-colors text-base-04 hover:text-base-05"
+          className="w-full flex items-center justify-between px-2 py-1 text-xs transition-colors text-base-04 hover:text-base-05"
         >
           <span>View entries ({workLog.length})</span>
           {/* Chevron icon - points down when collapsed, up when expanded */}
@@ -256,10 +256,10 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
 
         {/* Expanded Work Log Table */}
         {showWorkLog && (
-          <div className="mt-1 px-2 py-2 bg-base-01 rounded text-xs">
+          <div className="px-2 py-2 text-xs border-t border-base-03">
             <table className="w-full">
               <thead>
-                <tr className="text-base-04 border-b border-base-02">
+                <tr className="text-base-04 border-b border-base-03">
                   <th className="text-left py-1 pr-2 font-medium w-16">Date</th>
                   <th className="text-right py-1 pr-3 font-medium w-14">Time</th>
                   <th className="text-left py-1 font-medium">Notes</th>
@@ -267,7 +267,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
               </thead>
               <tbody>
                 {workLog.map((entry, i) => (
-                  <tr key={i} className="border-b border-base-01 last:border-0">
+                  <tr key={i} className="border-b border-base-03/50 last:border-0">
                     <td className="py-1 pr-2 text-base-04 whitespace-nowrap">{formatLogDate(entry.startedAt)}</td>
                     <td className="py-1 pr-3 text-right font-mono whitespace-nowrap">{formatDuration(entry.durationMs)}</td>
                     <td className="py-1 text-base-05">{entry.notes || '-'}</td>
@@ -275,7 +275,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
                 ))}
               </tbody>
               <tfoot>
-                <tr className="border-t border-base-02 font-medium">
+                <tr className="border-t border-base-03 font-medium">
                   <td className="py-1 pr-2 text-base-05">Total</td>
                   <td className="py-1 pr-3 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
                   <td></td>
