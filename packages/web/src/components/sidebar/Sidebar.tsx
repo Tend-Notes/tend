@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { useTagStore } from '../../stores/tagStore'
+import { todos as todosApi, type TaskItem } from '../../lib/api'
+import { formatDateYMD } from '../../lib/dateUtils'
 import { SidebarOptions } from './SidebarOptions'
 import { SidebarTags } from './SidebarTags'
 import { SidebarTodos } from './SidebarTodos'
@@ -40,10 +42,52 @@ interface SidebarProps {
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const { currentPageName, currentPage, navigateToPage, navigateToJournal, loadTodaysJournal } =
     usePageStore()
-  const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar } = useUIStore()
+  const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar, setTodoFilter } = useUIStore()
   const { contentTypes } = useSettingsStore()
   const { recentSheets, recentTags } = useRecentSheetsStore()
   const getTagColors = useTagStore((state) => state.getTagColors)
+
+  // Task counts for navigation panel
+  const [taskItems, setTaskItems] = useState<TaskItem[]>([])
+  const pageVersion = currentPage?.version
+
+  useEffect(() => {
+    let cancelled = false
+    async function fetchTaskCounts() {
+      try {
+        const data = await todosApi.list()
+        if (!cancelled) {
+          setTaskItems(data.tasks)
+        }
+      } catch {
+        // Silently fail - task counts are non-critical
+      }
+    }
+    fetchTaskCounts()
+    return () => { cancelled = true }
+  }, [pageVersion]) // Re-fetch when page version changes (after save)
+
+  const taskCounts = useMemo(() => {
+    const todayStr = formatDateYMD(new Date())
+    let todayCount = 0
+    let overdueCount = 0
+    for (const task of taskItems) {
+      const isCompleted = task.status === 'DONE' || task.status === 'NEVER'
+      if (isCompleted) continue
+      if (task.dueDate === todayStr || task.startDate === todayStr) {
+        todayCount++
+      }
+      if (task.dueDate && task.dueDate < todayStr) {
+        overdueCount++
+      }
+    }
+    return { todayCount, overdueCount }
+  }, [taskItems])
+
+  const handleTaskCountClick = (filter: 'today' | 'overdue') => {
+    setTodoFilter(filter)
+    onModeChange('todos')
+  }
 
   // Visual width during drag (can exceed bounds for bounceback effect)
   const [visualWidth, setVisualWidth] = useState(sidebarWidth)
@@ -166,6 +210,51 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 </svg>
               </button>
             </div>
+
+            {/* Tasks summary - Today and Overdue counts */}
+            {(taskCounts.todayCount > 0 || taskCounts.overdueCount > 0) && (
+              <div className="px-3 pb-2">
+                <h2 className="px-2 py-1 text-xs text-base-03 uppercase tracking-wide">
+                  Tasks
+                </h2>
+                <div className="flex flex-col gap-0.5">
+                  {taskCounts.todayCount > 0 && (
+                    <button
+                      onClick={() => handleTaskCountClick('today')}
+                      className="flex items-center justify-between w-full px-2 py-1 text-sm text-base-04 hover:text-base-05 transition-colors rounded hover:bg-base-01"
+                    >
+                      <span>Today</span>
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded"
+                        style={{
+                          backgroundColor: 'color-mix(in srgb, var(--base0E) 15%, transparent)',
+                          color: 'var(--base0E)',
+                        }}
+                      >
+                        {taskCounts.todayCount}
+                      </span>
+                    </button>
+                  )}
+                  {taskCounts.overdueCount > 0 && (
+                    <button
+                      onClick={() => handleTaskCountClick('overdue')}
+                      className="flex items-center justify-between w-full px-2 py-1 text-sm text-base-04 hover:text-base-05 transition-colors rounded hover:bg-base-01"
+                    >
+                      <span>Overdue</span>
+                      <span
+                        className="text-xs px-1.5 py-0.5 rounded"
+                        style={{
+                          backgroundColor: 'color-mix(in srgb, var(--base08) 15%, transparent)',
+                          color: 'var(--base08)',
+                        }}
+                      >
+                        {taskCounts.overdueCount}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Navigation - shows recently accessed sheets per content type */}
             <div className="flex-1 overflow-y-auto px-3">

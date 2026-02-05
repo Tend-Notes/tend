@@ -5,14 +5,15 @@ import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import { todos as todosApi, type TaskItem } from '../../lib/api'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
-import { formatShortDate, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils'
+import { useUIStore, type TodoFilterMode } from '../../stores/uiStore'
+import { formatShortDate, formatDateYMD, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils'
 import { getPriorityDisplay } from '../ui/PriorityPickerPopover'
 
 interface SidebarTodosProps {
   onBack: () => void
 }
 
-type FilterMode = 'all' | 'active' | 'completed'
+type FilterMode = TodoFilterMode
 type SortMode = 'status' | 'page' | 'due' | 'priority'
 
 // Get color for a status keyword
@@ -95,8 +96,25 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
   const [tasks, setTasks] = useState<TaskItem[]>([])
   const [hasFetched, setHasFetched] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [filter, setFilter] = useState<FilterMode>('active')
   const [sort, setSort] = useState<SortMode>('status')
+
+  // Read initial filter from uiStore (set by sidebar navigation task counts)
+  const todoFilter = useUIStore((state) => state.todoFilter)
+  const setTodoFilter = useUIStore((state) => state.setTodoFilter)
+  const [filter, setFilter] = useState<FilterMode>(todoFilter ?? 'active')
+
+  // Sync filter when todoFilter changes (e.g., clicking "Today" or "Overdue" in nav)
+  useEffect(() => {
+    if (todoFilter) {
+      setFilter(todoFilter)
+      // Also set sort to 'due' for date-based filters
+      if (todoFilter === 'today' || todoFilter === 'overdue') {
+        setSort('due')
+      }
+      // Clear the store filter so it doesn't re-apply on re-renders
+      setTodoFilter(null)
+    }
+  }, [todoFilter, setTodoFilter])
 
   const { navigateToPage, navigateToJournal, currentPage, setPendingScrollTarget } = usePageStore()
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
@@ -130,10 +148,22 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
 
   // Filter tasks
   const filteredTasks = useMemo(() => {
+    const todayStr = formatDateYMD(new Date())
     return tasks.filter((task) => {
       if (filter === 'all') return true
       if (filter === 'active') return !isCompletedStatus(task.status)
       if (filter === 'completed') return isCompletedStatus(task.status)
+      if (filter === 'today') {
+        // Tasks with due_date = today OR start_date = today (active only)
+        if (isCompletedStatus(task.status)) return false
+        return task.dueDate === todayStr || task.startDate === todayStr
+      }
+      if (filter === 'overdue') {
+        // Tasks with due_date < today that are not completed
+        if (isCompletedStatus(task.status)) return false
+        if (!task.dueDate) return false
+        return task.dueDate < todayStr
+      }
       return true
     })
   }, [tasks, filter])
@@ -235,7 +265,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
 
       {/* Filter and sort controls */}
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-base-02">
-        <div className="flex gap-1">
+        <div className="flex gap-1 flex-wrap">
           <button
             onClick={() => setFilter('active')}
             className={`px-2 py-1 text-xs rounded transition-colors ${
@@ -247,6 +277,26 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
             Active
           </button>
           <button
+            onClick={() => setFilter('today')}
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              filter === 'today'
+                ? 'bg-base-02 text-base-05'
+                : 'text-base-04 hover:text-base-05'
+            }`}
+          >
+            Today
+          </button>
+          <button
+            onClick={() => setFilter('overdue')}
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              filter === 'overdue'
+                ? 'bg-base-02 text-base-05'
+                : 'text-base-04 hover:text-base-05'
+            }`}
+          >
+            Overdue
+          </button>
+          <button
             onClick={() => setFilter('completed')}
             className={`px-2 py-1 text-xs rounded transition-colors ${
               filter === 'completed'
@@ -254,7 +304,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
                 : 'text-base-04 hover:text-base-05'
             }`}
           >
-            Completed
+            Done
           </button>
           <button
             onClick={() => setFilter('all')}
@@ -343,6 +393,10 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
           <div className="text-center text-base-04 text-sm py-8">
             {filter === 'active'
               ? 'No active tasks. Use TODO, DOING, or NOW to create tasks.'
+              : filter === 'today'
+              ? 'No tasks due or starting today.'
+              : filter === 'overdue'
+              ? 'No overdue tasks.'
               : filter === 'completed'
               ? 'No completed tasks yet.'
               : 'No tasks found.'}

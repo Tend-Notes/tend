@@ -8,6 +8,9 @@ import type { ContentType } from './settingsStore'
 // Sidebar modes
 export type SidebarMode = 'navigation' | 'history' | 'graph' | 'options' | 'tags' | 'todos'
 
+// Filter mode for the todos panel (set before switching to 'todos' mode)
+export type TodoFilterMode = 'all' | 'active' | 'completed' | 'today' | 'overdue'
+
 interface UIState {
   // Sidebar
   sidebarOpen: boolean
@@ -25,6 +28,9 @@ interface UIState {
   pendingContentType: ContentType | null
   /** Callback to invoke when a sheet is created (e.g., to insert a link) */
   onSheetCreated: ((link: string) => void) | null
+
+  // Todos filter (set before switching sidebar to 'todos' mode)
+  todoFilter: TodoFilterMode | null
 
   // Import dialog
   importDialogOpen: boolean
@@ -52,6 +58,7 @@ interface UIState {
   openCommandPaletteForContentType: (contentType: ContentType, onCreated?: (link: string) => void) => void
   closeCommandPalette: () => void
   clearPendingContentType: () => void
+  setTodoFilter: (filter: TodoFilterMode | null) => void
   openImportDialog: () => void
   closeImportDialog: () => void
   setInsertTextAtCursor: (fn: ((text: string) => void) | null) => void
@@ -110,6 +117,10 @@ export const useUIStore = create<UIState>()(
       closeCommandPalette: () => set({ commandPaletteOpen: false, pendingContentType: null, onSheetCreated: null }),
       clearPendingContentType: () => set({ pendingContentType: null }),
 
+      // Todos filter
+      todoFilter: null as TodoFilterMode | null,
+      setTodoFilter: (filter) => set({ todoFilter: filter }),
+
       // Import dialog
       importDialogOpen: false,
       openImportDialog: () => set({ importDialogOpen: true }),
@@ -131,6 +142,7 @@ export const useUIStore = create<UIState>()(
         commandPaletteOpen: false,
         pendingContentType: null,
         onSheetCreated: null,
+        todoFilter: null,
         importDialogOpen: false,
         insertTextAtCursor: null,
         lastFocusedBlockUuid: null,
@@ -148,6 +160,7 @@ export const useUIStore = create<UIState>()(
         commandPaletteOpen: false,
         pendingContentType: null,
         onSheetCreated: null,
+        todoFilter: null,
         importDialogOpen: false,
         insertTextAtCursor: null,
         lastFocusedBlockUuid: null,
