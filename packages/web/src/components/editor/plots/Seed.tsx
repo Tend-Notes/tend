@@ -59,8 +59,8 @@ export type SeedBoundaryEvent =
   | { type: 'shift-tab' }
   | { type: 'alt-arrow-up' }
   | { type: 'alt-arrow-down' }
-  | { type: 'shift-arrow-up' }
-  | { type: 'shift-arrow-down' }
+  | { type: 'shift-arrow-up'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
+  | { type: 'shift-arrow-down'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
 
 export interface SeedHandle {
   focus: () => void
@@ -521,19 +521,47 @@ const ActiveSeed = forwardRef<SeedHandle, {
             return true
           },
         },
-        // Shift+Arrow Up - extend block selection
+        // Shift+Arrow Up - at first line boundary, deactivate for cross-block text selection
         {
           key: 'Shift-ArrowUp',
-          run: () => {
-            onBoundaryEventRef.current({ type: 'shift-arrow-up' })
+          run: (view) => {
+            const sel = view.state.selection.main
+            const line = view.state.doc.lineAt(sel.head)
+            // Only fire boundary event when on the first line
+            if (line.number !== 1) return false
+
+            // Get coordinates for anchor and head of the current selection
+            const anchorRect = view.coordsAtPos(sel.anchor)
+            const headRect = view.coordsAtPos(sel.head)
+            if (!anchorRect || !headRect) return false
+
+            onBoundaryEventRef.current({
+              type: 'shift-arrow-up',
+              anchorCoords: { x: anchorRect.left, y: (anchorRect.top + anchorRect.bottom) / 2 },
+              headCoords: { x: headRect.left, y: (headRect.top + headRect.bottom) / 2 },
+            })
             return true
           },
         },
-        // Shift+Arrow Down - extend block selection
+        // Shift+Arrow Down - at last line boundary, deactivate for cross-block text selection
         {
           key: 'Shift-ArrowDown',
-          run: () => {
-            onBoundaryEventRef.current({ type: 'shift-arrow-down' })
+          run: (view) => {
+            const sel = view.state.selection.main
+            const line = view.state.doc.lineAt(sel.head)
+            // Only fire boundary event when on the last line
+            if (line.number !== view.state.doc.lines) return false
+
+            // Get coordinates for anchor and head of the current selection
+            const anchorRect = view.coordsAtPos(sel.anchor)
+            const headRect = view.coordsAtPos(sel.head)
+            if (!anchorRect || !headRect) return false
+
+            onBoundaryEventRef.current({
+              type: 'shift-arrow-down',
+              anchorCoords: { x: anchorRect.left, y: (anchorRect.top + anchorRect.bottom) / 2 },
+              headCoords: { x: headRect.left, y: (headRect.top + headRect.bottom) / 2 },
+            })
             return true
           },
         },

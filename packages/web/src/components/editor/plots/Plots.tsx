@@ -124,7 +124,6 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const updateCurrentPage = onBlocksChange ?? updateCurrentPageFromStore
   const {
     setFocusedBlock,
-    extendSelectionInDirection,
     clearSelection,
     isInSelection,
   } = useSelectionStore()
@@ -187,27 +186,6 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const codeFenceMap = useMemo(() => {
     return detectCodeFences(flatBlockOrder, page.blocks)
   }, [flatBlockOrder, page.blocks])
-
-  // Get fresh flat block order directly from store (not memoized, for selection)
-  // This is needed because the memoized flatBlockOrder may be stale after state updates
-  const getFreshFlatBlockOrder = useCallback((): string[] => {
-    const currentPage = usePageStore.getState().currentPage
-    if (!currentPage) return []
-    const result: string[] = []
-    const traverse = (uuids: string[]) => {
-      for (const uuid of uuids) {
-        const block = currentPage.blocks[uuid]
-        if (block) {
-          result.push(uuid)
-          if (!block.collapsed && block.children.length > 0) {
-            traverse(block.children)
-          }
-        }
-      }
-    }
-    traverse(currentPage.rootBlocks)
-    return result
-  }, [])
 
   // Convert blocks object to array for saving (deterministic tree order)
   const getAllBlocks = useCallback((): Block[] => {
@@ -852,14 +830,120 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         break
 
       case 'shift-arrow-up': {
-        const freshOrder = getFreshFlatBlockOrder()
-        extendSelectionInDirection('up', freshOrder)
+        // Deactivate the seed and create a native cross-block text selection
+        const anchorCoordsUp = event.anchorCoords
+        const headCoordsUp = event.headCoords
+        setActiveBlockUuid(null)
+
+        // After dormant HTML renders, set up native selection
+        requestAnimationFrame(() => {
+          const doc = document as Document & {
+            caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+          }
+
+          // Find the anchor position in the dormant DOM
+          let anchorNode: Node | null = null
+          let anchorOffset = 0
+          if (doc.caretPositionFromPoint) {
+            const pos = doc.caretPositionFromPoint(anchorCoordsUp.x, anchorCoordsUp.y)
+            if (pos) { anchorNode = pos.offsetNode; anchorOffset = pos.offset }
+          } else if (document.caretRangeFromPoint) {
+            const range = document.caretRangeFromPoint(anchorCoordsUp.x, anchorCoordsUp.y)
+            if (range) { anchorNode = range.startContainer; anchorOffset = range.startOffset }
+          }
+
+          if (!anchorNode) return
+
+          try {
+            // Set the anchor first as a collapsed selection
+            const sel = window.getSelection()
+            if (!sel) return
+            sel.removeAllRanges()
+            const range = document.createRange()
+            range.setStart(anchorNode, anchorOffset)
+            range.collapse(true)
+            sel.addRange(range)
+
+            // Extend from the anchor toward the previous block by finding a position
+            // one line-height above the head coordinates
+            const lineHeight = 24 // approximate line height
+            const targetY = headCoordsUp.y - lineHeight
+            let extNode: Node | null = null
+            let extOffset = 0
+            if (doc.caretPositionFromPoint) {
+              const pos = doc.caretPositionFromPoint(headCoordsUp.x, targetY)
+              if (pos) { extNode = pos.offsetNode; extOffset = pos.offset }
+            } else if (document.caretRangeFromPoint) {
+              const r = document.caretRangeFromPoint(headCoordsUp.x, targetY)
+              if (r) { extNode = r.startContainer; extOffset = r.startOffset }
+            }
+
+            if (extNode) {
+              sel.extend(extNode, extOffset)
+            }
+          } catch {
+            // Selection API can throw if nodes are invalid
+          }
+        })
         break
       }
 
       case 'shift-arrow-down': {
-        const freshOrder = getFreshFlatBlockOrder()
-        extendSelectionInDirection('down', freshOrder)
+        // Deactivate the seed and create a native cross-block text selection
+        const anchorCoordsDown = event.anchorCoords
+        const headCoordsDown = event.headCoords
+        setActiveBlockUuid(null)
+
+        // After dormant HTML renders, set up native selection
+        requestAnimationFrame(() => {
+          const doc = document as Document & {
+            caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+          }
+
+          // Find the anchor position in the dormant DOM
+          let anchorNode: Node | null = null
+          let anchorOffset = 0
+          if (doc.caretPositionFromPoint) {
+            const pos = doc.caretPositionFromPoint(anchorCoordsDown.x, anchorCoordsDown.y)
+            if (pos) { anchorNode = pos.offsetNode; anchorOffset = pos.offset }
+          } else if (document.caretRangeFromPoint) {
+            const range = document.caretRangeFromPoint(anchorCoordsDown.x, anchorCoordsDown.y)
+            if (range) { anchorNode = range.startContainer; anchorOffset = range.startOffset }
+          }
+
+          if (!anchorNode) return
+
+          try {
+            // Set the anchor first as a collapsed selection
+            const sel = window.getSelection()
+            if (!sel) return
+            sel.removeAllRanges()
+            const range = document.createRange()
+            range.setStart(anchorNode, anchorOffset)
+            range.collapse(true)
+            sel.addRange(range)
+
+            // Extend from the anchor toward the next block by finding a position
+            // one line-height below the head coordinates
+            const lineHeight = 24 // approximate line height
+            const targetY = headCoordsDown.y + lineHeight
+            let extNode: Node | null = null
+            let extOffset = 0
+            if (doc.caretPositionFromPoint) {
+              const pos = doc.caretPositionFromPoint(headCoordsDown.x, targetY)
+              if (pos) { extNode = pos.offsetNode; extOffset = pos.offset }
+            } else if (document.caretRangeFromPoint) {
+              const r = document.caretRangeFromPoint(headCoordsDown.x, targetY)
+              if (r) { extNode = r.startContainer; extOffset = r.startOffset }
+            }
+
+            if (extNode) {
+              sel.extend(extNode, extOffset)
+            }
+          } catch {
+            // Selection API can throw if nodes are invalid
+          }
+        })
         break
       }
     }
@@ -870,8 +954,6 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     handleMergeWithNext,
     navigateUp,
     navigateDown,
-    extendSelectionInDirection,
-    getFreshFlatBlockOrder,
     handleIndent,
     handleOutdent,
     handleMoveUp,
