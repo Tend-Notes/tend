@@ -49,7 +49,13 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
 
   const handleStartTimer = () => {
     if (!currentPage || !taskContent) return
-    startSession(blockUuid, currentPage.name, currentPage.isJournal, taskContent)
+    startSession(
+      blockUuid,
+      currentPage.name,
+      currentPage.contentType,
+      currentPage.journalDate ?? undefined,
+      taskContent
+    )
   }
 
   const dueDate = properties.due_date || null
@@ -83,8 +89,9 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
   }
 
   return (
+    <>
     <div
-      className="relative flex items-center gap-2 mt-1 ml-0.5 text-xs"
+      className="flex items-center gap-2 mt-1 ml-0.5 text-xs"
       onClick={stopPropagation}
     >
       {/* Due Date */}
@@ -239,39 +246,38 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
           <span className="text-base-03">({workLog.length})</span>
         </button>
       )}
-
-      {/* Expanded Work Log Table */}
-      {showWorkLog && workLog.length > 0 && (
-        <div className="absolute left-0 top-full mt-1 z-10 bg-base-00 border border-base-02 rounded shadow-lg p-2 min-w-[280px]">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-base-04 border-b border-base-02">
-                <th className="text-left py-1 pr-3 font-medium">Date</th>
-                <th className="text-right py-1 pr-3 font-medium">Duration</th>
-                <th className="text-left py-1 font-medium">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {workLog.map((entry, i) => (
-                <tr key={i} className="border-b border-base-01 last:border-0">
-                  <td className="py-1 pr-3 text-base-04">{formatLogDate(entry.startedAt)}</td>
-                  <td className="py-1 pr-3 text-right font-mono">{formatDuration(entry.durationMs)}</td>
-                  <td className="py-1 text-base-05 max-w-[150px] truncate" title={entry.notes}>
-                    {entry.notes || '-'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t border-base-02 font-medium">
-                <td className="py-1 pr-3 text-base-05">Total</td>
-                <td className="py-1 pr-3 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-      )}
     </div>
+
+    {/* Expanded Work Log Panel - accordion style, inline below metadata */}
+    {showWorkLog && workLog.length > 0 && (
+      <div className="mt-2 ml-0.5 text-xs border-l-2 border-base-02 pl-3">
+        <table className="w-full max-w-md">
+          <thead>
+            <tr className="text-base-04 border-b border-base-02">
+              <th className="text-left py-1 pr-4 font-medium">Date</th>
+              <th className="text-right py-1 pr-4 font-medium">Duration</th>
+              <th className="text-left py-1 font-medium">Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {workLog.map((entry, i) => (
+              <tr key={i} className="border-b border-base-01 last:border-0">
+                <td className="py-1 pr-4 text-base-04">{formatLogDate(entry.startedAt)}</td>
+                <td className="py-1 pr-4 text-right font-mono">{formatDuration(entry.durationMs)}</td>
+                <td className="py-1 text-base-05">{entry.notes || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="border-t border-base-02 font-medium">
+              <td className="py-1 pr-4 text-base-05">Total</td>
+              <td className="py-1 pr-4 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    )}
+  </>
   )
 }

@@ -6,7 +6,8 @@ import { create } from 'zustand'
 export interface WorkSession {
   blockUuid: string
   pageName: string
-  isJournal: boolean
+  contentType: string // "page", "journal", or custom content type ID
+  sheetDate?: string // For date-organized content types (journals, etc.)
   taskContent: string
   startedAt: string // ISO 8601
   pausedAt?: string // ISO 8601, set when paused
@@ -28,7 +29,7 @@ interface WorkSessionState {
   showContinuePrompt: boolean
 
   // Actions
-  startSession: (blockUuid: string, pageName: string, isJournal: boolean, taskContent: string) => void
+  startSession: (blockUuid: string, pageName: string, contentType: string, sheetDate: string | undefined, taskContent: string) => void
   pauseSession: () => void
   resumeSession: () => void
   stopSession: (notes: string) => WorkLogEntry | null
@@ -43,12 +44,13 @@ export const useWorkSessionStore = create<WorkSessionState>()((set, get) => ({
   activeSession: null,
   showContinuePrompt: false,
 
-  startSession: (blockUuid, pageName, isJournal, taskContent) => {
+  startSession: (blockUuid, pageName, contentType, sheetDate, taskContent) => {
     set({
       activeSession: {
         blockUuid,
         pageName,
-        isJournal,
+        contentType,
+        sheetDate,
         taskContent,
         startedAt: new Date().toISOString(),
         accumulatedMs: 0,

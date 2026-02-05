@@ -2,9 +2,10 @@
 // Work timer banner - shows active task timer at top of app
 
 import { useState, useEffect, useCallback } from 'react'
-import { useWorkSessionStore, type WorkLogEntry } from '../../stores/workSessionStore'
+import { useWorkSessionStore, type WorkLogEntry, type WorkSession } from '../../stores/workSessionStore'
 import { usePageStore } from '../../stores/pageStore'
-import { pages, journals, pageBlocksToApiFormat } from '../../lib/api'
+import { pages, journals, sheets, pageBlocksToApiFormat } from '../../lib/api'
+import type { Page } from '../../types'
 
 // Format milliseconds as HH:MM:SS
 function formatDuration(ms: number): string {
@@ -19,20 +20,42 @@ function formatDuration(ms: number): string {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
 }
 
+// Fetch a page by its session info (handles all content types)
+async function fetchPage(session: WorkSession): Promise<Page> {
+  const { pageName, contentType, sheetDate } = session
+  if (contentType === 'journal') {
+    return journals.get(pageName)
+  } else if (contentType === 'page') {
+    return pages.get(pageName)
+  } else {
+    return sheets.get(contentType, pageName, sheetDate)
+  }
+}
+
+// Save a page by its session info (handles all content types)
+async function savePage(session: WorkSession, page: Page): Promise<void> {
+  const { pageName, contentType, sheetDate } = session
+  const blockData = pageBlocksToApiFormat(page)
+  if (contentType === 'journal') {
+    await journals.update(pageName, blockData, page.version)
+  } else if (contentType === 'page') {
+    await pages.update(pageName, blockData, page.version)
+  } else {
+    await sheets.update(contentType, pageName, blockData, page.version, sheetDate)
+  }
+}
+
 // Save work log entry to block properties
 async function saveWorkLogToBlock(
-  pageName: string,
-  isJournal: boolean,
-  blockUuid: string,
+  session: WorkSession,
   entry: WorkLogEntry
 ): Promise<void> {
-  // Fetch the current page/journal
-  const page = isJournal ? await journals.get(pageName) : await pages.get(pageName)
+  const page = await fetchPage(session)
 
   // Find the block
-  const block = page.blocks[blockUuid]
+  const block = page.blocks[session.blockUuid]
   if (!block) {
-    console.error('Block not found for work log:', blockUuid)
+    console.error('Block not found for work log:', session.blockUuid)
     return
   }
 
@@ -53,12 +76,7 @@ async function saveWorkLogToBlock(
   block.properties.work_log = JSON.stringify(workLog)
 
   // Save the page
-  const blockData = pageBlocksToApiFormat(page)
-  if (isJournal) {
-    await journals.update(pageName, blockData, page.version)
-  } else {
-    await pages.update(pageName, blockData, page.version)
-  }
+  await savePage(session, page)
 }
 
 export function WorkTimerBanner() {
@@ -94,8 +112,8 @@ export function WorkTimerBanner() {
   const handleNavigateToTask = useCallback(() => {
     if (!activeSession) return
 
-    if (activeSession.pageName.startsWith('journals/')) {
-      navigateToJournal(activeSession.pageName.replace('journals/', ''))
+    if (activeSession.contentType === 'journal') {
+      navigateToJournal(activeSession.pageName)
     } else {
       navigateToPage(activeSession.pageName)
     }
@@ -110,23 +128,23 @@ export function WorkTimerBanner() {
     if (!activeSession) return
 
     setIsSaving(true)
+    // Capture session before stopping (stopSession clears it)
+    const sessionToSave = { ...activeSession }
     try {
-      // Capture session info before stopping
-      const { pageName, isJournal, blockUuid } = activeSession
       const entry = useWorkSessionStore.getState().stopSession(stopNotes)
 
       if (entry) {
         // Save work log entry to block properties
-        await saveWorkLogToBlock(pageName, isJournal, blockUuid, entry)
+        await saveWorkLogToBlock(sessionToSave, entry)
 
         // Refresh the current page if it's the one we updated
         const currentPage = usePageStore.getState().currentPage
-        if (currentPage?.name === pageName) {
+        if (currentPage?.name === sessionToSave.pageName) {
           // Re-fetch the page to get the updated work log
-          if (isJournal) {
-            usePageStore.getState().navigateToJournal(pageName, false)
+          if (sessionToSave.contentType === 'journal') {
+            usePageStore.getState().navigateToJournal(sessionToSave.pageName, false)
           } else {
-            usePageStore.getState().navigateToPage(pageName, false)
+            usePageStore.getState().navigateToPage(sessionToSave.pageName, false)
           }
         }
       }
