@@ -303,18 +303,24 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     [getAllBlocks, updateCurrentPage]
   )
 
-  const handleCreateBlock = useCallback(
-    (afterUuid: string, contentForNewBlock: string = ''): string => {
+  // Split a block at a cursor position: truncate current block and create a new
+  // block with the remainder. Both mutations happen in a single updateCurrentPage
+  // call so there is no stale-state race between the truncation and the insertion.
+  const handleSplitBlock = useCallback(
+    (uuid: string, contentBefore: string, contentAfter: string): string => {
       const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
-      const afterBlock = blocks.find((b) => b.uuid === afterUuid)
-      if (!afterBlock) return afterUuid
+      const afterBlock = blocks.find((b) => b.uuid === uuid)
+      if (!afterBlock) return uuid
+
+      // Truncate the current block
+      afterBlock.content = contentBefore
 
       const hasVisibleChildren = afterBlock.children.length > 0 && !afterBlock.collapsed
 
       const newBlock: Block = {
         uuid: uuidv4(),
-        content: contentForNewBlock,
-        parentUuid: hasVisibleChildren ? afterUuid : afterBlock.parentUuid,
+        content: contentAfter,
+        parentUuid: hasVisibleChildren ? uuid : afterBlock.parentUuid,
         children: [],
         collapsed: false,
         properties: {},
@@ -327,7 +333,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       } else if (afterBlock.parentUuid) {
         const parent = blocks.find((b) => b.uuid === afterBlock.parentUuid)
         if (parent) {
-          const afterIndex = parent.children.indexOf(afterUuid)
+          const afterIndex = parent.children.indexOf(uuid)
           parent.children = [
             ...parent.children.slice(0, afterIndex + 1),
             newBlock.uuid,
@@ -336,7 +342,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         }
         updateCurrentPage([...blocks, newBlock])
       } else {
-        const afterIndex = page.rootBlocks.indexOf(afterUuid)
+        const afterIndex = page.rootBlocks.indexOf(uuid)
         const newRootBlocks = [
           ...page.rootBlocks.slice(0, afterIndex + 1),
           newBlock.uuid,
@@ -748,15 +754,13 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
           const newUuid = handleCreateBlockBefore(uuid)
           focusBlock(newUuid, 'start')
         } else {
-          // Split block at cursor (or create after for empty blocks)
+          // Split block at cursor (or create after for empty blocks).
+          // Uses handleSplitBlock to truncate and create in a single state
+          // update, avoiding a race where the second call reads stale state.
           const contentBefore = event.content.substring(0, event.cursorOffset)
           const contentAfter = event.content.substring(event.cursorOffset)
 
-          // Update current block with content before cursor
-          handleBlockChange(uuid, contentBefore)
-
-          // Create new block with content after cursor
-          const newUuid = handleCreateBlock(uuid, contentAfter)
+          const newUuid = handleSplitBlock(uuid, contentBefore, contentAfter)
           focusBlock(newUuid, 'start')
         }
         break
@@ -823,8 +827,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       }
     }
   }, [
-    handleBlockChange,
-    handleCreateBlock,
+    handleSplitBlock,
     handleCreateBlockBefore,
     handleMergeWithPrevious,
     handleMergeWithNext,
