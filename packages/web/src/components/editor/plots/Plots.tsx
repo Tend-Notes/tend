@@ -979,8 +979,6 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         // Detect if the pasted content looks like a markdown list (has list markers)
         const hasListMarkers = rawPastedLines.some((line) => /^\s*[-*]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line))
 
-        console.log('[paste-multiline]', { rawPastedLines, hasListMarkers, tendBlocks: !!tendBlocksRaw })
-
         // ── Tend-blocks paste (lossless internal round-trip) ───────────────
         // If the clipboard carries text/tend-blocks JSON, use it to reconstruct
         // the block tree exactly as it was copied, preserving all nesting.
@@ -1656,6 +1654,10 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
     // Use rAF to ensure the dormant DOM is fully painted before querying caret position
     requestAnimationFrame(() => {
+      // Focus the container first so it can receive keyboard events (e.g. Delete/Backspace).
+      // This must happen before setting up the selection range.
+      containerRef.current?.focus({ preventScroll: true })
+
       const doc = document as Document & {
         caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
       }
@@ -1697,123 +1699,144 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // Delete selected text across dormant blocks when Backspace/Delete is pressed
   // with a native cross-block selection active.
   const handleCrossBlockDelete = useCallback(() => {
-    const container = containerRef.current
-    if (!container) return false
+    try {
+      const container = containerRef.current
+      if (!container) return false
 
-    const selection = window.getSelection()
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
 
-    const range = selection.getRangeAt(0)
+      const range = selection.getRangeAt(0)
 
-    // Find block containers for start and end of selection
-    const findBlockContainer = (node: Node): HTMLElement | null => {
-      let el = node instanceof HTMLElement ? node : node.parentElement
-      while (el && el !== container) {
-        if (el.hasAttribute('data-block-id')) return el
-        el = el.parentElement
-      }
-      return null
-    }
+      // Find all blocks whose seed content intersects the selection range.
+      const allBlockEls = container.querySelectorAll('[data-block-id]')
+      let blockEls: HTMLElement[] = []
+      let blockUuids: string[] = []
 
-    const startBlock = findBlockContainer(range.startContainer)
-    const endBlock = findBlockContainer(range.endContainer)
-
-    // Must span at least two blocks for cross-block deletion
-    if (!startBlock || !endBlock || startBlock === endBlock) return false
-
-    const startUuid = startBlock.getAttribute('data-block-id')!
-    const endUuid = endBlock.getAttribute('data-block-id')!
-
-    // Gather all block UUIDs between start and end in DOM order
-    const allBlockEls = container.querySelectorAll('[data-block-id]')
-    const blockUuids: string[] = []
-    let inRange = false
-    for (const el of allBlockEls) {
-      const uuid = el.getAttribute('data-block-id')!
-      if (uuid === startUuid) inRange = true
-      if (inRange) blockUuids.push(uuid)
-      if (uuid === endUuid) break
-    }
-
-    if (blockUuids.length < 2) return false
-
-    // Compute rendered text offset within a block's seed element
-    const getRenderedOffsetInBlock = (blockEl: HTMLElement, node: Node, localOffset: number): number => {
-      const seedEl = blockEl.querySelector('[data-seed-editor]')
-      if (!seedEl) return 0
-
-      let totalOffset = 0
-      const walker = document.createTreeWalker(seedEl, NodeFilter.SHOW_TEXT)
-      let textNode: Node | null
-      while ((textNode = walker.nextNode())) {
-        if (textNode === node) {
-          return totalOffset + localOffset
-        }
-        totalOffset += (textNode.textContent?.length ?? 0)
-      }
-      return totalOffset
-    }
-
-    // Get source offsets for the first and last blocks
-    const firstBlock = page.blocks[startUuid]
-    const lastBlock = page.blocks[endUuid]
-    if (!firstBlock || !lastBlock) return false
-
-    const firstRenderedOffset = getRenderedOffsetInBlock(startBlock, range.startContainer, range.startOffset)
-    const firstTokens = parseContent(firstBlock.content)
-    const firstSourceOffset = mapRenderedOffsetToSource(firstTokens, firstRenderedOffset)
-
-    const lastRenderedOffset = getRenderedOffsetInBlock(endBlock, range.endContainer, range.endOffset)
-    const lastTokens = parseContent(lastBlock.content)
-    const lastSourceOffset = mapRenderedOffsetToSource(lastTokens, lastRenderedOffset)
-
-    // Text to keep: before selection in first block + after selection in last block
-    const textBefore = firstBlock.content.slice(0, firstSourceOffset)
-    const textAfter = lastBlock.content.slice(lastSourceOffset)
-    const mergedContent = textBefore + textAfter
-    const cursorPos = textBefore.length
-
-    // Clear selection before modifying DOM
-    selection.removeAllRanges()
-
-    // Build the updated block list:
-    // - First block gets merged content
-    // - Middle blocks (fully selected) are removed
-    // - Last block is removed (its remaining text merged into first)
-    const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
-
-    // UUIDs to delete: everything except the first block
-    const uuidsToDelete = new Set(blockUuids.slice(1))
-
-    // Update the first block's content
-    const firstBlockObj = blocks.find((b) => b.uuid === startUuid)
-    if (firstBlockObj) {
-      firstBlockObj.content = mergedContent
-    }
-
-    // Remove deleted blocks from their parents' children arrays
-    for (const uuid of uuidsToDelete) {
-      const block = blocks.find((b) => b.uuid === uuid)
-      if (!block) continue
-
-      if (block.parentUuid) {
-        const parent = blocks.find((b) => b.uuid === block.parentUuid)
-        if (parent) {
-          parent.children = parent.children.filter((id) => id !== uuid)
+      for (const el of allBlockEls) {
+        const seedEl = el.querySelector('[data-seed-editor]')
+        if (seedEl && range.intersectsNode(seedEl)) {
+          blockEls.push(el as HTMLElement)
+          blockUuids.push(el.getAttribute('data-block-id')!)
         }
       }
+
+      // Fallback: if intersectsNode found < 2 blocks, try selection.containsNode
+      if (blockUuids.length < 2) {
+        blockEls = []
+        blockUuids = []
+        for (const el of allBlockEls) {
+          const seedEl = el.querySelector('[data-seed-editor]')
+          if (seedEl && selection.containsNode(seedEl, true)) {
+            blockEls.push(el as HTMLElement)
+            blockUuids.push(el.getAttribute('data-block-id')!)
+          }
+        }
+      }
+
+      if (blockUuids.length < 2) {
+        return false
+      }
+
+      const startBlock = blockEls[0]
+      const endBlock = blockEls[blockEls.length - 1]
+      const startUuid = blockUuids[0]
+      const endUuid = blockUuids[blockUuids.length - 1]
+
+      // Check if range endpoints are actually inside the detected blocks' seeds
+      const startSeed = startBlock.querySelector('[data-seed-editor]')
+      const endSeed = endBlock.querySelector('[data-seed-editor]')
+      const startInSeed = startSeed?.contains(range.startContainer)
+      const endInSeed = endSeed?.contains(range.endContainer)
+
+      // Compute rendered text offset within a block's seed element
+      const getRenderedOffsetInBlock = (blockEl: HTMLElement, node: Node, localOffset: number): number => {
+        const seedEl = blockEl.querySelector('[data-seed-editor]')
+        if (!seedEl) return 0
+
+        let totalOffset = 0
+        const walker = document.createTreeWalker(seedEl, NodeFilter.SHOW_TEXT)
+        let textNode: Node | null
+        while ((textNode = walker.nextNode())) {
+          if (textNode === node) {
+            return totalOffset + localOffset
+          }
+          totalOffset += (textNode.textContent?.length ?? 0)
+        }
+        return totalOffset
+      }
+
+      // Get source offsets for the first and last blocks
+      const firstBlock = page.blocks[startUuid]
+      const lastBlock = page.blocks[endUuid]
+      if (!firstBlock || !lastBlock) return false
+
+      const firstRenderedOffset = startInSeed
+        ? getRenderedOffsetInBlock(startBlock, range.startContainer, range.startOffset)
+        : 0
+      const firstTokens = parseContent(firstBlock.content)
+      const firstSourceOffset = startInSeed
+        ? mapRenderedOffsetToSource(firstTokens, firstRenderedOffset)
+        : 0
+
+      const lastRenderedOffset = endInSeed
+        ? getRenderedOffsetInBlock(endBlock, range.endContainer, range.endOffset)
+        : lastBlock.content.length
+      const lastTokens = parseContent(lastBlock.content)
+      const lastSourceOffset = endInSeed
+        ? mapRenderedOffsetToSource(lastTokens, lastRenderedOffset)
+        : lastBlock.content.length
+
+      // Text to keep: before selection in first block + after selection in last block
+      const textBefore = firstBlock.content.slice(0, firstSourceOffset)
+      const textAfter = lastBlock.content.slice(lastSourceOffset)
+      const mergedContent = textBefore + textAfter
+      const cursorPos = textBefore.length
+
+      // Clear selection before modifying DOM
+      selection.removeAllRanges()
+
+      // Build the updated block list:
+      // - First block gets merged content
+      // - Middle blocks (fully selected) are removed
+      // - Last block is removed (its remaining text merged into first)
+      const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+
+      // UUIDs to delete: everything except the first block
+      const uuidsToDelete = new Set(blockUuids.slice(1))
+
+      // Update the first block's content
+      const firstBlockObj = blocks.find((b) => b.uuid === startUuid)
+      if (firstBlockObj) {
+        firstBlockObj.content = mergedContent
+      }
+
+      // Remove deleted blocks from their parents' children arrays
+      for (const uuid of uuidsToDelete) {
+        const block = blocks.find((b) => b.uuid === uuid)
+        if (!block) continue
+
+        if (block.parentUuid) {
+          const parent = blocks.find((b) => b.uuid === block.parentUuid)
+          if (parent) {
+            parent.children = parent.children.filter((id) => id !== uuid)
+          }
+        }
+      }
+
+      // Filter out deleted blocks and compute new rootBlocks
+      const updatedBlocks = blocks.filter((b) => !uuidsToDelete.has(b.uuid))
+      const newRootBlocks = page.rootBlocks.filter((id) => !uuidsToDelete.has(id))
+
+      updateCurrentPage(updatedBlocks, newRootBlocks)
+
+      // Activate the merged block at the cursor position
+      focusBlock(startUuid, cursorPos)
+
+      return true
+    } catch {
+      return false
     }
-
-    // Filter out deleted blocks and compute new rootBlocks
-    const updatedBlocks = blocks.filter((b) => !uuidsToDelete.has(b.uuid))
-    const newRootBlocks = page.rootBlocks.filter((id) => !uuidsToDelete.has(id))
-
-    updateCurrentPage(updatedBlocks, newRootBlocks)
-
-    // Activate the merged block at the cursor position
-    focusBlock(startUuid, cursorPos)
-
-    return true
   }, [getAllBlocks, updateCurrentPage, focusBlock, page.blocks, page.rootBlocks])
 
   // Keyboard handler: when all seeds are dormant and the container has focus,
@@ -1969,44 +1992,49 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     if (!container) return
 
     const handleCopy = (e: ClipboardEvent) => {
+      try {
       const selection = window.getSelection()
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) return
 
       const range = selection.getRangeAt(0)
 
-      // Walk up from start and end nodes to find their block containers
-      const findBlockContainer = (node: Node): HTMLElement | null => {
-        let el = node instanceof HTMLElement ? node : node.parentElement
-        while (el && el !== container) {
-          if (el.hasAttribute('data-block-id')) return el
-          el = el.parentElement
-        }
-        return null
-      }
-
-      const startBlock = findBlockContainer(range.startContainer)
-      const endBlock = findBlockContainer(range.endContainer)
-
-      // If selection is entirely within one block, let the default handler
-      // (or CodeMirror) deal with it
-      if (!startBlock || !endBlock || startBlock === endBlock) return
-
-      // Selection spans multiple blocks - intercept and provide source markdown
-      const startUuid = startBlock.getAttribute('data-block-id')!
-      const endUuid = endBlock.getAttribute('data-block-id')!
-
-      // Gather all block containers between start and end in DOM order
+      // Find all blocks whose seed content intersects the selection range.
+      // We use intersectsNode on the seed element (not the block container)
+      // because block containers are nested (parent contains children in DOM),
+      // but seed elements are the actual text content of each block.
       const allBlockEls = container.querySelectorAll('[data-block-id]')
+      const blockEls: HTMLElement[] = []
       const blockUuids: string[] = []
-      let inRange = false
+
       for (const el of allBlockEls) {
-        const uuid = el.getAttribute('data-block-id')!
-        if (uuid === startUuid) inRange = true
-        if (inRange) blockUuids.push(uuid)
-        if (uuid === endUuid) break
+        const seedEl = el.querySelector('[data-seed-editor]')
+        if (seedEl && range.intersectsNode(seedEl)) {
+          blockEls.push(el as HTMLElement)
+          blockUuids.push(el.getAttribute('data-block-id')!)
+        }
       }
 
-      if (blockUuids.length === 0) return
+      // Fallback: if intersectsNode found < 2 blocks, try selection.containsNode
+      // which may work better with nested DOM structures in click-to-edit mode.
+      if (blockUuids.length < 2) {
+        blockEls.length = 0
+        blockUuids.length = 0
+        for (const el of allBlockEls) {
+          const seedEl = el.querySelector('[data-seed-editor]')
+          if (seedEl && selection.containsNode(seedEl, true)) {
+            blockEls.push(el as HTMLElement)
+            blockUuids.push(el.getAttribute('data-block-id')!)
+          }
+        }
+      }
+
+      // If selection is entirely within one block (or none), let the default handler deal with it
+      if (blockUuids.length < 2) {
+        return
+      }
+
+      const startBlock = blockEls[0]
+      const endBlock = blockEls[blockEls.length - 1]
 
       // Compute the rendered text offset within a block container's seed element.
       // Walks the text nodes of the seed element to find the total offset of the
@@ -2080,8 +2108,6 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         const indent = '  '.repeat(relativeDepth)
         fragments.push(`${indent}- ${content}`)
       }
-
-      console.log('[copy]', { blockCount: blockUuids.length, fragments })
 
       // ── Build text/tend-blocks JSON for lossless internal round-trip ──
       // CopiedBlock is a recursive tree structure carrying content + children.
@@ -2159,10 +2185,15 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
       const markdownContent = fragments.join('\n')
 
+      const tendBlocksJson = JSON.stringify(copiedBlocks)
+
       e.clipboardData?.setData('text/plain', markdownContent)
       e.clipboardData?.setData('text/html', selection.toString())
-      e.clipboardData?.setData('text/tend-blocks', JSON.stringify(copiedBlocks))
+      e.clipboardData?.setData('text/tend-blocks', tendBlocksJson)
       e.preventDefault()
+      } catch {
+        // Cross-block copy failed; fall back to default browser behavior
+      }
     }
 
     container.addEventListener('copy', handleCopy)

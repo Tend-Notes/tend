@@ -926,6 +926,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
         changes: { from: pos, insert: text },
         selection: { anchor: pos + text.length },
       })
+      view.focus()
 
       // Notify onChange
       const newContent = view.state.doc.toString()
