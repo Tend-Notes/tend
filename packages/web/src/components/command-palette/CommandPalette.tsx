@@ -5,6 +5,7 @@ import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore, type ContentType } from '../../stores/settingsStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
+import { useToastStore } from '../../stores/toastStore'
 import * as api from '../../lib/api'
 
 interface CommandPaletteProps {
@@ -80,6 +81,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [sheetError, setSheetError] = useState<string | null>(null)
   const [existingSheets, setExistingSheets] = useState<string[]>([])
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
+  const [reindexing, setReindexing] = useState(false)
   const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty } = usePageStore()
   const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
   const { contentTypes } = useSettingsStore()
@@ -101,6 +103,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setSheetDate('')
       setSheetError(null)
       setExistingSheets([])
+      setReindexing(false)
       clearPendingContentType()
     }
   }, [open, clearPendingContentType])
@@ -299,6 +302,27 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     await updateCurrentPageProperty('freeText', currentlyEnabled ? null : 'true')
     onOpenChange(false)
   }, [currentPage, updateCurrentPageProperty, onOpenChange])
+
+  // DEV: Rebuild all indices
+  const handleRebuildIndices = useCallback(async () => {
+    setReindexing(true)
+    try {
+      const result = await api.reindex.rebuildAll()
+      const total = result.pagesIndexed + result.journalsIndexed
+      useToastStore.getState().addToast(
+        `Rebuilt indices for ${total} pages (${result.pagesIndexed} pages, ${result.journalsIndexed} journals)`,
+        4000
+      )
+      onOpenChange(false)
+    } catch (err) {
+      useToastStore.getState().addToast(
+        `Reindex failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        4000
+      )
+    } finally {
+      setReindexing(false)
+    }
+  }, [onOpenChange])
 
   // Check if free text mode is currently enabled
   const isFreeTextEnabled = currentPage?.properties?.freeText === 'true'
@@ -608,6 +632,12 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
             {/* Dev Tools */}
             <Command.Group heading="Dev" className="mb-2">
+              <CommandItem
+                onSelect={handleRebuildIndices}
+                value="dev rebuild indices reindex backlinks search"
+              >
+                {reindexing ? 'DEV: Rebuilding indices...' : 'DEV: Rebuild Indices'}
+              </CommandItem>
               <CommandItem
                 onSelect={() => {
                   const next = forcedViewport === 'mobile' ? 'none' : 'mobile'

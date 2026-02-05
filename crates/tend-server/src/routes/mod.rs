@@ -25,6 +25,7 @@ mod templates;
 mod todos;
 mod import;
 mod user;
+mod reindex;
 
 /// Build the API router
 pub fn api_router() -> Router<Arc<AppState>> {
@@ -53,6 +54,8 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/blocks/status", get(blocks::status))
         .route("/blocks/rebuild", post(blocks::rebuild))
         .route("/blocks/{uuid}", get(blocks::get_block))
+        // Reindex (rebuild all indices at once)
+        .route("/reindex", post(reindex::reindex))
         // Tags
         .route("/tags", get(tags::list_tags))
         // Todos

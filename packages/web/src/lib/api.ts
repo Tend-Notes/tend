@@ -647,3 +647,21 @@ export const blocks = {
     return res.json()
   },
 }
+
+// Reindex API
+export interface ReindexResponse {
+  pagesIndexed: number
+  journalsIndexed: number
+  linkEntries: number
+  blockCount: number | null
+  searchDocs: number | null
+  message: string
+}
+
+export const reindex = {
+  /** Rebuild all indices (search, links, blocks) from disk */
+  rebuildAll: () =>
+    fetchJson<ReindexResponse>(`${API_BASE}/reindex`, {
+      method: 'POST',
+    }),
+}
