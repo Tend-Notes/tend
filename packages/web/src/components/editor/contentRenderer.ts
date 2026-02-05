@@ -643,3 +643,142 @@ export function mapRenderedOffsetToSource(
   // Offset is past all tokens - return end of source
   return sourcePos
 }
+
+/**
+ * Map from source-markdown offset (including **, ~~, ==, `, [[]], etc.) to
+ * rendered-text offset (what the user sees, no delimiters).
+ *
+ * Inverse of mapRenderedOffsetToSource. Walks the token list, accumulating
+ * both source length and rendered length. When the source offset falls within
+ * a token, maps to the corresponding rendered position.
+ */
+export function mapSourceOffsetToRendered(
+  tokens: ContentToken[],
+  sourceOffset: number
+): number {
+  let renderedPos = 0
+  let sourcePos = 0
+
+  for (const token of tokens) {
+    let renderedLen: number
+    let sourceLen: number
+
+    switch (token.type) {
+      case 'text':
+        renderedLen = token.content.length
+        sourceLen = token.content.length
+        break
+      case 'bold':
+        renderedLen = token.content.length
+        sourceLen = token.content.length + 4
+        break
+      case 'italic':
+        renderedLen = token.content.length
+        sourceLen = token.content.length + 2
+        break
+      case 'bolditalic':
+        renderedLen = token.content.length
+        sourceLen = token.content.length + 6
+        break
+      case 'strikethrough':
+        renderedLen = token.content.length
+        sourceLen = token.content.length + 4
+        break
+      case 'highlight':
+        renderedLen = token.content.length
+        sourceLen = token.content.length + 4
+        break
+      case 'code':
+        renderedLen = token.content.length
+        sourceLen = token.content.length + 2
+        break
+      case 'wikilink': {
+        const lastSlash = token.display.lastIndexOf('/')
+        const displayText = lastSlash >= 0 ? token.display.slice(lastSlash + 1) : token.display
+        renderedLen = displayText.length
+        if (token.target === token.display) {
+          sourceLen = token.target.length + 4
+        } else {
+          sourceLen = token.target.length + 1 + token.display.length + 4
+        }
+        break
+      }
+      case 'tag':
+        renderedLen = token.name.length + 1
+        sourceLen = token.name.length + 1
+        break
+      case 'url':
+        renderedLen = token.url.length
+        sourceLen = token.url.length
+        break
+      case 'taskStatus':
+        renderedLen = token.keyword.length
+        sourceLen = token.keyword.length + 1
+        break
+      case 'blockReference':
+        renderedLen = token.uuid.length + 4
+        sourceLen = token.uuid.length + 4
+        break
+      case 'headerPrefix':
+        renderedLen = 0
+        sourceLen = token.level + 1
+        break
+      default:
+        renderedLen = 0
+        sourceLen = 0
+    }
+
+    if (sourceOffset <= sourcePos + sourceLen) {
+      const offsetInToken = sourceOffset - sourcePos
+      if (sourceLen === 0) {
+        return renderedPos
+      }
+
+      // For tokens with delimiters, map the inner content position
+      switch (token.type) {
+        case 'bold': {
+          // Source: **content** - opening delimiter is 2 chars
+          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, token.content.length))
+          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
+        }
+        case 'italic': {
+          const innerOffset = Math.max(0, Math.min(offsetInToken - 1, token.content.length))
+          return renderedPos + (offsetInToken < 1 ? 0 : innerOffset)
+        }
+        case 'bolditalic': {
+          const innerOffset = Math.max(0, Math.min(offsetInToken - 3, token.content.length))
+          return renderedPos + (offsetInToken < 3 ? 0 : innerOffset)
+        }
+        case 'strikethrough': {
+          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, token.content.length))
+          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
+        }
+        case 'highlight': {
+          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, token.content.length))
+          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
+        }
+        case 'code': {
+          const innerOffset = Math.max(0, Math.min(offsetInToken - 1, token.content.length))
+          return renderedPos + (offsetInToken < 1 ? 0 : innerOffset)
+        }
+        case 'wikilink': {
+          // Source: [[target]] or [[target|display]] -- map inside [[ to rendered start
+          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, renderedLen))
+          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
+        }
+        case 'headerPrefix':
+          return renderedPos
+        default: {
+          const ratio = offsetInToken / sourceLen
+          return renderedPos + Math.round(ratio * renderedLen)
+        }
+      }
+    }
+
+    renderedPos += renderedLen
+    sourcePos += sourceLen
+  }
+
+  // Offset is past all tokens - return end of rendered
+  return renderedPos
+}

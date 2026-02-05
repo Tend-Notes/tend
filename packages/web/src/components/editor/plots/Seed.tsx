@@ -89,8 +89,9 @@ interface SeedProps {
   isActive?: boolean
   /** Called when a dormant seed is clicked, with the text offset to place the cursor */
   onActivate?: (cursorOffset?: number) => void
-  /** Called when the active seed should deactivate (e.g., drag-out for cross-block selection) */
-  onDeactivate?: () => void
+  /** Called when the active seed should deactivate (e.g., drag-out for cross-block selection).
+   *  Receives the original mousedown coordinates so the caller can restore the selection anchor. */
+  onDeactivate?: (info?: { mousedownX: number; mousedownY: number }) => void
   /** When transitioning from dormant to active, position cursor at this offset */
   initialCursorPosition?: number
 }
@@ -302,7 +303,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
   readonly: boolean
   isCodeBlock: boolean
   codeLanguage: string
-  onDeactivate?: () => void
+  onDeactivate?: (info?: { mousedownX: number; mousedownY: number }) => void
   initialCursorPosition?: number
 }>(function ActiveSeed(
   {
@@ -378,6 +379,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
 
   // Ref for drag-out deactivation
   const mouseDownInsideRef = useRef(false)
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null)
   const onDeactivateRef = useRef(onDeactivate)
   onDeactivateRef.current = onDeactivate
 
@@ -934,19 +936,23 @@ const ActiveSeed = forwardRef<SeedHandle, {
     const container = containerRef.current
     if (!container) return
 
-    const handleMouseDown = () => {
+    const handleMouseDown = (e: MouseEvent) => {
       mouseDownInsideRef.current = true
+      mouseDownPosRef.current = { x: e.clientX, y: e.clientY }
     }
 
     const handleMouseUp = () => {
       mouseDownInsideRef.current = false
+      mouseDownPosRef.current = null
     }
 
     const handleMouseLeave = (e: MouseEvent) => {
       // Only trigger if mouse button is still held (dragging out)
       if (mouseDownInsideRef.current && e.buttons > 0) {
+        const pos = mouseDownPosRef.current
         mouseDownInsideRef.current = false
-        onDeactivateRef.current?.()
+        mouseDownPosRef.current = null
+        onDeactivateRef.current?.(pos ? { mousedownX: pos.x, mousedownY: pos.y } : undefined)
       }
     }
 

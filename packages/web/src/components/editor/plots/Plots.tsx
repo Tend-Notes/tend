@@ -146,6 +146,11 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // Track last-active block UUID for keyboard re-activation when all seeds are dormant
   const lastActiveBlockUuidRef = useRef<string | null>(null)
 
+  // Pending selection anchor for drag-out deactivation continuity.
+  // Stores the original mousedown coordinates so we can restore the selection
+  // anchor on the dormant DOM after the active seed unmounts.
+  const pendingSelectionAnchorRef = useRef<{ mousedownX: number; mousedownY: number } | null>(null)
+
   // Garden info for encrypted garden checks
   const { isEncrypted } = useGardenInfo()
   const addToast = useToastStore((state) => state.addToast)
@@ -1003,7 +1008,12 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
                 // Store cursor offset for initialCursorPosition on next render
                 pendingCursorPositionRef.current = cursorOffset
               }}
-              onDeactivate={() => setActiveBlockUuid(null)}
+              onDeactivate={(info) => {
+                if (info) {
+                  pendingSelectionAnchorRef.current = info
+                }
+                setActiveBlockUuid(null)
+              }}
               initialCursorPosition={
                 block.uuid === activeBlockUuid
                   ? pendingCursorPositionRef.current
@@ -1139,6 +1149,58 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     if (activeBlockUuid) {
       lastActiveBlockUuidRef.current = activeBlockUuid
     }
+  }, [activeBlockUuid])
+
+  // Restore selection anchor after drag-out deactivation.
+  // When an active seed deactivates during a drag, the dormant HTML replaces it.
+  // We use the original mousedown coordinates to place a collapsed selection anchor
+  // on the new dormant DOM, so the browser continues the selection as the user drags.
+  useEffect(() => {
+    if (activeBlockUuid !== null) return // Only run when all seeds are dormant
+    const anchor = pendingSelectionAnchorRef.current
+    if (!anchor) return
+
+    // Clear immediately so this only runs once
+    pendingSelectionAnchorRef.current = null
+
+    // Use rAF to ensure the dormant DOM is fully painted before querying caret position
+    requestAnimationFrame(() => {
+      const doc = document as Document & {
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+      }
+
+      let node: Node | null = null
+      let offset = 0
+
+      if (doc.caretPositionFromPoint) {
+        const pos = doc.caretPositionFromPoint(anchor.mousedownX, anchor.mousedownY)
+        if (pos) {
+          node = pos.offsetNode
+          offset = pos.offset
+        }
+      } else if (document.caretRangeFromPoint) {
+        const range = document.caretRangeFromPoint(anchor.mousedownX, anchor.mousedownY)
+        if (range) {
+          node = range.startContainer
+          offset = range.startOffset
+        }
+      }
+
+      if (!node) return
+
+      try {
+        const range = document.createRange()
+        range.setStart(node, offset)
+        range.collapse(true)
+        const sel = window.getSelection()
+        if (sel) {
+          sel.removeAllRanges()
+          sel.addRange(range)
+        }
+      } catch {
+        // Range creation can fail if the DOM node is no longer valid
+      }
+    })
   }, [activeBlockUuid])
 
   // Keyboard handler: when all seeds are dormant and the container has focus,
