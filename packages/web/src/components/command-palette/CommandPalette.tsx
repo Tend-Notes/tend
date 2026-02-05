@@ -82,6 +82,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [existingSheets, setExistingSheets] = useState<string[]>([])
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
+  const [stabilizing, setStabilizing] = useState(false)
   const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty } = usePageStore()
   const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
   const { contentTypes } = useSettingsStore()
@@ -321,6 +322,26 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       )
     } finally {
       setReindexing(false)
+    }
+  }, [onOpenChange])
+
+  // DEV: Stabilize block UUIDs
+  const handleStabilize = useCallback(async () => {
+    setStabilizing(true)
+    try {
+      const result = await api.stabilize.stabilizeUuids()
+      useToastStore.getState().addToast(
+        `Stabilized ${result.stabilized} files (${result.alreadyStable} already stable${result.failed > 0 ? `, ${result.failed} failed` : ''})`,
+        4000
+      )
+      onOpenChange(false)
+    } catch (err) {
+      useToastStore.getState().addToast(
+        `Stabilize failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        4000
+      )
+    } finally {
+      setStabilizing(false)
     }
   }, [onOpenChange])
 
@@ -637,6 +658,12 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 value="dev rebuild indices reindex backlinks search"
               >
                 {reindexing ? 'DEV: Rebuilding indices...' : 'DEV: Rebuild Indices'}
+              </CommandItem>
+              <CommandItem
+                onSelect={handleStabilize}
+                value="dev stabilize page uuids fix import backlinks footer"
+              >
+                {stabilizing ? 'DEV: Stabilizing UUIDs...' : 'DEV: Stabilize Page UUIDs'}
               </CommandItem>
               <CommandItem
                 onSelect={() => {

@@ -665,3 +665,19 @@ export const reindex = {
       method: 'POST',
     }),
 }
+
+// Stabilize API
+export interface StabilizeResponse {
+  stabilized: number
+  alreadyStable: number
+  failed: number
+  message: string
+}
+
+export const stabilize = {
+  /** Add Tend footers to files missing them, then rebuild indices */
+  stabilizeUuids: () =>
+    fetchJson<StabilizeResponse>(`${API_BASE}/stabilize`, {
+      method: 'POST',
+    }),
+}

@@ -56,6 +56,8 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/blocks/{uuid}", get(blocks::get_block))
         // Reindex (rebuild all indices at once)
         .route("/reindex", post(reindex::reindex))
+        // Stabilize (add Tend footers to files missing them, then reindex)
+        .route("/stabilize", post(reindex::stabilize))
         // Tags
         .route("/tags", get(tags::list_tags))
         // Todos

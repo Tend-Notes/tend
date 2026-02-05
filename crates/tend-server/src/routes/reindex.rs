@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 //! Reindex API route
 //!
-//! Provides a single endpoint that rebuilds ALL indices (search, links, blocks)
-//! from disk. This is useful after importing pages that may have stale or missing
-//! index entries.
+//! Provides endpoints that rebuild indices from disk, and a stabilize endpoint
+//! that adds Tend footers (stable block UUIDs) to files that lack them.
 
 use std::sync::Arc;
 
@@ -12,8 +11,12 @@ use axum::Json;
 use serde::Serialize;
 use tracing::info;
 
+use tend_core::block_metadata::FOOTER_START;
+use tend_core::parser::parse_markdown;
+
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
+use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 
 /// Response for the reindex operation
@@ -138,6 +141,186 @@ pub async fn reindex(
         link_entries,
         block_count,
         search_docs: search_doc_count,
+        message,
+    }))
+}
+
+/// Response for the stabilize operation
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StabilizeResponse {
+    /// Number of files that were stabilized (had footer added)
+    pub stabilized: usize,
+    /// Number of files already stable (had footer)
+    pub already_stable: usize,
+    /// Number of files that failed to stabilize
+    pub failed: usize,
+    /// Human-readable summary message
+    pub message: String,
+}
+
+/// Stabilize block UUIDs across all pages, journals, and sheets
+///
+/// Reads all files from disk. For any file that lacks a Tend footer
+/// (i.e., has no stable block UUIDs), re-saves it through write_page/write_sheet
+/// to add the footer. Then triggers a full reindex.
+///
+/// This fixes pages imported before the footer was added to the import path.
+pub async fn stabilize(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+) -> Result<Json<StabilizeResponse>, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
+
+    let mut stabilized = 0usize;
+    let mut already_stable = 0usize;
+    let mut failed = 0usize;
+
+    // Phase 1: Add footers to files that lack them
+    for ct in &content_types {
+        let garden = user_state.garden.read().await;
+        let sheets = match garden.file_manager.list_sheets(ct).await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Failed to list sheets for {}: {}", ct.id, e);
+                continue;
+            }
+        };
+
+        let root = garden.file_manager.root().to_path_buf();
+
+        for sheet_meta in &sheets {
+            // Build the file path from root + directory structure
+            let file_path = if ct.id == "journal" {
+                if let Some(date) = sheet_meta.journal_date {
+                    root.join("journals").join(format!("{}.md", date.format("%Y-%m-%d")))
+                } else {
+                    failed += 1;
+                    continue;
+                }
+            } else if ct.id == "page" {
+                root.join("pages").join(format!("{}.md", sheet_meta.name))
+            } else if ct.save_by_date {
+                if let Some(date) = sheet_meta.journal_date {
+                    // Extract the sheet name from the full path (directory/date/name)
+                    let name_part = sheet_meta.name
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or(&sheet_meta.name);
+                    root.join(&ct.directory)
+                        .join(date.format("%Y-%m-%d").to_string())
+                        .join(format!("{}.md", name_part))
+                } else {
+                    root.join(&ct.directory).join(format!("{}.md", sheet_meta.name))
+                }
+            } else {
+                // Strip directory prefix from name if present
+                let name_part = if sheet_meta.name.starts_with(&ct.directory) {
+                    &sheet_meta.name[ct.directory.len() + 1..]
+                } else {
+                    &sheet_meta.name
+                };
+                root.join(&ct.directory).join(format!("{}.md", name_part))
+            };
+
+            // Read the raw file content to check for footer
+            let raw = match tokio::fs::read_to_string(&file_path).await {
+                Ok(content) => content,
+                Err(_) => {
+                    failed += 1;
+                    continue;
+                }
+            };
+
+            // Check if the file already has a footer
+            if raw.contains(FOOTER_START) {
+                already_stable += 1;
+                continue;
+            }
+
+            // File lacks a footer -- parse and re-save through the file manager
+            let page_name = &sheet_meta.name;
+            match parse_markdown(&raw, page_name) {
+                Ok(mut page) => {
+                    // Set journal-specific fields
+                    if ct.id == "journal" {
+                        page.is_journal = true;
+                        page.journal_date = sheet_meta.journal_date;
+                    }
+                    page.content_type = ct.id.clone();
+
+                    let write_result = if ct.id == "page" || ct.id == "journal" {
+                        garden.file_manager.write_page(&page).await
+                    } else {
+                        garden.file_manager.write_sheet(ct, &page, sheet_meta.journal_date).await
+                    };
+
+                    match write_result {
+                        Ok(_) => {
+                            stabilized += 1;
+                            info!("Stabilized UUIDs for {}/{}", ct.id, page_name);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to stabilize {}/{}: {}", ct.id, page_name, e);
+                            failed += 1;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to parse {}/{} for stabilization: {}", ct.id, page_name, e);
+                    failed += 1;
+                }
+            }
+        }
+    }
+
+    info!(
+        "Stabilization complete: {} stabilized, {} already stable, {} failed",
+        stabilized, already_stable, failed
+    );
+
+    // Phase 2: If we stabilized any files, rebuild all indices so they
+    // pick up the new stable UUIDs
+    if stabilized > 0 {
+        info!("Rebuilding indices after stabilization...");
+
+        // Rebuild link index
+        {
+            let garden = user_state.garden.read().await;
+            if let Err(e) = garden.rebuild_link_index().await {
+                tracing::warn!("Failed to rebuild link index after stabilize: {}", e);
+            }
+        }
+
+        // Rebuild search index
+        {
+            let mut garden = user_state.garden.write().await;
+            if garden.search_config.enabled {
+                if let Err(e) = garden.build_index().await {
+                    tracing::warn!("Failed to rebuild search index after stabilize: {}", e);
+                }
+            }
+        }
+
+        // Rebuild block index
+        {
+            let garden = user_state.garden.read().await;
+            if let Err(e) = garden.rebuild_block_index().await {
+                tracing::warn!("Block index rebuild after stabilize skipped: {}", e);
+            }
+        }
+    }
+
+    let message = format!(
+        "Stabilized {} files ({} already stable, {} failed)",
+        stabilized, already_stable, failed
+    );
+
+    Ok(Json(StabilizeResponse {
+        stabilized,
+        already_stable,
+        failed,
         message,
     }))
 }
