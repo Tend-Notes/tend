@@ -30,7 +30,6 @@ function randomTagColors(): TagColors {
     textL: randomInRange(22, 38),
     bgL: randomInRange(82, 94),
   }
-  console.log('randomTagColors generated:', colors)
   return colors
 }
 
@@ -66,12 +65,10 @@ export const useTagStore = create<TagState>()(
       getTagColors: (tagName: string) => {
         const tag = get().tags[tagName]
         if (tag?.hue !== undefined && tag?.sat !== undefined && tag?.textL !== undefined && tag?.bgL !== undefined) {
-          console.log(`getTagColors(${tagName}): cached`, { hue: tag.hue, sat: tag.sat, textL: tag.textL, bgL: tag.bgL })
-          return { hue: tag.hue, sat: tag.sat, textL: tag.textL, bgL: tag.bgL }
+          return tag as TagColors
         }
         // First access - generate and persist random colors
         const colors = randomTagColors()
-        console.log(`getTagColors(${tagName}): NEW`, colors)
         set((state) => ({
           tags: {
             ...state.tags,
