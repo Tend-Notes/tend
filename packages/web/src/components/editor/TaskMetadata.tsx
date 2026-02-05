@@ -49,7 +49,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
 
   const handleStartTimer = () => {
     if (!currentPage || !taskContent) return
-    startSession(blockUuid, currentPage.name, taskContent)
+    startSession(blockUuid, currentPage.name, currentPage.isJournal, taskContent)
   }
 
   const dueDate = properties.due_date || null

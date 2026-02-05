@@ -22,15 +22,12 @@ function formatDuration(ms: number): string {
 // Save work log entry to block properties
 async function saveWorkLogToBlock(
   pageName: string,
+  isJournal: boolean,
   blockUuid: string,
   entry: WorkLogEntry
 ): Promise<void> {
-  // Determine if this is a journal or a page
-  const isJournal = pageName.startsWith('journals/')
-  const dateOrName = isJournal ? pageName.replace('journals/', '') : pageName
-
   // Fetch the current page/journal
-  const page = isJournal ? await journals.get(dateOrName) : await pages.get(dateOrName)
+  const page = isJournal ? await journals.get(pageName) : await pages.get(pageName)
 
   // Find the block
   const block = page.blocks[blockUuid]
@@ -58,9 +55,9 @@ async function saveWorkLogToBlock(
   // Save the page
   const blockData = pageBlocksToApiFormat(page)
   if (isJournal) {
-    await journals.update(dateOrName, blockData, page.version)
+    await journals.update(pageName, blockData, page.version)
   } else {
-    await pages.update(dateOrName, blockData, page.version)
+    await pages.update(pageName, blockData, page.version)
   }
 }
 
@@ -115,19 +112,19 @@ export function WorkTimerBanner() {
     setIsSaving(true)
     try {
       // Capture session info before stopping
-      const { pageName, blockUuid } = activeSession
+      const { pageName, isJournal, blockUuid } = activeSession
       const entry = useWorkSessionStore.getState().stopSession(stopNotes)
 
       if (entry) {
         // Save work log entry to block properties
-        await saveWorkLogToBlock(pageName, blockUuid, entry)
+        await saveWorkLogToBlock(pageName, isJournal, blockUuid, entry)
 
         // Refresh the current page if it's the one we updated
         const currentPage = usePageStore.getState().currentPage
-        if (currentPage?.name === pageName || `journals/${currentPage?.name}` === pageName) {
+        if (currentPage?.name === pageName) {
           // Re-fetch the page to get the updated work log
-          if (pageName.startsWith('journals/')) {
-            usePageStore.getState().navigateToJournal(pageName.replace('journals/', ''), false)
+          if (isJournal) {
+            usePageStore.getState().navigateToJournal(pageName, false)
           } else {
             usePageStore.getState().navigateToPage(pageName, false)
           }
