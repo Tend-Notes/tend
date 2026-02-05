@@ -61,7 +61,7 @@ export type SeedBoundaryEvent =
   | { type: 'alt-arrow-down' }
   | { type: 'shift-arrow-up'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
   | { type: 'shift-arrow-down'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
-  | { type: 'paste-multiline'; lines: string[]; textBefore: string; textAfter: string; rawPastedLines: string[] }
+  | { type: 'paste-multiline'; lines: string[]; textBefore: string; textAfter: string; rawPastedLines: string[]; tendBlocks?: string }
 
 export interface SeedHandle {
   focus: () => void
@@ -770,7 +770,8 @@ const ActiveSeed = forwardRef<SeedHandle, {
           lines.push(line)
         }
 
-        onBoundaryEventRef.current({ type: 'paste-multiline', lines, textBefore, textAfter, rawPastedLines })
+        const tendBlocks = event.clipboardData?.getData('text/tend-blocks') || undefined
+        onBoundaryEventRef.current({ type: 'paste-multiline', lines, textBefore, textAfter, rawPastedLines, tendBlocks })
         return true
       },
     })

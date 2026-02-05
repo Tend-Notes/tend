@@ -949,10 +949,9 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
       case 'paste-multiline': {
         // Multi-line paste with tree structure preservation.
-        // Parses indentation and list markers from raw pasted lines to reconstruct
-        // the tree hierarchy. The first line merges into the current block; subsequent
-        // lines become children/siblings based on their indentation.
-        const { lines, rawPastedLines } = event
+        // Checks for text/tend-blocks (lossless internal round-trip) first,
+        // then falls back to parsing indentation and list markers from raw pasted lines.
+        const { lines, rawPastedLines, tendBlocks: tendBlocksRaw } = event
         if (lines.length === 0) break
 
         const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
@@ -979,6 +978,169 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
         // Detect if the pasted content looks like a markdown list (has list markers)
         const hasListMarkers = rawPastedLines.some((line) => /^\s*[-*]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line))
+
+        console.log('[paste-multiline]', { rawPastedLines, hasListMarkers, tendBlocks: !!tendBlocksRaw })
+
+        // ── Tend-blocks paste (lossless internal round-trip) ───────────────
+        // If the clipboard carries text/tend-blocks JSON, use it to reconstruct
+        // the block tree exactly as it was copied, preserving all nesting.
+        interface CopiedBlock {
+          content: string
+          children: CopiedBlock[]
+        }
+
+        let tendBlocksParsed: CopiedBlock[] | null = null
+        if (tendBlocksRaw) {
+          try {
+            tendBlocksParsed = JSON.parse(tendBlocksRaw)
+            // Basic validation: must be an array with at least one entry
+            if (!Array.isArray(tendBlocksParsed) || tendBlocksParsed.length === 0) {
+              tendBlocksParsed = null
+            }
+          } catch {
+            tendBlocksParsed = null
+          }
+        }
+
+        if (tendBlocksParsed) {
+          // Reconstruct blocks from the CopiedBlock tree.
+          // Strategy:
+          //   - First CopiedBlock's content merges with textBefore into currentBlock
+          //   - Its children become children of currentBlock
+          //   - Subsequent top-level CopiedBlocks become siblings after currentBlock
+          //   - The last leaf in the entire tree gets textAfter appended
+          const { textBefore, textAfter } = event
+
+          const allNewBlocks: Block[] = []
+          const rootNewUuids: string[] = []
+
+          // Find the last leaf in the entire pasted tree (for textAfter)
+          const findLastLeaf = (nodes: CopiedBlock[]): CopiedBlock => {
+            const last = nodes[nodes.length - 1]
+            if (last.children.length > 0) return findLastLeaf(last.children)
+            return last
+          }
+          const lastLeaf = findLastLeaf(tendBlocksParsed)
+          // We'll track the last leaf's UUID after creating it so we can append textAfter
+          let lastLeafUuid: string | null = null
+
+          // Recursively create Block objects from CopiedBlock tree
+          const createBlocks = (
+            copiedNodes: CopiedBlock[],
+            parentUuid: string | null,
+            depth: number,
+          ): string[] => {
+            const childUuids: string[] = []
+            for (const copied of copiedNodes) {
+              const newUuid = uuidv4()
+              const isLastLeaf = copied === lastLeaf
+              if (isLastLeaf) lastLeafUuid = newUuid
+
+              let content = copied.content
+              if (isLastLeaf) content = content + textAfter
+
+              const newBlock: Block = {
+                uuid: newUuid,
+                content,
+                parentUuid,
+                children: [],
+                collapsed: false,
+                properties: {},
+                depth,
+              }
+
+              // Recursively create children
+              newBlock.children = createBlocks(copied.children, newUuid, depth + 1)
+
+              allNewBlocks.push(newBlock)
+              childUuids.push(newUuid)
+            }
+            return childUuids
+          }
+
+          // First copied block merges into currentBlock
+          const firstCopied = tendBlocksParsed[0]
+          currentBlock.content = textBefore + firstCopied.content
+
+          // Check if first copied block IS the last leaf (single block, no children, no siblings)
+          if (firstCopied === lastLeaf) {
+            currentBlock.content = textBefore + firstCopied.content + textAfter
+          }
+
+          // Create children of the first copied block as children of currentBlock
+          const firstCopiedChildUuids = createBlocks(firstCopied.children, currentBlock.uuid, currentBlock.depth + 1)
+          // Append new children to currentBlock's existing children
+          currentBlock.children = [...currentBlock.children, ...firstCopiedChildUuids]
+
+          // Remaining top-level copied blocks become siblings after currentBlock
+          if (tendBlocksParsed.length > 1) {
+            for (let i = 1; i < tendBlocksParsed.length; i++) {
+              const copied = tendBlocksParsed[i]
+              const newUuid = uuidv4()
+              const isLastLeaf = copied === lastLeaf
+              if (isLastLeaf) lastLeafUuid = newUuid
+
+              let content = copied.content
+              if (isLastLeaf) content = content + textAfter
+
+              const newBlock: Block = {
+                uuid: newUuid,
+                content,
+                parentUuid: currentBlock.parentUuid,
+                children: [],
+                collapsed: false,
+                properties: {},
+                depth: currentBlock.depth,
+              }
+
+              newBlock.children = createBlocks(copied.children, newUuid, currentBlock.depth + 1)
+
+              allNewBlocks.push(newBlock)
+              rootNewUuids.push(newUuid)
+            }
+          }
+
+          // Insert sibling blocks into the parent's children list (or rootBlocks)
+          if (rootNewUuids.length > 0) {
+            if (currentBlock.parentUuid) {
+              const parent = blocks.find((b) => b.uuid === currentBlock.parentUuid)
+              if (parent) {
+                const afterIndex = parent.children.indexOf(uuid)
+                parent.children = [
+                  ...parent.children.slice(0, afterIndex + 1),
+                  ...rootNewUuids,
+                  ...parent.children.slice(afterIndex + 1),
+                ]
+              }
+              updateCurrentPage([...blocks, ...allNewBlocks])
+            } else {
+              const afterIndex = page.rootBlocks.indexOf(uuid)
+              const newRootBlocks = [
+                ...page.rootBlocks.slice(0, afterIndex + 1),
+                ...rootNewUuids,
+                ...page.rootBlocks.slice(afterIndex + 1),
+              ]
+              updateCurrentPage([...blocks, ...allNewBlocks], newRootBlocks)
+            }
+          } else {
+            updateCurrentPage([...blocks, ...allNewBlocks])
+          }
+
+          // Focus the last block (deepest last leaf)
+          if (lastLeafUuid) {
+            const lastBlock = allNewBlocks.find((b) => b.uuid === lastLeafUuid)
+            if (lastBlock) {
+              focusBlock(lastLeafUuid, lastBlock.content.length)
+            } else {
+              focusBlock(uuid, currentBlock.content.length)
+            }
+          } else {
+            focusBlock(uuid, currentBlock.content.length)
+          }
+          break
+        }
+
+        // ── Fallback: no tend-blocks ──────────────────────────────────────
 
         if (!hasListMarkers) {
           // No list markers detected - fall back to flat sibling paste (original behavior).
@@ -1866,42 +2028,140 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         return totalOffset
       }
 
+      // Compute source offsets for first/last partial blocks
+      let firstSourceOffset = 0
+      let lastSourceOffset: number | null = null
+
+      {
+        const firstBlock = page.blocks[blockUuids[0]]
+        if (firstBlock && blockUuids.length > 1) {
+          const renderedOffset = getRenderedOffsetInBlock(startBlock, range.startContainer, range.startOffset)
+          const tokens = parseContent(firstBlock.content)
+          firstSourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
+        }
+        const lastUuid = blockUuids[blockUuids.length - 1]
+        const lastBlock = page.blocks[lastUuid]
+        if (lastBlock && blockUuids.length > 1) {
+          const renderedOffset = getRenderedOffsetInBlock(endBlock, range.endContainer, range.endOffset)
+          const tokens = parseContent(lastBlock.content)
+          lastSourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
+        }
+      }
+
+      // Build flat fragments for text/plain (as before, for backward compat)
       const fragments: string[] = []
+      // Track the minimum depth among selected blocks for relative indentation
+      let minDepth = Infinity
+      for (const uuid of blockUuids) {
+        const block = page.blocks[uuid]
+        if (block && block.depth < minDepth) minDepth = block.depth
+      }
 
       for (let i = 0; i < blockUuids.length; i++) {
         const uuid = blockUuids[i]
         const block = page.blocks[uuid]
         if (!block) continue
 
-        const content = block.content
+        let content = block.content
         const isFirst = i === 0
         const isLast = i === blockUuids.length - 1
 
         if (isFirst && isLast) {
           // Should not happen (same block case caught above), but handle defensively
-          fragments.push(content)
         } else if (isFirst) {
-          // Partial: selection starts partway through this block
-          const renderedOffset = getRenderedOffsetInBlock(startBlock, range.startContainer, range.startOffset)
-          const tokens = parseContent(content)
-          const sourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
-          fragments.push(content.slice(sourceOffset))
-        } else if (isLast) {
-          // Partial: selection ends partway through this block
-          const renderedOffset = getRenderedOffsetInBlock(endBlock, range.endContainer, range.endOffset)
-          const tokens = parseContent(content)
-          const sourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
-          fragments.push(content.slice(0, sourceOffset))
-        } else {
-          // Middle block: include full content
-          fragments.push(content)
+          content = content.slice(firstSourceOffset)
+        } else if (isLast && lastSourceOffset !== null) {
+          content = content.slice(0, lastSourceOffset)
         }
+
+        // Emit indented markdown list format for text/plain so external
+        // paste targets preserve tree structure readably.
+        const relativeDepth = block.depth - minDepth
+        const indent = '  '.repeat(relativeDepth)
+        fragments.push(`${indent}- ${content}`)
+      }
+
+      console.log('[copy]', { blockCount: blockUuids.length, fragments })
+
+      // ── Build text/tend-blocks JSON for lossless internal round-trip ──
+      // CopiedBlock is a recursive tree structure carrying content + children.
+      interface CopiedBlock {
+        content: string
+        children: CopiedBlock[]
+      }
+
+      // Build a set of selected UUIDs for quick lookup
+      const selectedSet = new Set(blockUuids)
+
+      // Recursive builder: for a given block UUID, build a CopiedBlock with
+      // its children (only those within the selection set).
+      const buildCopiedTree = (uuid: string, sliceStart?: number, sliceEnd?: number): CopiedBlock | null => {
+        const block = page.blocks[uuid]
+        if (!block) return null
+
+        let content = block.content
+        if (sliceStart !== undefined) content = content.slice(sliceStart)
+        if (sliceEnd !== undefined) content = content.slice(0, sliceEnd)
+
+        const children: CopiedBlock[] = []
+        for (const childUuid of block.children) {
+          if (selectedSet.has(childUuid)) {
+            const isLastBlock = childUuid === blockUuids[blockUuids.length - 1]
+            const child = buildCopiedTree(
+              childUuid,
+              undefined,
+              isLastBlock && lastSourceOffset !== null ? lastSourceOffset : undefined,
+            )
+            if (child) children.push(child)
+          }
+        }
+        return { content, children }
+      }
+
+      // Walk blockUuids in document order. We build top-level CopiedBlock
+      // entries for blocks whose parent is NOT in the selection (i.e., they
+      // are root-level within the copied region). Children that are in the
+      // selection are nested via buildCopiedTree.
+      const copiedBlocks: CopiedBlock[] = []
+      const handled = new Set<string>()
+
+      for (const uuid of blockUuids) {
+        if (handled.has(uuid)) continue
+        const block = page.blocks[uuid]
+        if (!block) continue
+
+        // If this block's parent is also selected, it will be included as a child
+        // of the parent's CopiedBlock entry - skip it here.
+        if (block.parentUuid && selectedSet.has(block.parentUuid)) continue
+
+        const isFirstBlock = uuid === blockUuids[0]
+        const isLastBlock = uuid === blockUuids[blockUuids.length - 1]
+
+        const node = buildCopiedTree(
+          uuid,
+          isFirstBlock ? firstSourceOffset : undefined,
+          isLastBlock && lastSourceOffset !== null ? lastSourceOffset : undefined,
+        )
+        if (node) copiedBlocks.push(node)
+
+        // Mark this block and all its selected descendants as handled
+        const markHandled = (u: string) => {
+          handled.add(u)
+          const b = page.blocks[u]
+          if (b) {
+            for (const childUuid of b.children) {
+              if (selectedSet.has(childUuid)) markHandled(childUuid)
+            }
+          }
+        }
+        markHandled(uuid)
       }
 
       const markdownContent = fragments.join('\n')
 
       e.clipboardData?.setData('text/plain', markdownContent)
       e.clipboardData?.setData('text/html', selection.toString())
+      e.clipboardData?.setData('text/tend-blocks', JSON.stringify(copiedBlocks))
       e.preventDefault()
     }
 
