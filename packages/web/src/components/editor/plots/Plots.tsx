@@ -150,6 +150,15 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // anchor on the dormant DOM after the active seed unmounts.
   const pendingSelectionAnchorRef = useRef<{ mousedownX: number; mousedownY: number } | null>(null)
 
+  // Refs for page.blocks and page.rootBlocks to avoid re-registering event
+  // listeners and re-creating callbacks on every keystroke. These are kept in
+  // sync via direct assignment (not useEffect) so they always hold the latest
+  // value without triggering re-renders or dependency changes.
+  const pageBlocksRef = useRef(page.blocks)
+  pageBlocksRef.current = page.blocks
+  const pageRootBlocksRef = useRef(page.rootBlocks)
+  pageRootBlocksRef.current = page.rootBlocks
+
   // Garden info for encrypted garden checks
   const { isEncrypted } = useGardenInfo()
   const addToast = useToastStore((state) => state.addToast)
@@ -1767,8 +1776,8 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       }
 
       // Get source offsets for the first and last blocks
-      const firstBlock = page.blocks[startUuid]
-      const lastBlock = page.blocks[endUuid]
+      const firstBlock = pageBlocksRef.current[startUuid]
+      const lastBlock = pageBlocksRef.current[endUuid]
       if (!firstBlock || !lastBlock) return false
 
       const firstRenderedOffset = startInSeed
@@ -1826,7 +1835,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
       // Filter out deleted blocks and compute new rootBlocks
       const updatedBlocks = blocks.filter((b) => !uuidsToDelete.has(b.uuid))
-      const newRootBlocks = page.rootBlocks.filter((id) => !uuidsToDelete.has(id))
+      const newRootBlocks = pageRootBlocksRef.current.filter((id) => !uuidsToDelete.has(id))
 
       updateCurrentPage(updatedBlocks, newRootBlocks)
 
@@ -1837,7 +1846,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     } catch {
       return false
     }
-  }, [getAllBlocks, updateCurrentPage, focusBlock, page.blocks, page.rootBlocks])
+  }, [getAllBlocks, updateCurrentPage, focusBlock])
 
   // Keyboard handler: when all seeds are dormant and the container has focus,
   // activate a block on keypress so the user can start typing immediately.
@@ -1882,7 +1891,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       // after it mounts.
       e.preventDefault()
       const uuid = targetUuid || flatBlockOrder[0]
-      const block = page.blocks[uuid]
+      const block = pageBlocksRef.current[uuid]
       if (block) {
         // Activate the block at the end, then insert the character via seed-insert-text
         focusBlock(uuid, 'end')
@@ -1904,7 +1913,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         requestAnimationFrame(insertChar)
       }
     }
-  }, [activeBlockUuid, flatBlockOrder, readonly, focusBlock, page.blocks, handleCrossBlockDelete])
+  }, [activeBlockUuid, flatBlockOrder, readonly, focusBlock, handleCrossBlockDelete])
 
   // Register insertTextAtCursor callback with UI store.
   // When a seed is active, dispatches seed-insert-text directly.
@@ -2061,14 +2070,15 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       let lastSourceOffset: number | null = null
 
       {
-        const firstBlock = page.blocks[blockUuids[0]]
+        const blocks = pageBlocksRef.current
+        const firstBlock = blocks[blockUuids[0]]
         if (firstBlock && blockUuids.length > 1) {
           const renderedOffset = getRenderedOffsetInBlock(startBlock, range.startContainer, range.startOffset)
           const tokens = parseContent(firstBlock.content)
           firstSourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
         }
         const lastUuid = blockUuids[blockUuids.length - 1]
-        const lastBlock = page.blocks[lastUuid]
+        const lastBlock = blocks[lastUuid]
         if (lastBlock && blockUuids.length > 1) {
           const renderedOffset = getRenderedOffsetInBlock(endBlock, range.endContainer, range.endOffset)
           const tokens = parseContent(lastBlock.content)
@@ -2081,13 +2091,13 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       // Track the minimum depth among selected blocks for relative indentation
       let minDepth = Infinity
       for (const uuid of blockUuids) {
-        const block = page.blocks[uuid]
+        const block = pageBlocksRef.current[uuid]
         if (block && block.depth < minDepth) minDepth = block.depth
       }
 
       for (let i = 0; i < blockUuids.length; i++) {
         const uuid = blockUuids[i]
-        const block = page.blocks[uuid]
+        const block = pageBlocksRef.current[uuid]
         if (!block) continue
 
         let content = block.content
@@ -2122,7 +2132,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       // Recursive builder: for a given block UUID, build a CopiedBlock with
       // its children (only those within the selection set).
       const buildCopiedTree = (uuid: string, sliceStart?: number, sliceEnd?: number): CopiedBlock | null => {
-        const block = page.blocks[uuid]
+        const block = pageBlocksRef.current[uuid]
         if (!block) return null
 
         let content = block.content
@@ -2153,7 +2163,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
       for (const uuid of blockUuids) {
         if (handled.has(uuid)) continue
-        const block = page.blocks[uuid]
+        const block = pageBlocksRef.current[uuid]
         if (!block) continue
 
         // If this block's parent is also selected, it will be included as a child
@@ -2173,7 +2183,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         // Mark this block and all its selected descendants as handled
         const markHandled = (u: string) => {
           handled.add(u)
-          const b = page.blocks[u]
+          const b = pageBlocksRef.current[u]
           if (b) {
             for (const childUuid of b.children) {
               if (selectedSet.has(childUuid)) markHandled(childUuid)
@@ -2198,7 +2208,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
     container.addEventListener('copy', handleCopy)
     return () => container.removeEventListener('copy', handleCopy)
-  }, [page.blocks])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (rootBlocks.length === 0) {
     return (

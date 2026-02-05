@@ -16,7 +16,7 @@
 // Formatting, syntax highlighting, and decorations are handled by Actions.
 // If Actions fails or is unavailable, Seed continues as a plain text editor.
 
-import React, { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState, useMemo } from 'react'
+import React, { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState, useMemo, memo } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
 import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
@@ -1067,7 +1067,7 @@ ActiveSeed.displayName = 'ActiveSeed'
 // Renders either ActiveSeed or DormantSeed based on isActive prop.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const Seed = forwardRef<SeedHandle, SeedProps>(
+export const Seed = memo(forwardRef<SeedHandle, SeedProps>(
   (
     {
       block,
@@ -1114,6 +1114,21 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
       />
     )
   }
-)
+), (prev, next) => {
+  // Custom comparator: only re-render when data props change.
+  // Callback props (onChange, onBoundaryEvent, onFocus, onBlur, onActivate,
+  // onDeactivate) are inline closures from renderBlock that change on every
+  // render - ignore them to avoid defeating memoization.
+  return (
+    prev.block.uuid === next.block.uuid &&
+    prev.block.content === next.block.content &&
+    prev.isActive === next.isActive &&
+    prev.isSelected === next.isSelected &&
+    prev.isCodeBlock === next.isCodeBlock &&
+    prev.codeLanguage === next.codeLanguage &&
+    prev.readonly === next.readonly &&
+    prev.initialCursorPosition === next.initialCursorPosition
+  )
+})
 
 Seed.displayName = 'Seed'
