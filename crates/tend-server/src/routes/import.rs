@@ -16,6 +16,7 @@ use axum_extra::extract::Multipart;
 use futures_util::StreamExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use chrono::NaiveDate;
 use tend_core::parser::parse_markdown;
 use tokio::fs;
 
@@ -322,9 +323,9 @@ async fn process_import(
     let mut skipped = 0;
     let mut failed = 0;
 
-    // Track imported files for link index update
-    // Each entry is (page_name, content) for direct parsing without re-reading from disk
-    let mut imported_items: Vec<(String, String)> = Vec::new();
+    // Track imported pages for link index update
+    // Each entry is (page_name, Page) with stable UUIDs from write_page serialization
+    let mut imported_items: Vec<(String, tend_core::Page)> = Vec::new();
 
     // Logseq journal date patterns
     let journal_date_regex = Regex::new(r"^(\d{4})[-_](\d{2})[-_](\d{2})\.md$").unwrap();
@@ -465,9 +466,36 @@ async fn process_import(
             continue;
         }
 
-        // Write the file
-        match fs::write(&dest_path, &content).await {
-            Ok(_) => {
+        // Write the file through the file manager so it gets a Tend footer
+        // with stable block UUIDs. This ensures backlinks work correctly.
+        let write_result = {
+            let page_name = match target {
+                ImportTarget::Page => dest_name.clone(),
+                ImportTarget::Journal => dest_name.trim_end_matches(".md").to_string(),
+            };
+
+            match parse_markdown(&content, &page_name) {
+                Ok(mut page) => {
+                    // Set journal-specific fields
+                    if matches!(target, ImportTarget::Journal) {
+                        page.is_journal = true;
+                        page.journal_date = NaiveDate::parse_from_str(
+                            dest_name.trim_end_matches(".md"),
+                            "%Y-%m-%d",
+                        ).ok();
+                    }
+
+                    let garden = user_state.garden.read().await;
+                    garden.file_manager.write_page(&page).await
+                        .map(|_| page)
+                        .map_err(|e| e.to_string())
+                }
+                Err(e) => Err(format!("Failed to parse content: {}", e)),
+            }
+        };
+
+        match write_result {
+            Ok(page) => {
                 let _ = tx
                     .send(ImportProgress::Imported {
                         file: file_name,
@@ -476,15 +504,12 @@ async fn process_import(
                     .await;
                 match target {
                     ImportTarget::Page => {
-                        // For pages, dest_name is the page name (without .md)
-                        imported_items.push((dest_name, content.clone()));
+                        imported_items.push((dest_name, page));
                         pages_imported += 1;
                     }
                     ImportTarget::Journal => {
-                        // For journals, dest_name is filename like "2024-01-15.md"
-                        // Use date string (YYYY-MM-DD) as page name for link index
                         let date_str = dest_name.trim_end_matches(".md").to_string();
-                        imported_items.push((date_str, content.clone()));
+                        imported_items.push((date_str, page));
                         journals_imported += 1;
                     }
                 }
@@ -509,23 +534,16 @@ async fn process_import(
     }
 
     // Update link index for all imported pages and journals
-    // Parse content directly rather than re-reading from disk to avoid
-    // potential mismatches with file manager path resolution
+    // Uses the Page objects that were written through write_page, so block
+    // UUIDs match what's on disk (stable via the Tend footer).
     if !imported_items.is_empty() {
         let garden = user_state.garden.read().await;
         let mut link_index = garden.link_index.write().await;
 
-        for (page_name, content) in &imported_items {
-            match parse_markdown(content, page_name) {
-                Ok(page) => {
-                    let blocks: Vec<_> = page.blocks.values().cloned().collect();
-                    if let Err(e) = link_index.index_page(page_name, &blocks).await {
-                        tracing::warn!("Failed to update link index for imported item {}: {}", page_name, e);
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to parse imported item {} for indexing: {}", page_name, e);
-                }
+        for (page_name, page) in &imported_items {
+            let blocks: Vec<_> = page.blocks.values().cloned().collect();
+            if let Err(e) = link_index.index_page(page_name, &blocks).await {
+                tracing::warn!("Failed to update link index for imported item {}: {}", page_name, e);
             }
         }
     }
@@ -807,8 +825,9 @@ pub async fn accept_import_error(
         serde_json::from_str(&meta_content).context("Failed to parse metadata")?;
 
     // Determine destination path
+    let req_date = req.date.clone();
     let dest_dir = if content_type.save_by_date {
-        let date = req.date.unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+        let date = req_date.clone().unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
         garden_path.join(&content_type.directory).join(&date)
     } else {
         garden_path.join(&content_type.directory)
@@ -847,12 +866,39 @@ pub async fn accept_import_error(
         )));
     }
 
-    // Write to destination
-    tokio::fs::write(&dest_path, &content).await.context("Failed to write destination file")?;
+    // Write through the file manager so the file gets a Tend footer with
+    // stable block UUIDs. This ensures backlinks work correctly.
+    let mut page = parse_markdown(&content, &file_name)
+        .map_err(|e| AppError::Internal(format!("Failed to parse content: {}", e)))?;
 
-    // Update link index, search index, and block index
-    // Parse the content directly to extract blocks with their links
-    if let Ok(page) = parse_markdown(&content, &file_name) {
+    // Determine the date for save_by_date content types
+    let sheet_date = if content_type.save_by_date || content_type.id == "journal" {
+        req_date
+            .as_ref()
+            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .or_else(|| Some(chrono::Local::now().date_naive()))
+    } else {
+        None
+    };
+
+    // Set journal-specific fields so write_page routes to the correct path
+    if content_type.id == "journal" {
+        page.is_journal = true;
+        page.journal_date = sheet_date.or_else(|| {
+            // Try parsing file_name as a date (YYYY-MM-DD)
+            NaiveDate::parse_from_str(&file_name, "%Y-%m-%d").ok()
+        });
+    }
+
+    {
+        let garden = user_state.garden.read().await;
+        garden.file_manager.write_sheet(&content_type, &page, sheet_date).await
+            .map_err(|e| AppError::Internal(format!("Failed to write file: {}", e)))?;
+    }
+
+    // Update link index, search index, and block index using the Page
+    // with stable UUIDs that match what write_sheet stored on disk
+    {
         let garden = user_state.garden.read().await;
 
         // Update link index
