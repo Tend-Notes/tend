@@ -39,7 +39,6 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/pages/{name}/backlinks", get(pages::get_backlinks))
         // Journals
         .route("/journals", get(journals::list_journals))
-        .route("/journals/today", get(journals::get_today))
         .route("/journals/{date}", get(journals::get_journal))
         .route("/journals/{date}", put(journals::update_journal))
         // Search

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::Json;
-use chrono::{Local, NaiveDate};
+use chrono::NaiveDate;
 use tend_core::{Block, Page, PageMeta};
 use tracing::debug;
 
@@ -24,55 +24,6 @@ pub async fn list_journals(
     let garden = user_state.garden.read().await;
     let journals = garden.file_manager.list_journals().await?;
     Ok(Json(journals))
-}
-
-/// Get today's journal (creates if doesn't exist)
-pub async fn get_today(
-    State(state): State<Arc<AppState>>,
-    user: AuthenticatedUser,
-) -> Result<Json<Page>, AppError> {
-    let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    let today = Local::now().date_naive();
-    let page = garden.file_manager.read_journal(today).await?;
-
-    // If the page is empty (new journal), create it with an empty block
-    if page.blocks.is_empty() {
-        let mut new_page = Page::new_journal(today);
-        let block = Block::new("");
-        new_page.add_block(block);
-
-        garden.file_manager.write_page(&new_page).await?;
-
-        // Index the new journal (if search is enabled)
-        if let Some(search_index) = &garden.search_index {
-            let mut index = search_index.write().await;
-            index.index_page(&new_page)?;
-            index.commit()?;
-        }
-
-        // Update link index
-        {
-            let blocks: Vec<_> = new_page.blocks.values().cloned().collect();
-            let mut link_index = garden.link_index.write().await;
-            if let Err(e) = link_index.index_page(&new_page.name, &blocks).await {
-                tracing::warn!("Failed to update link index for journal {}: {}", new_page.name, e);
-            }
-        }
-
-        // Update block index (if available - not for encrypted gardens)
-        if let Some(block_index) = &garden.block_index {
-            let mut index = block_index.lock().await;
-            if let Err(e) = index.update_page(&new_page) {
-                tracing::warn!("Failed to update block index for journal {}: {}", new_page.name, e);
-            }
-        }
-
-        debug!("Created today's journal: {}", today);
-        return Ok(Json(new_page));
-    }
-
-    Ok(Json(page))
 }
 
 /// Get a journal by date

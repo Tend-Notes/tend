@@ -91,8 +91,6 @@ export const pages = {
 export const journals = {
   list: () => fetchJson<PageMeta[]>(`${API_BASE}/journals`),
 
-  getToday: () => fetchJson<Page>(`${API_BASE}/journals/today`),
-
   get: (date: string) => fetchJson<Page>(`${API_BASE}/journals/${date}`),
 
   update: (date: string, blocks: BlockData[], version?: number) =>
