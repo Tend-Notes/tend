@@ -225,58 +225,65 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
         </div>
       )}
 
-      {/* Work Log - show if there are entries */}
+      {/* Time worked - show total if there are entries */}
       {workLog.length > 0 && (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-base-04">
+          <span>Time worked:</span>
+          <span className="font-mono">{formatDuration(totalTimeWorked)}</span>
+        </span>
+      )}
+    </div>
+
+    {/* View entries bar - full width, expands to show work log */}
+    {workLog.length > 0 && (
+      <div className="mt-1 w-full">
         <button
           onClick={() => setShowWorkLog(!showWorkLog)}
-          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors text-base-04 hover:text-base-05 hover:bg-base-01"
-          title={`${workLog.length} work session${workLog.length !== 1 ? 's' : ''}, total: ${formatDuration(totalTimeWorked)}`}
+          className="w-full flex items-center justify-between px-2 py-1 text-xs bg-base-01 hover:bg-base-02 rounded transition-colors text-base-04 hover:text-base-05"
         >
-          {/* Chevron icon */}
+          <span>View entries ({workLog.length})</span>
+          {/* Chevron icon - points down when collapsed, up when expanded */}
           <svg
-            className={`w-3 h-3 transition-transform ${showWorkLog ? 'rotate-90' : ''}`}
+            className={`w-4 h-4 transition-transform ${showWorkLog ? 'rotate-180' : ''}`}
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
             strokeWidth={2}
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
           </svg>
-          <span>View entries</span>
-          <span className="font-mono">{formatDuration(totalTimeWorked)}</span>
-          <span className="text-base-03">({workLog.length})</span>
         </button>
-      )}
-    </div>
 
-    {/* Expanded Work Log Panel - accordion style, inline below metadata */}
-    {showWorkLog && workLog.length > 0 && (
-      <div className="mt-2 ml-0.5 text-xs border-l-2 border-base-02 pl-3">
-        <table className="max-w-lg">
-          <thead>
-            <tr className="text-base-04 border-b border-base-02">
-              <th className="text-left py-1 pr-2 font-medium w-16">Date</th>
-              <th className="text-right py-1 pr-3 font-medium w-14">Time</th>
-              <th className="text-left py-1 font-medium">Notes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {workLog.map((entry, i) => (
-              <tr key={i} className="border-b border-base-01 last:border-0">
-                <td className="py-1 pr-2 text-base-04 whitespace-nowrap">{formatLogDate(entry.startedAt)}</td>
-                <td className="py-1 pr-3 text-right font-mono whitespace-nowrap">{formatDuration(entry.durationMs)}</td>
-                <td className="py-1 text-base-05">{entry.notes || '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr className="border-t border-base-02 font-medium">
-              <td className="py-1 pr-2 text-base-05">Total</td>
-              <td className="py-1 pr-3 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
-              <td></td>
-            </tr>
-          </tfoot>
-        </table>
+        {/* Expanded Work Log Table */}
+        {showWorkLog && (
+          <div className="mt-1 px-2 py-2 bg-base-01 rounded text-xs">
+            <table className="w-full">
+              <thead>
+                <tr className="text-base-04 border-b border-base-02">
+                  <th className="text-left py-1 pr-2 font-medium w-16">Date</th>
+                  <th className="text-right py-1 pr-3 font-medium w-14">Time</th>
+                  <th className="text-left py-1 font-medium">Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workLog.map((entry, i) => (
+                  <tr key={i} className="border-b border-base-01 last:border-0">
+                    <td className="py-1 pr-2 text-base-04 whitespace-nowrap">{formatLogDate(entry.startedAt)}</td>
+                    <td className="py-1 pr-3 text-right font-mono whitespace-nowrap">{formatDuration(entry.durationMs)}</td>
+                    <td className="py-1 text-base-05">{entry.notes || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-base-02 font-medium">
+                  <td className="py-1 pr-2 text-base-05">Total</td>
+                  <td className="py-1 pr-3 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
       </div>
     )}
   </>
