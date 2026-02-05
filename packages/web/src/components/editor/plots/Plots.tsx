@@ -14,6 +14,7 @@ import { useSelectionStore } from '../../../stores/selectionStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useToastStore } from '../../../stores/toastStore'
 import { Seed, SeedBoundaryEvent } from './Seed'
+import { parseContent, mapRenderedOffsetToSource } from '../contentRenderer'
 import { useBlockFlip } from './useBlockFlip'
 import { useGardenInfo } from '../../../hooks/useGardenInfo'
 import { BlockContextMenu } from '../../ui/BlockContextMenu'
@@ -142,6 +143,8 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const [activeBlockUuid, setActiveBlockUuid] = useState<string | null>(null)
   // Store cursor offset between activation request and next render
   const pendingCursorPositionRef = useRef<number | undefined>(undefined)
+  // Track last-active block UUID for keyboard re-activation when all seeds are dormant
+  const lastActiveBlockUuidRef = useRef<string | null>(null)
 
   // Garden info for encrypted garden checks
   const { isEncrypted } = useGardenInfo()
@@ -1181,6 +1184,119 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [selectedUuid, copyBlockReference])
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CROSS-BLOCK COPY
+  // Intercept copy when selection spans multiple dormant blocks to provide
+  // source markdown instead of rendered HTML.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleCopy = (e: ClipboardEvent) => {
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return
+
+      const range = selection.getRangeAt(0)
+
+      // Walk up from start and end nodes to find their block containers
+      const findBlockContainer = (node: Node): HTMLElement | null => {
+        let el = node instanceof HTMLElement ? node : node.parentElement
+        while (el && el !== container) {
+          if (el.hasAttribute('data-block-id')) return el
+          el = el.parentElement
+        }
+        return null
+      }
+
+      const startBlock = findBlockContainer(range.startContainer)
+      const endBlock = findBlockContainer(range.endContainer)
+
+      // If selection is entirely within one block, let the default handler
+      // (or CodeMirror) deal with it
+      if (!startBlock || !endBlock || startBlock === endBlock) return
+
+      // Selection spans multiple blocks - intercept and provide source markdown
+      const startUuid = startBlock.getAttribute('data-block-id')!
+      const endUuid = endBlock.getAttribute('data-block-id')!
+
+      // Gather all block containers between start and end in DOM order
+      const allBlockEls = container.querySelectorAll('[data-block-id]')
+      const blockUuids: string[] = []
+      let inRange = false
+      for (const el of allBlockEls) {
+        const uuid = el.getAttribute('data-block-id')!
+        if (uuid === startUuid) inRange = true
+        if (inRange) blockUuids.push(uuid)
+        if (uuid === endUuid) break
+      }
+
+      if (blockUuids.length === 0) return
+
+      // Compute the rendered text offset within a block container's seed element.
+      // Walks the text nodes of the seed element to find the total offset of the
+      // given node + local offset within the rendered text.
+      const getRenderedOffsetInBlock = (blockEl: HTMLElement, node: Node, localOffset: number): number => {
+        const seedEl = blockEl.querySelector('[data-seed-editor]')
+        if (!seedEl) return 0
+
+        let totalOffset = 0
+        const walker = document.createTreeWalker(seedEl, NodeFilter.SHOW_TEXT)
+        let textNode: Node | null
+        while ((textNode = walker.nextNode())) {
+          if (textNode === node) {
+            return totalOffset + localOffset
+          }
+          totalOffset += (textNode.textContent?.length ?? 0)
+        }
+        // node not found in this seed - return total length (end of block)
+        return totalOffset
+      }
+
+      const fragments: string[] = []
+
+      for (let i = 0; i < blockUuids.length; i++) {
+        const uuid = blockUuids[i]
+        const block = page.blocks[uuid]
+        if (!block) continue
+
+        const content = block.content
+        const isFirst = i === 0
+        const isLast = i === blockUuids.length - 1
+
+        if (isFirst && isLast) {
+          // Should not happen (same block case caught above), but handle defensively
+          fragments.push(content)
+        } else if (isFirst) {
+          // Partial: selection starts partway through this block
+          const renderedOffset = getRenderedOffsetInBlock(startBlock, range.startContainer, range.startOffset)
+          const tokens = parseContent(content)
+          const sourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
+          fragments.push(content.slice(sourceOffset))
+        } else if (isLast) {
+          // Partial: selection ends partway through this block
+          const renderedOffset = getRenderedOffsetInBlock(endBlock, range.endContainer, range.endOffset)
+          const tokens = parseContent(content)
+          const sourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
+          fragments.push(content.slice(0, sourceOffset))
+        } else {
+          // Middle block: include full content
+          fragments.push(content)
+        }
+      }
+
+      const markdownContent = fragments.join('\n')
+
+      e.clipboardData?.setData('text/plain', markdownContent)
+      e.clipboardData?.setData('text/html', selection.toString())
+      e.preventDefault()
+    }
+
+    container.addEventListener('copy', handleCopy)
+    return () => container.removeEventListener('copy', handleCopy)
+  }, [page.blocks])
 
   if (rootBlocks.length === 0) {
     return (
