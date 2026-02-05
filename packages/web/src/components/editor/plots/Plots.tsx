@@ -138,6 +138,11 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; uuid: string } | null>(null)
   const pendingFocusRef = useRef<{ uuid: string; position: 'start' | 'end' | number } | null>(null)
 
+  // Click-to-edit: track which seed is active (has CodeMirror). Null = all dormant.
+  const [activeBlockUuid, setActiveBlockUuid] = useState<string | null>(null)
+  // Store cursor offset between activation request and next render
+  const pendingCursorPositionRef = useRef<number | undefined>(undefined)
+
   // Garden info for encrypted garden checks
   const { isEncrypted } = useGardenInfo()
   const addToast = useToastStore((state) => state.addToast)
@@ -217,6 +222,26 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     setFocusedBlock(uuid)
     setLastFocusedBlockUuid(uuid) // Update synchronously for command palette text insertion
     clearSelection()
+
+    // Activate the target seed (transitions from dormant to active)
+    setActiveBlockUuid(uuid)
+
+    // Store cursor position for the seed's initialCursorPosition prop.
+    // If the seed is already active, pendingFocusRef handles cursor placement
+    // via the seed-focus custom event. If transitioning from dormant, the
+    // initialCursorPosition prop picks it up on mount.
+    if (typeof position === 'number') {
+      pendingCursorPositionRef.current = position
+    } else if (position === 'start') {
+      pendingCursorPositionRef.current = 0
+    } else {
+      // 'end' - we don't know the length here; use a sentinel.
+      // The seed-focus event handles 'end' for already-active seeds.
+      // For dormant->active, Seed's initialCursorPosition with Infinity
+      // will be clamped to doc.length in ActiveSeed.
+      pendingCursorPositionRef.current = Infinity
+    }
+
     pendingFocusRef.current = { uuid, position }
   }, [setFocusedBlock, setLastFocusedBlockUuid, clearSelection])
 
@@ -225,6 +250,10 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const currentFocusTargetRef = useRef<string | null>(null)
 
   useEffect(() => {
+    // Clear the pending cursor position after render - the seed has consumed it
+    // via initialCursorPosition prop during this render cycle
+    pendingCursorPositionRef.current = undefined
+
     if (pendingFocusRef.current) {
       const { uuid, position } = pendingFocusRef.current
       pendingFocusRef.current = null
@@ -961,6 +990,22 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
               readonly={readonly}
               isCodeBlock={isCodeBlock}
               codeLanguage={codeLanguage}
+              isActive={block.uuid === activeBlockUuid}
+              onActivate={(cursorOffset) => {
+                setActiveBlockUuid(block.uuid)
+                setSelectedUuid(block.uuid)
+                setFocusedBlock(block.uuid)
+                setLastFocusedBlockUuid(block.uuid)
+                clearSelection()
+                // Store cursor offset for initialCursorPosition on next render
+                pendingCursorPositionRef.current = cursorOffset
+              }}
+              onDeactivate={() => setActiveBlockUuid(null)}
+              initialCursorPosition={
+                block.uuid === activeBlockUuid
+                  ? pendingCursorPositionRef.current
+                  : undefined
+              }
             />
             {/* Task metadata - shown below task content */}
             {isTask && !readonly && (
@@ -1148,9 +1193,22 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // Check if page is in free text mode (bullets hidden, no indentation)
   const isFreeTextMode = page.properties?.freeText === 'true'
 
+  // Deactivate all seeds when clicking empty space in the container
+  const handleContainerClick = useCallback((e: React.MouseEvent) => {
+    // Only deactivate if the click target is the container itself,
+    // not a child element (block, seed, bullet, etc.)
+    if (e.target === e.currentTarget) {
+      setActiveBlockUuid(null)
+    }
+  }, [])
+
   return (
     <>
-      <div ref={containerRef} className={`outliner-editor max-w-3xl ${isFreeTextMode ? 'outliner-editor--free-text' : ''}`}>
+      <div
+        ref={containerRef}
+        className={`outliner-editor max-w-3xl ${isFreeTextMode ? 'outliner-editor--free-text' : ''}`}
+        onClick={handleContainerClick}
+      >
         {rootBlocks.map((block) => renderBlock(block))}
       </div>
 
