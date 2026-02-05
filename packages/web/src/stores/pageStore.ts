@@ -264,55 +264,10 @@ export const usePageStore = create<PageState>()(
     pendingScrollTarget: null,
 
     loadTodaysJournal: async () => {
-      set((state) => {
-        state.isLoading = true
-        state.error = null
-        state.hasUnsavedChanges = false
-        state.pendingDraftRecovery = null
-      })
-
-      try {
-        const page = await api.journals.getToday()
-
-        // Check for stale draft
-        const draft = await draftStore.getDraft(page.name)
-        if (draft && draft.serverVersion !== page.modifiedAt) {
-          // Found a draft that differs from server - offer recovery
-          set((state) => {
-            state.currentPage = page
-            state.currentPageName = page.name
-            state.isLoading = false
-            state.pendingDraftRecovery = {
-              pageName: draft.pageName,
-              blocks: draft.blocks,
-              rootBlocks: draft.rootBlocks,
-              savedAt: draft.savedAt,
-            }
-          })
-        } else {
-          // No stale draft - clear any existing draft for this page
-          if (draft) {
-            await draftStore.deleteDraft(page.name)
-          }
-          set((state) => {
-            state.currentPage = page
-            state.currentPageName = page.name
-            state.isLoading = false
-          })
-        }
-
-        // Record this access in recent sheets
-        recordSheetAccess(page)
-
-        // Update URL without adding to history (initial load)
-        const url = buildUrlPath('journal', page.journalDate || page.name)
-        window.history.replaceState({ type: 'journal', name: page.journalDate || page.name }, '', url)
-      } catch (e) {
-        set((state) => {
-          state.error = e instanceof Error ? e.message : 'Failed to load today\'s journal'
-          state.isLoading = false
-        })
-      }
+      // Use browser's local date, not server's, so "Today" works correctly
+      // when traveling across timezones
+      const today = new Date().toISOString().slice(0, 10)
+      return get().navigateToJournal(today)
     },
 
     navigateToPage: async (name: string, pushHistory = true) => {
