@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
+use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 
 /// A task item found in a block
@@ -26,6 +27,9 @@ pub struct TaskItem {
     pub page_name: String,
     /// The page title
     pub page_title: String,
+
+    /// Content type ID (e.g., "page", "journal", "meetings")
+    pub content_type: String,
     /// Whether the page is a journal
     pub is_journal: bool,
     /// Journal date if applicable
@@ -60,37 +64,27 @@ pub async fn list_todos(
 
     let mut tasks = Vec::new();
 
-    // Scan all pages
-    let pages = garden.file_manager.list_pages().await?;
-    for page_meta in &pages {
-        if let Ok(page) = garden.file_manager.read_page(&page_meta.name).await {
-            for block in page.blocks.values() {
-                if let Some(captures) = status_pattern.captures(&block.content) {
-                    let status = captures.get(1).unwrap().as_str().to_string();
-                    let content = captures.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+    // Get all content types for this garden (pages, journals, custom sheets)
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
 
-                    tasks.push(TaskItem {
-                        uuid: block.uuid.to_string(),
-                        status,
-                        content,
-                        page_name: page.name.clone(),
-                        page_title: page.title.clone(),
-                        is_journal: false,
-                        journal_date: None,
-                        due_date: block.properties.get("due_date").cloned(),
-                        start_date: block.properties.get("start_date").cloned(),
-                        priority: block.properties.get("priority").cloned(),
-                    });
+    // Scan all content types
+    for ct in &content_types {
+        let sheets = garden.file_manager.list_sheets(ct).await?;
+        for sheet_meta in &sheets {
+            // Read the full page for this sheet
+            let page = if ct.id == "journal" {
+                if let Some(date) = sheet_meta.journal_date {
+                    garden.file_manager.read_journal(date).await.ok()
+                } else {
+                    None
                 }
-            }
-        }
-    }
+            } else if ct.id == "page" {
+                garden.file_manager.read_page(&sheet_meta.name).await.ok()
+            } else {
+                garden.file_manager.read_sheet(ct, &sheet_meta.name, sheet_meta.journal_date).await.ok()
+            };
 
-    // Scan all journals
-    let journals = garden.file_manager.list_journals().await?;
-    for journal_meta in &journals {
-        if let Some(date) = journal_meta.journal_date {
-            if let Ok(page) = garden.file_manager.read_journal(date).await {
+            if let Some(page) = page {
                 for block in page.blocks.values() {
                     if let Some(captures) = status_pattern.captures(&block.content) {
                         let status = captures.get(1).unwrap().as_str().to_string();
@@ -102,8 +96,9 @@ pub async fn list_todos(
                             content,
                             page_name: page.name.clone(),
                             page_title: page.title.clone(),
-                            is_journal: true,
-                            journal_date: Some(date.to_string()),
+                            content_type: ct.id.clone(),
+                            is_journal: ct.id == "journal",
+                            journal_date: sheet_meta.journal_date.map(|d| d.to_string()),
                             due_date: block.properties.get("due_date").cloned(),
                             start_date: block.properties.get("start_date").cloned(),
                             priority: block.properties.get("priority").cloned(),
