@@ -450,7 +450,11 @@ export const Seed = forwardRef<SeedHandle, SeedProps>(
 
           // Auto-complete code fence: when user types ``` at start of block
           // Expand to ```\n\n``` with cursor positioned to type language
-          if (newContent === '```') {
+          // Only trigger on insertion (typing), not deletion (backspacing).
+          // When backspacing through a code block down to ```, the doc shrinks,
+          // so we check that the new doc is longer than the old one.
+          const docGrew = update.state.doc.length > update.startState.doc.length
+          if (newContent === '```' && docGrew) {
             const view = update.view
             const expandedContent = '```\n\n```'
 
