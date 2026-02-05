@@ -1,12 +1,30 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Inline task metadata component for displaying and editing due date, start date, and priority
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { DatePickerPopover } from '../ui/DatePickerPopover'
 import { PriorityPickerPopover, getPriorityDisplay } from '../ui/PriorityPickerPopover'
 import { formatShortDate, getUrgencyStyle } from '../../lib/dateUtils'
-import { useWorkSessionStore } from '../../stores/workSessionStore'
+import { useWorkSessionStore, type WorkLogEntry } from '../../stores/workSessionStore'
 import { usePageStore } from '../../stores/pageStore'
+
+// Format milliseconds as human-readable duration
+function formatDuration(ms: number): string {
+  const totalMinutes = Math.floor(ms / 60000)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`
+  }
+  return `${minutes}m`
+}
+
+// Format ISO date as short date string
+function formatLogDate(isoDate: string): string {
+  const date = new Date(isoDate)
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
 
 interface TaskMetadataProps {
   blockUuid: string
@@ -20,6 +38,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
   const [showDueDatePicker, setShowDueDatePicker] = useState(false)
   const [showStartDatePicker, setShowStartDatePicker] = useState(false)
   const [showPriorityPicker, setShowPriorityPicker] = useState(false)
+  const [showWorkLog, setShowWorkLog] = useState(false)
 
   const { activeSession, startSession } = useWorkSessionStore()
   const currentPage = usePageStore((state) => state.currentPage)
@@ -37,6 +56,21 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
   const startDate = properties.start_date || null
   const priority = properties.priority || null
 
+  // Parse work log from properties
+  const workLog = useMemo((): WorkLogEntry[] => {
+    if (!properties.work_log) return []
+    try {
+      return JSON.parse(properties.work_log)
+    } catch {
+      return []
+    }
+  }, [properties.work_log])
+
+  // Calculate total time worked
+  const totalTimeWorked = useMemo(() => {
+    return workLog.reduce((sum, entry) => sum + entry.durationMs, 0)
+  }, [workLog])
+
   const priorityInfo = getPriorityDisplay(priority)
   // Urgency based on start date if set, otherwise due date
   // Completed tasks don't show urgency styling
@@ -50,7 +84,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
 
   return (
     <div
-      className="flex items-center gap-2 mt-1 ml-0.5 text-xs"
+      className="relative flex items-center gap-2 mt-1 ml-0.5 text-xs"
       onClick={stopPropagation}
     >
       {/* Due Date */}
@@ -181,6 +215,61 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
               Start
             </button>
           )}
+        </div>
+      )}
+
+      {/* Work Log - show if there are entries */}
+      {workLog.length > 0 && (
+        <button
+          onClick={() => setShowWorkLog(!showWorkLog)}
+          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors text-base-04 hover:text-base-05 hover:bg-base-01"
+          title={`${workLog.length} work session${workLog.length !== 1 ? 's' : ''}, total: ${formatDuration(totalTimeWorked)}`}
+        >
+          {/* Chevron icon */}
+          <svg
+            className={`w-3 h-3 transition-transform ${showWorkLog ? 'rotate-90' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+          </svg>
+          <span className="font-mono">{formatDuration(totalTimeWorked)}</span>
+          <span className="text-base-03">({workLog.length})</span>
+        </button>
+      )}
+
+      {/* Expanded Work Log Table */}
+      {showWorkLog && workLog.length > 0 && (
+        <div className="absolute left-0 top-full mt-1 z-10 bg-base-00 border border-base-02 rounded shadow-lg p-2 min-w-[280px]">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-base-04 border-b border-base-02">
+                <th className="text-left py-1 pr-3 font-medium">Date</th>
+                <th className="text-right py-1 pr-3 font-medium">Duration</th>
+                <th className="text-left py-1 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workLog.map((entry, i) => (
+                <tr key={i} className="border-b border-base-01 last:border-0">
+                  <td className="py-1 pr-3 text-base-04">{formatLogDate(entry.startedAt)}</td>
+                  <td className="py-1 pr-3 text-right font-mono">{formatDuration(entry.durationMs)}</td>
+                  <td className="py-1 text-base-05 max-w-[150px] truncate" title={entry.notes}>
+                    {entry.notes || '-'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t border-base-02 font-medium">
+                <td className="py-1 pr-3 text-base-05">Total</td>
+                <td className="py-1 pr-3 text-right font-mono text-base-05">{formatDuration(totalTimeWorked)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       )}
     </div>
