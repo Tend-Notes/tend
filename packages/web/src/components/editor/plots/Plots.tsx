@@ -1134,31 +1134,121 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     }
   }, [selectedUuid, setLastFocusedBlockUuid])
 
-  // Register insertTextAtCursor callback with UI store
+  // Track last-active block so keyboard re-activation returns to the right place
+  useEffect(() => {
+    if (activeBlockUuid) {
+      lastActiveBlockUuidRef.current = activeBlockUuid
+    }
+  }, [activeBlockUuid])
+
+  // Keyboard handler: when all seeds are dormant and the container has focus,
+  // activate a block on keypress so the user can start typing immediately.
+  const handleContainerKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Only handle when no seed is active (all dormant)
+    if (activeBlockUuid !== null) return
+    if (flatBlockOrder.length === 0) return
+    if (readonly) return
+
+    // Don't intercept modifier-only keys, Tab, or Escape
+    if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'Shift' ||
+        e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return
+
+    // Don't intercept keyboard shortcuts (Ctrl/Cmd+key, Alt+Shift+key)
+    if (e.ctrlKey || e.metaKey || (e.altKey && e.shiftKey)) return
+
+    const targetUuid = lastActiveBlockUuidRef.current && flatBlockOrder.includes(lastActiveBlockUuidRef.current)
+      ? lastActiveBlockUuidRef.current
+      : null
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      focusBlock(targetUuid || flatBlockOrder[0], 'start')
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      focusBlock(targetUuid || flatBlockOrder[flatBlockOrder.length - 1], 'end')
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      focusBlock(targetUuid || flatBlockOrder[0], 'end')
+    } else if (e.key.length === 1 && !e.altKey) {
+      // Printable character - activate last-focused or first block
+      // Don't preventDefault: let the character be typed into the newly activated editor.
+      // focusBlock sets initialCursorPosition; the key event will be handled by CodeMirror
+      // after it mounts.
+      e.preventDefault()
+      const uuid = targetUuid || flatBlockOrder[0]
+      const block = page.blocks[uuid]
+      if (block) {
+        // Activate the block at the end, then insert the character via seed-insert-text
+        focusBlock(uuid, 'end')
+        // Schedule text insertion after CodeMirror mounts
+        const insertChar = () => {
+          const blockEl = document.querySelector(`[data-block-id="${uuid}"]`)
+          const editorEl = blockEl?.querySelector('[data-seed-editor]') as HTMLElement
+          if (editorEl?.querySelector('.cm-editor')) {
+            const evt = new CustomEvent('seed-insert-text', {
+              detail: { text: e.key },
+              bubbles: false,
+            })
+            editorEl.dispatchEvent(evt)
+          } else {
+            // CodeMirror not yet mounted, retry
+            requestAnimationFrame(insertChar)
+          }
+        }
+        requestAnimationFrame(insertChar)
+      }
+    }
+  }, [activeBlockUuid, flatBlockOrder, readonly, focusBlock, page.blocks])
+
+  // Register insertTextAtCursor callback with UI store.
+  // When a seed is active, dispatches seed-insert-text directly.
+  // When all seeds are dormant, activates the target seed first, then inserts.
   const setInsertTextAtCursor = useUIStore((state) => state.setInsertTextAtCursor)
+  const activeBlockUuidRef = useRef(activeBlockUuid)
+  activeBlockUuidRef.current = activeBlockUuid
+  const focusBlockRef = useRef(focusBlock)
+  focusBlockRef.current = focusBlock
+
   useEffect(() => {
     const insertText = (text: string) => {
-      // First try to find a currently focused editor
+      // First try to find a currently focused/active editor (has CodeMirror)
       const activeEl = document.activeElement
       let seedEditor = activeEl?.closest('[data-seed-editor]') || document.querySelector('[data-seed-editor]:focus-within')
 
-      // If no editor is focused, use the last focused block
-      if (!seedEditor) {
-        const targetUuid = useUIStore.getState().lastFocusedBlockUuid
-        if (targetUuid) {
-          const blockEl = document.querySelector(`[data-block-id="${targetUuid}"]`)
-          seedEditor = blockEl?.querySelector('[data-seed-editor]') as HTMLElement | null
-        }
+      // Check if this editor is actually active (has CodeMirror, not dormant)
+      if (seedEditor && seedEditor.querySelector('.cm-editor')) {
+        const event = new CustomEvent('seed-insert-text', {
+          detail: { text },
+          bubbles: false,
+        })
+        seedEditor.dispatchEvent(event)
+        return
       }
 
-      if (!seedEditor) return
+      // No active editor - need to activate a seed first, then insert
+      const targetUuid = useUIStore.getState().lastFocusedBlockUuid
+      if (!targetUuid) return
 
-      // Dispatch custom event to insert text
-      const event = new CustomEvent('seed-insert-text', {
-        detail: { text },
-        bubbles: false,
-      })
-      seedEditor.dispatchEvent(event)
+      // Activate the target block
+      focusBlockRef.current(targetUuid, 'end')
+
+      // Poll for CodeMirror to mount, then insert text
+      let attempts = 0
+      const tryInsert = () => {
+        const blockEl = document.querySelector(`[data-block-id="${targetUuid}"]`)
+        const editorEl = blockEl?.querySelector('[data-seed-editor]') as HTMLElement
+        if (editorEl?.querySelector('.cm-editor')) {
+          const event = new CustomEvent('seed-insert-text', {
+            detail: { text },
+            bubbles: false,
+          })
+          editorEl.dispatchEvent(event)
+        } else if (attempts < 10) {
+          attempts++
+          requestAnimationFrame(tryInsert)
+        }
+      }
+      requestAnimationFrame(tryInsert)
     }
 
     setInsertTextAtCursor(insertText)
@@ -1315,6 +1405,8 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     // not a child element (block, seed, bullet, etc.)
     if (e.target === e.currentTarget) {
       setActiveBlockUuid(null)
+      // Focus the container so it can receive keyboard events
+      containerRef.current?.focus()
     }
   }, [])
 
@@ -1322,8 +1414,10 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     <>
       <div
         ref={containerRef}
-        className={`outliner-editor max-w-3xl ${isFreeTextMode ? 'outliner-editor--free-text' : ''}`}
+        tabIndex={-1}
+        className={`outliner-editor max-w-3xl outline-none ${isFreeTextMode ? 'outliner-editor--free-text' : ''}`}
         onClick={handleContainerClick}
+        onKeyDown={handleContainerKeyDown}
       >
         {rootBlocks.map((block) => renderBlock(block))}
       </div>
