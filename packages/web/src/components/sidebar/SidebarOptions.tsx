@@ -399,18 +399,27 @@ function ThemePicker({
 
   const themes = variant === 'light' ? getLightThemes() : getDarkThemes()
   const loading = isLoadingThemes()
+
+  // Track whether a selection was made. When the picker closes (via onSelect
+  // calling setShowThemePicker(null)), the DOM removal triggers onMouseLeave.
+  // Without this guard, onMouseLeave would revert to the old activeTheme,
+  // undoing the selection and requiring a second click to apply it.
+  const selectedRef = useRef(false)
+
   // Always preview themes on hover, regardless of which variant is active
   const handlePreview = useCallback((theme: Base16Theme) => {
     applyTheme(theme)
   }, [])
 
   const handleMouseLeave = useCallback(() => {
+    if (selectedRef.current) return
     if (activeTheme) {
       applyTheme(activeTheme)
     }
   }, [activeTheme])
 
   const handleSelect = useCallback((theme: Base16Theme) => {
+    selectedRef.current = true
     applyTheme(theme)
     onSelect(theme.name)
   }, [onSelect])
