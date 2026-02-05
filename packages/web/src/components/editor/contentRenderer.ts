@@ -491,3 +491,155 @@ export function renderContentReact(
 
   return nodes
 }
+
+/**
+ * Map from rendered-text offset (what the user sees, no delimiters) to
+ * source-markdown offset (including **, ~~, ==, `, [[]], etc.).
+ *
+ * Walks the token list, accumulating both rendered length and source length.
+ * When the rendered offset falls within a token, linearly maps to the
+ * corresponding source position.
+ */
+export function mapRenderedOffsetToSource(
+  tokens: ContentToken[],
+  renderedOffset: number
+): number {
+  let renderedPos = 0
+  let sourcePos = 0
+
+  for (const token of tokens) {
+    // Compute rendered length and source length for each token type
+    let renderedLen: number
+    let sourceLen: number
+
+    switch (token.type) {
+      case 'text':
+        renderedLen = token.content.length
+        sourceLen = token.content.length
+        break
+      case 'bold':
+        renderedLen = token.content.length
+        // ** or __ around content
+        sourceLen = token.content.length + 4
+        break
+      case 'italic':
+        renderedLen = token.content.length
+        // * or _ around content
+        sourceLen = token.content.length + 2
+        break
+      case 'bolditalic':
+        renderedLen = token.content.length
+        // *** or ___ around content
+        sourceLen = token.content.length + 6
+        break
+      case 'strikethrough':
+        renderedLen = token.content.length
+        // ~~ around content
+        sourceLen = token.content.length + 4
+        break
+      case 'highlight':
+        renderedLen = token.content.length
+        // == around content
+        sourceLen = token.content.length + 4
+        break
+      case 'code':
+        renderedLen = token.content.length
+        // ` around content
+        sourceLen = token.content.length + 2
+        break
+      case 'wikilink': {
+        // Displayed text (after last slash for content type paths)
+        const lastSlash = token.display.lastIndexOf('/')
+        const displayText = lastSlash >= 0 ? token.display.slice(lastSlash + 1) : token.display
+        renderedLen = displayText.length
+        // Source: [[target]] or [[target|display]]
+        if (token.target === token.display) {
+          sourceLen = token.target.length + 4 // [[target]]
+        } else {
+          sourceLen = token.target.length + 1 + token.display.length + 4 // [[target|display]]
+        }
+        break
+      }
+      case 'tag':
+        // Rendered: #name, Source: #name
+        renderedLen = token.name.length + 1
+        sourceLen = token.name.length + 1
+        break
+      case 'url':
+        renderedLen = token.url.length
+        sourceLen = token.url.length
+        break
+      case 'taskStatus':
+        // Rendered: keyword badge, Source: keyword + space
+        renderedLen = token.keyword.length
+        sourceLen = token.keyword.length + 1
+        break
+      case 'blockReference':
+        // Rendered: ((uuid)), Source: ((uuid))
+        renderedLen = token.uuid.length + 4
+        sourceLen = token.uuid.length + 4
+        break
+      case 'headerPrefix':
+        // Hidden in rendered output, but present in source
+        renderedLen = 0
+        sourceLen = token.level + 1 // "## " = hashes + space (e.g., level 2 = "## " = 3 chars)
+        break
+      default:
+        renderedLen = 0
+        sourceLen = 0
+    }
+
+    // If the rendered offset falls within this token, interpolate
+    if (renderedOffset <= renderedPos + renderedLen) {
+      const offsetInToken = renderedOffset - renderedPos
+      if (renderedLen === 0) {
+        // Zero-width rendered token (e.g., headerPrefix) - skip
+        return sourcePos
+      }
+      // For formatting tokens, place cursor after opening delimiter + proportional offset
+      const ratio = offsetInToken / renderedLen
+      const sourceOffset = Math.round(ratio * sourceLen)
+
+      // For tokens with delimiters, ensure we land inside the content
+      switch (token.type) {
+        case 'bold': {
+          // Source: **content** - opening delimiter is 2 chars
+          const innerOffset = Math.min(offsetInToken, token.content.length)
+          return sourcePos + 2 + innerOffset
+        }
+        case 'italic': {
+          const innerOffset = Math.min(offsetInToken, token.content.length)
+          return sourcePos + 1 + innerOffset
+        }
+        case 'bolditalic': {
+          const innerOffset = Math.min(offsetInToken, token.content.length)
+          return sourcePos + 3 + innerOffset
+        }
+        case 'strikethrough': {
+          const innerOffset = Math.min(offsetInToken, token.content.length)
+          return sourcePos + 2 + innerOffset
+        }
+        case 'highlight': {
+          const innerOffset = Math.min(offsetInToken, token.content.length)
+          return sourcePos + 2 + innerOffset
+        }
+        case 'code': {
+          const innerOffset = Math.min(offsetInToken, token.content.length)
+          return sourcePos + 1 + innerOffset
+        }
+        case 'wikilink': {
+          // Place cursor inside [[...]] at proportional position
+          return sourcePos + 2 + Math.min(offsetInToken, token.target.length)
+        }
+        default:
+          return sourcePos + sourceOffset
+      }
+    }
+
+    renderedPos += renderedLen
+    sourcePos += sourceLen
+  }
+
+  // Offset is past all tokens - return end of source
+  return sourcePos
+}

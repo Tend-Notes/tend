@@ -894,6 +894,24 @@ code {
     opacity var(--duration-normal) var(--ease-out);
 }
 
+/* Dormant seed - static HTML rendering that matches CodeMirror layout */
+.seed-dormant {
+  /* Match .cm-content styles */
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  padding: 0;
+  /* Match .cm-line padding */
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Minimum height matches block-content */
+  min-height: 1.5em;
+  /* Cursor indicates clickable to edit */
+  cursor: text;
+  /* Prevent layout shift when transitioning to/from CodeMirror */
+  overflow-wrap: break-word;
+}
+
 /* Editor placeholder */
 .block-content:empty::before {
   content: attr(data-placeholder);
