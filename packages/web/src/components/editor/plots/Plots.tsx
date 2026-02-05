@@ -1288,6 +1288,9 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
             e.stopPropagation()
             return
           }
+          // Don't activate if there's an active text selection (backward drag-select)
+          const sel = window.getSelection()
+          if (sel && !sel.isCollapsed) return
           // Outside editor (e.g., container padding) - focus at end
           focusBlock(block.uuid, 'end')
         }}
@@ -1529,6 +1532,128 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     })
   }, [activeBlockUuid])
 
+  // Delete selected text across dormant blocks when Backspace/Delete is pressed
+  // with a native cross-block selection active.
+  const handleCrossBlockDelete = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return false
+
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return false
+
+    const range = selection.getRangeAt(0)
+
+    // Find block containers for start and end of selection
+    const findBlockContainer = (node: Node): HTMLElement | null => {
+      let el = node instanceof HTMLElement ? node : node.parentElement
+      while (el && el !== container) {
+        if (el.hasAttribute('data-block-id')) return el
+        el = el.parentElement
+      }
+      return null
+    }
+
+    const startBlock = findBlockContainer(range.startContainer)
+    const endBlock = findBlockContainer(range.endContainer)
+
+    // Must span at least two blocks for cross-block deletion
+    if (!startBlock || !endBlock || startBlock === endBlock) return false
+
+    const startUuid = startBlock.getAttribute('data-block-id')!
+    const endUuid = endBlock.getAttribute('data-block-id')!
+
+    // Gather all block UUIDs between start and end in DOM order
+    const allBlockEls = container.querySelectorAll('[data-block-id]')
+    const blockUuids: string[] = []
+    let inRange = false
+    for (const el of allBlockEls) {
+      const uuid = el.getAttribute('data-block-id')!
+      if (uuid === startUuid) inRange = true
+      if (inRange) blockUuids.push(uuid)
+      if (uuid === endUuid) break
+    }
+
+    if (blockUuids.length < 2) return false
+
+    // Compute rendered text offset within a block's seed element
+    const getRenderedOffsetInBlock = (blockEl: HTMLElement, node: Node, localOffset: number): number => {
+      const seedEl = blockEl.querySelector('[data-seed-editor]')
+      if (!seedEl) return 0
+
+      let totalOffset = 0
+      const walker = document.createTreeWalker(seedEl, NodeFilter.SHOW_TEXT)
+      let textNode: Node | null
+      while ((textNode = walker.nextNode())) {
+        if (textNode === node) {
+          return totalOffset + localOffset
+        }
+        totalOffset += (textNode.textContent?.length ?? 0)
+      }
+      return totalOffset
+    }
+
+    // Get source offsets for the first and last blocks
+    const firstBlock = page.blocks[startUuid]
+    const lastBlock = page.blocks[endUuid]
+    if (!firstBlock || !lastBlock) return false
+
+    const firstRenderedOffset = getRenderedOffsetInBlock(startBlock, range.startContainer, range.startOffset)
+    const firstTokens = parseContent(firstBlock.content)
+    const firstSourceOffset = mapRenderedOffsetToSource(firstTokens, firstRenderedOffset)
+
+    const lastRenderedOffset = getRenderedOffsetInBlock(endBlock, range.endContainer, range.endOffset)
+    const lastTokens = parseContent(lastBlock.content)
+    const lastSourceOffset = mapRenderedOffsetToSource(lastTokens, lastRenderedOffset)
+
+    // Text to keep: before selection in first block + after selection in last block
+    const textBefore = firstBlock.content.slice(0, firstSourceOffset)
+    const textAfter = lastBlock.content.slice(lastSourceOffset)
+    const mergedContent = textBefore + textAfter
+    const cursorPos = textBefore.length
+
+    // Clear selection before modifying DOM
+    selection.removeAllRanges()
+
+    // Build the updated block list:
+    // - First block gets merged content
+    // - Middle blocks (fully selected) are removed
+    // - Last block is removed (its remaining text merged into first)
+    const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+
+    // UUIDs to delete: everything except the first block
+    const uuidsToDelete = new Set(blockUuids.slice(1))
+
+    // Update the first block's content
+    const firstBlockObj = blocks.find((b) => b.uuid === startUuid)
+    if (firstBlockObj) {
+      firstBlockObj.content = mergedContent
+    }
+
+    // Remove deleted blocks from their parents' children arrays
+    for (const uuid of uuidsToDelete) {
+      const block = blocks.find((b) => b.uuid === uuid)
+      if (!block) continue
+
+      if (block.parentUuid) {
+        const parent = blocks.find((b) => b.uuid === block.parentUuid)
+        if (parent) {
+          parent.children = parent.children.filter((id) => id !== uuid)
+        }
+      }
+    }
+
+    // Filter out deleted blocks and compute new rootBlocks
+    const updatedBlocks = blocks.filter((b) => !uuidsToDelete.has(b.uuid))
+    const newRootBlocks = page.rootBlocks.filter((id) => !uuidsToDelete.has(id))
+
+    updateCurrentPage(updatedBlocks, newRootBlocks)
+
+    // Activate the merged block at the cursor position
+    focusBlock(startUuid, cursorPos)
+
+    return true
+  }, [getAllBlocks, updateCurrentPage, focusBlock, page.blocks, page.rootBlocks])
+
   // Keyboard handler: when all seeds are dormant and the container has focus,
   // activate a block on keypress so the user can start typing immediately.
   const handleContainerKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -1536,6 +1661,14 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     if (activeBlockUuid !== null) return
     if (flatBlockOrder.length === 0) return
     if (readonly) return
+
+    // Handle Delete/Backspace with active cross-block selection
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (handleCrossBlockDelete()) {
+        e.preventDefault()
+        return
+      }
+    }
 
     // Don't intercept modifier-only keys, Tab, or Escape
     if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'Shift' ||
@@ -1586,7 +1719,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         requestAnimationFrame(insertChar)
       }
     }
-  }, [activeBlockUuid, flatBlockOrder, readonly, focusBlock, page.blocks])
+  }, [activeBlockUuid, flatBlockOrder, readonly, focusBlock, page.blocks, handleCrossBlockDelete])
 
   // Register insertTextAtCursor callback with UI store.
   // When a seed is active, dispatches seed-insert-text directly.
@@ -1792,6 +1925,11 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     // Only deactivate if the click target is the container itself,
     // not a child element (block, seed, bullet, etc.)
     if (e.target === e.currentTarget) {
+      // If there's an active text selection, don't deactivate - the user may
+      // have released a backward drag-select over the container padding
+      const sel = window.getSelection()
+      if (sel && !sel.isCollapsed) return
+
       setActiveBlockUuid(null)
       // Focus the container so it can receive keyboard events
       containerRef.current?.focus()

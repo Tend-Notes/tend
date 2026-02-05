@@ -253,6 +253,14 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
       return
     }
 
+    // If there's an active text selection (e.g., the user just finished a
+    // backward drag-select across dormant blocks), do NOT activate. Activating
+    // would destroy the dormant HTML and thus the native selection highlight.
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed) {
+      return
+    }
+
     // Calculate the rendered text offset from click position
     const renderedOffset = getCaretOffsetFromClick(e)
     if (renderedOffset !== undefined) {
