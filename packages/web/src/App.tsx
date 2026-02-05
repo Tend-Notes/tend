@@ -57,7 +57,6 @@ function App() {
       .then(async ({ username }) => {
         const lastUser = localStorage.getItem('tend-last-user')
         if (lastUser && lastUser !== username) {
-          console.log(`User changed from ${lastUser} to ${username}`)
           // Clear localStorage cache - server will provide correct data
           clearRecentSheets()
           clearTags()

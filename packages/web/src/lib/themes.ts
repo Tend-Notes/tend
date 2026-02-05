@@ -132,8 +132,8 @@ function restoreCache(): ThemeCache {
         }
       }
     }
-  } catch (e) {
-    console.warn('Failed to restore theme cache from localStorage:', e)
+  } catch {
+    // Failed to restore cache - start fresh
   }
   // Return fresh cache if restore fails
   return {
@@ -152,8 +152,8 @@ function persistCache(cache: ThemeCache): void {
       lastFetched: cache.lastFetched,
     }
     localStorage.setItem(THEME_CACHE_KEY, JSON.stringify(toStore))
-  } catch (e) {
-    console.warn('Failed to persist theme cache to localStorage:', e)
+  } catch {
+    // Failed to persist cache - not critical
   }
 }
 

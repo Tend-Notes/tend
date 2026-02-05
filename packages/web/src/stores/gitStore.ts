@@ -119,13 +119,10 @@ export const useGitStore = create<GitState>()(
       // Trigger an auto-commit
       triggerAutoCommit: async () => {
         try {
-          const result = await api.git.commit()
-          if (result.commitSha) {
-            console.log('[GitStore] Auto-commit successful:', result.message)
-            // Don't need to call recordCommit here - the page save will handle it
-          }
-        } catch (err) {
-          console.error('[GitStore] Auto-commit failed:', err)
+          await api.git.commit()
+          // Don't need to call recordCommit here - the page save will handle it
+        } catch {
+          // Auto-commit failure is not critical - will retry on next interval
         }
       },
 

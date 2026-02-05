@@ -448,7 +448,7 @@ export const importApi = {
             const progress = JSON.parse(line) as ImportProgress
             onProgress(progress)
           } catch {
-            console.warn('Failed to parse progress line:', line)
+            // Ignore malformed progress lines
           }
         }
       }
@@ -460,7 +460,7 @@ export const importApi = {
         const progress = JSON.parse(buffer) as ImportProgress
         onProgress(progress)
       } catch {
-        console.warn('Failed to parse final progress line:', buffer)
+        // Ignore malformed final progress line
       }
     }
   },

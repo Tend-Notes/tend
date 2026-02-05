@@ -166,13 +166,6 @@ class BlockReferenceWidget extends WidgetType {
   private async loadContent(container: HTMLElement, view: EditorView): Promise<void> {
     const entry = await getBlockRef(this.uuid)
 
-    // Debug logging for block reference loading
-    console.debug('[BlockRef]', this.uuid, 'entry:', {
-      hasData: entry.data !== null,
-      error: entry.error,
-      content: entry.data?.content?.slice(0, 50),
-    })
-
     // Widget might have been destroyed while loading
     if (!container.isConnected) return
 
@@ -186,7 +179,6 @@ class BlockReferenceWidget extends WidgetType {
     }
 
     if (entry.error === 'not_found' || entry.data === null) {
-      console.debug('[BlockRef]', this.uuid, 'showing missing - data:', entry.data, 'error:', entry.error)
       container.className = 'block-reference block-reference-missing'
       container.textContent = 'reference missing'
       return

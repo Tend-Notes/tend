@@ -39,14 +39,11 @@ export function useAutoCommit() {
       // Check if there are actual changes first
       const status = await api.git.status()
       if (!status.hasChanges) {
-        console.log('[AutoCommit] No changes to commit')
-        // Don't log "no changes" - it would be noisy
         return
       }
 
       const result = await api.git.commit()
       if (result.commitSha) {
-        console.log('[AutoCommit] Success:', result.message)
         const totalChars = currentPage ? calculateTotalChars(currentPage.blocks) : 0
         recordCommit(totalChars)
         addLogEntry('git_auto_commit', result.message || 'Auto-commit', result.commitSha?.slice(0, 7))
@@ -54,7 +51,6 @@ export function useAutoCommit() {
         useSyncStatusStore.getState().recordCommit()
       }
     } catch (err) {
-      console.error('[AutoCommit] Failed:', err)
       addLogEntry('git_error', 'Auto-commit failed', err instanceof Error ? err.message : 'Unknown error')
     }
   }, [autoCommitEnabled, currentPage, recordCommit, addLogEntry])
@@ -80,9 +76,6 @@ export function useAutoCommit() {
 
     const threshold = SMART_THRESHOLDS[smartCommitThreshold]
     if (smartCommitWindowChars >= threshold) {
-      console.log(
-        `[AutoCommit] Smart commit triggered: ${smartCommitWindowChars} chars >= ${threshold} threshold`
-      )
       triggerAutoCommit()
     }
   }, [autoCommitEnabled, smartCommitThreshold, smartCommitWindowChars, triggerAutoCommit])

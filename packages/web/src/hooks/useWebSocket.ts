@@ -99,7 +99,7 @@ export function useWebSocket() {
       wsRef.current = ws
 
       ws.onopen = () => {
-        console.log('WebSocket connected')
+        // Connected
       }
 
       ws.onmessage = (event) => {
@@ -111,7 +111,7 @@ export function useWebSocket() {
 
           switch (data.type) {
             case 'connected':
-              console.log('WebSocket handshake complete')
+              // Handshake complete
               break
 
             case 'file_changed': {
@@ -135,20 +135,14 @@ export function useWebSocket() {
                 // - pending debounced saves
                 // - recent save grace period
                 if (shouldSkipFileWatcherReload()) {
-                  console.log('File changed but skipping reload (local changes or recent save)')
                   break
                 }
 
-                console.log('Current page changed externally, reloading...')
                 // Re-fetch the current page (silent - don't show errors for background reloads)
                 if (isJournal) {
-                  navigateToJournal(pageName, false).catch((err) => {
-                    console.warn('Background reload failed:', err)
-                  })
+                  navigateToJournal(pageName, false).catch(() => {})
                 } else {
-                  navigateToPage(pageName, false).catch((err) => {
-                    console.warn('Background reload failed:', err)
-                  })
+                  navigateToPage(pageName, false).catch(() => {})
                 }
               }
               break
@@ -159,20 +153,14 @@ export function useWebSocket() {
               if (data.name === currentPageName) {
                 // Use centralized check - protects against race conditions
                 if (shouldSkipFileWatcherReload()) {
-                  console.log('Page updated but skipping reload (local changes or recent save)')
                   break
                 }
 
-                console.log('Page updated by another client, reloading...')
                 // Silent reload - don't show errors for background reloads
                 if (currentPage?.isJournal) {
-                  navigateToJournal(data.name, false).catch((err) => {
-                    console.warn('Background reload failed:', err)
-                  })
+                  navigateToJournal(data.name, false).catch(() => {})
                 } else {
-                  navigateToPage(data.name, false).catch((err) => {
-                    console.warn('Background reload failed:', err)
-                  })
+                  navigateToPage(data.name, false).catch(() => {})
                 }
               }
               break
@@ -180,26 +168,24 @@ export function useWebSocket() {
             case 'backup_started':
             case 'backup_completed':
             case 'backup_failed':
-              console.log('Backup event:', data.type)
+              // Backup events - no action needed
               break
 
             case 'push_started':
-              console.log('Push started')
+              // Push started - no action needed
               break
 
             case 'push_completed':
-              console.log('Push completed:', data.message)
               useSyncStatusStore.getState().recordPush()
               break
 
             case 'push_failed':
-              console.log('Push failed:', data.error)
+              // Push failed - no action needed (user will see error in UI)
               break
 
             case 'garden_switched':
               // Garden was switched (by another client or this client)
               // Reset all stores and reinitialize without a full page reload
-              console.log('Garden switched to:', data.garden_id)
               useSettingsStore.getState().setCurrentGraphId(data.garden_id)
               usePageStore.getState().reset()
               useUIStore.getState().reset()
@@ -211,18 +197,17 @@ export function useWebSocket() {
                   useSettingsStore.getState().setContentTypes(types)
                   usePageStore.getState().initializeFromUrl()
                 })
-                .catch((err) => {
-                  console.error('Failed to load content types after garden switch:', err)
-                  // Still try to initialize the page
+                .catch(() => {
+                  // Still try to initialize the page even if content types fail
                   usePageStore.getState().initializeFromUrl()
                 })
               break
 
             default:
-              console.log('Unknown WebSocket event:', data)
+              // Unknown event type - ignore
           }
-        } catch (e) {
-          console.error('Failed to parse WebSocket message:', e)
+        } catch {
+          // Failed to parse WebSocket message - ignore
         }
       }
 
@@ -231,13 +216,11 @@ export function useWebSocket() {
 
         // Only reconnect if this wasn't an intentional close
         if (!closingIntentionallyRef.current) {
-          console.log('WebSocket disconnected, reconnecting in 3s...')
           reconnectTimeoutRef.current = setTimeout(connect, 3000)
         }
       }
 
-      ws.onerror = (error) => {
-        console.error('WebSocket error:', error)
+      ws.onerror = () => {
         ws.close()
       }
     }

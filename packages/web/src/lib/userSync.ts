@@ -46,9 +46,8 @@ export async function loadUserPrefs(): Promise<void> {
     if (prefs.smartCommitThreshold !== undefined) git.setSmartCommitThreshold(prefs.smartCommitThreshold as 'paragraph' | 'page' | 'pages')
     if (prefs.autoCommitEnabled !== undefined) git.setAutoCommitEnabled(prefs.autoCommitEnabled as boolean)
 
-    console.log('[UserSync] Loaded preferences from server')
-  } catch (err) {
-    console.warn('[UserSync] Failed to load preferences:', err)
+  } catch {
+    // Preferences may not exist yet for new users
   } finally {
     isLoadingFromServer = false
   }
@@ -91,9 +90,8 @@ export async function loadUserState(): Promise<void> {
       useTagStore.setState({ tags: state.tags as Record<string, TagMetadata> })
     }
 
-    console.log('[UserSync] Loaded state from server')
-  } catch (err) {
-    console.warn('[UserSync] Failed to load state:', err)
+  } catch {
+    // State may not exist yet for new users
   } finally {
     isLoadingFromServer = false
   }
@@ -162,9 +160,8 @@ function savePrefsToServer(): void {
     try {
       await user.savePrefs(buildPrefs())
       prefsDirty = false
-      console.log('[UserSync] Saved preferences to server')
-    } catch (err) {
-      console.error('[UserSync] Failed to save preferences:', err)
+    } catch {
+      // Silently fail - user prefs are not critical
     }
   }, DEBOUNCE_MS)
 }
@@ -181,9 +178,8 @@ function saveStateToServer(): void {
     try {
       await user.saveState(buildState())
       stateDirty = false
-      console.log('[UserSync] Saved state to server')
-    } catch (err) {
-      console.error('[UserSync] Failed to save state:', err)
+    } catch {
+      // Silently fail - UI state is not critical
     }
   }, DEBOUNCE_MS)
 }
@@ -233,8 +229,6 @@ export function startSync(): void {
   // Add beforeunload handler to flush pending saves when closing tab/browser
   beforeUnloadHandler = flushPendingSaves
   window.addEventListener('beforeunload', beforeUnloadHandler)
-
-  console.log('[UserSync] Started sync subscriptions')
 }
 
 /**

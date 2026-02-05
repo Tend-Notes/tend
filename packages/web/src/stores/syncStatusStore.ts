@@ -90,8 +90,7 @@ export const useSyncStatusStore = create<SyncStatusState>()((set, get) => ({
         // Remote backup enabled, have remote, and not ahead - fully backed up
         set({ status: 'backed up', isChecking: false, lastCheck: Date.now() })
       }
-    } catch (err) {
-      console.error('[SyncStatus] Failed to check git status:', err)
+    } catch {
       set({ isChecking: false })
     }
   },
