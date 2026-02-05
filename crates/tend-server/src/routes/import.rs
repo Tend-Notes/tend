@@ -16,6 +16,7 @@ use axum_extra::extract::Multipart;
 use futures_util::StreamExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tend_core::parser::parse_markdown;
 use tokio::fs;
 
 use anyhow::Context;
@@ -322,9 +323,8 @@ async fn process_import(
     let mut failed = 0;
 
     // Track imported files for link index update
-    // Pages are tracked by name, journals by date string (YYYY-MM-DD)
-    let mut imported_pages: Vec<String> = Vec::new();
-    let mut imported_journals: Vec<String> = Vec::new();
+    // Each entry is (page_name, content) for direct parsing without re-reading from disk
+    let mut imported_items: Vec<(String, String)> = Vec::new();
 
     // Logseq journal date patterns
     let journal_date_regex = Regex::new(r"^(\d{4})[-_](\d{2})[-_](\d{2})\.md$").unwrap();
@@ -477,14 +477,14 @@ async fn process_import(
                 match target {
                     ImportTarget::Page => {
                         // For pages, dest_name is the page name (without .md)
-                        imported_pages.push(dest_name);
+                        imported_items.push((dest_name, content.clone()));
                         pages_imported += 1;
                     }
                     ImportTarget::Journal => {
                         // For journals, dest_name is filename like "2024-01-15.md"
-                        // Extract the date string (YYYY-MM-DD)
+                        // Use date string (YYYY-MM-DD) as page name for link index
                         let date_str = dest_name.trim_end_matches(".md").to_string();
-                        imported_journals.push(date_str);
+                        imported_items.push((date_str, content.clone()));
                         journals_imported += 1;
                     }
                 }
@@ -509,39 +509,22 @@ async fn process_import(
     }
 
     // Update link index for all imported pages and journals
-    // This ensures tags and wiki-links are indexed for backlink queries
-    if !imported_pages.is_empty() || !imported_journals.is_empty() {
+    // Parse content directly rather than re-reading from disk to avoid
+    // potential mismatches with file manager path resolution
+    if !imported_items.is_empty() {
         let garden = user_state.garden.read().await;
         let mut link_index = garden.link_index.write().await;
 
-        // Index imported pages
-        for page_name in &imported_pages {
-            match garden.file_manager.read_page(page_name).await {
+        for (page_name, content) in &imported_items {
+            match parse_markdown(content, page_name) {
                 Ok(page) => {
                     let blocks: Vec<_> = page.blocks.values().cloned().collect();
-                    if let Err(e) = link_index.index_page(&page.name, &blocks).await {
-                        tracing::warn!("Failed to update link index for imported page {}: {}", page_name, e);
+                    if let Err(e) = link_index.index_page(page_name, &blocks).await {
+                        tracing::warn!("Failed to update link index for imported item {}: {}", page_name, e);
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to read imported page {} for indexing: {}", page_name, e);
-                }
-            }
-        }
-
-        // Index imported journals
-        for date_str in &imported_journals {
-            if let Ok(date) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-                match garden.file_manager.read_journal(date).await {
-                    Ok(page) => {
-                        let blocks: Vec<_> = page.blocks.values().cloned().collect();
-                        if let Err(e) = link_index.index_page(&page.name, &blocks).await {
-                            tracing::warn!("Failed to update link index for imported journal {}: {}", date_str, e);
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to read imported journal {} for indexing: {}", date_str, e);
-                    }
+                    tracing::warn!("Failed to parse imported item {} for indexing: {}", page_name, e);
                 }
             }
         }
@@ -866,6 +849,38 @@ pub async fn accept_import_error(
 
     // Write to destination
     tokio::fs::write(&dest_path, &content).await.context("Failed to write destination file")?;
+
+    // Update link index, search index, and block index
+    // Parse the content directly to extract blocks with their links
+    if let Ok(page) = parse_markdown(&content, &file_name) {
+        let garden = user_state.garden.read().await;
+
+        // Update link index
+        {
+            let blocks: Vec<_> = page.blocks.values().cloned().collect();
+            let mut link_index = garden.link_index.write().await;
+            if let Err(e) = link_index.index_page(&file_name, &blocks).await {
+                tracing::warn!("Failed to update link index for accepted import {}: {}", file_name, e);
+            }
+        }
+
+        // Update search index (if search is enabled)
+        if let Some(search_index) = &garden.search_index {
+            let mut index = search_index.write().await;
+            if let Err(e) = index.index_page(&page) {
+                tracing::warn!("Failed to update search index for accepted import {}: {}", file_name, e);
+            }
+            let _ = index.commit();
+        }
+
+        // Update block index (if available - not for encrypted gardens)
+        if let Some(block_index) = &garden.block_index {
+            let mut index = block_index.lock().await;
+            if let Err(e) = index.update_page(&page) {
+                tracing::warn!("Failed to update block index for accepted import {}: {}", file_name, e);
+            }
+        }
+    }
 
     // Delete the error files
     fs::remove_file(&content_path).await.context("Failed to delete error content file")?;
