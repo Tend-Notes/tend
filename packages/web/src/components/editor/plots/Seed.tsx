@@ -61,6 +61,7 @@ export type SeedBoundaryEvent =
   | { type: 'alt-arrow-down' }
   | { type: 'shift-arrow-up'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
   | { type: 'shift-arrow-down'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
+  | { type: 'paste-multiline'; lines: string[] }
 
 export interface SeedHandle {
   focus: () => void
@@ -719,7 +720,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
     })
   }, [])
 
-  // Create focus/blur handlers
+  // Create focus/blur/paste handlers
   const createEventHandlers = useCallback(() => {
     return EditorView.domEventHandlers({
       focus: () => {
@@ -729,6 +730,40 @@ const ActiveSeed = forwardRef<SeedHandle, {
       blur: () => {
         onBlurRef.current?.()
         return false
+      },
+      paste: (event, view) => {
+        const text = event.clipboardData?.getData('text/plain')
+        if (!text) return false
+
+        // Only intercept multi-line paste; single-line goes to CodeMirror
+        if (!text.includes('\n') && !text.includes('\r')) return false
+
+        event.preventDefault()
+
+        // Split on newlines, normalising \r\n to \n first
+        const pastedLines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
+
+        const { from, to } = view.state.selection.main
+        const doc = view.state.doc.toString()
+
+        // Text before selection and after selection in the current block
+        const textBefore = doc.substring(0, from)
+        const textAfter = doc.substring(to)
+
+        // Build the lines array:
+        // lines[0]       = textBefore + first pasted line
+        // lines[1..n-1]  = middle pasted lines (unchanged)
+        // lines[n]       = last pasted line + textAfter
+        const lines: string[] = []
+        for (let i = 0; i < pastedLines.length; i++) {
+          let line = pastedLines[i]
+          if (i === 0) line = textBefore + line
+          if (i === pastedLines.length - 1) line = line + textAfter
+          lines.push(line)
+        }
+
+        onBoundaryEventRef.current({ type: 'paste-multiline', lines })
+        return true
       },
     })
   }, [])

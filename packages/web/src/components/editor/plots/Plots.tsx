@@ -946,6 +946,71 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         })
         break
       }
+
+      case 'paste-multiline': {
+        // Multi-line paste: replace current block content with first line,
+        // create new sibling blocks for remaining lines, focus last block at end.
+        const { lines } = event
+        if (lines.length === 0) break
+
+        const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+        const currentBlock = blocks.find((b) => b.uuid === uuid)
+        if (!currentBlock) break
+
+        // Set current block to the first line
+        currentBlock.content = lines[0]
+
+        // Create new sibling blocks for lines[1..n]
+        const newBlocks: Block[] = []
+        for (let i = 1; i < lines.length; i++) {
+          newBlocks.push({
+            uuid: uuidv4(),
+            content: lines[i],
+            parentUuid: currentBlock.parentUuid,
+            children: [],
+            collapsed: false,
+            properties: {},
+            depth: currentBlock.depth,
+          })
+        }
+
+        if (newBlocks.length === 0) {
+          // Only one line - just update the current block content
+          updateCurrentPage(blocks)
+          focusBlock(uuid, lines[0].length)
+          break
+        }
+
+        const newBlockUuids = newBlocks.map((b) => b.uuid)
+
+        // Insert new blocks as siblings after the current block
+        if (currentBlock.parentUuid) {
+          const parent = blocks.find((b) => b.uuid === currentBlock.parentUuid)
+          if (parent) {
+            const afterIndex = parent.children.indexOf(uuid)
+            parent.children = [
+              ...parent.children.slice(0, afterIndex + 1),
+              ...newBlockUuids,
+              ...parent.children.slice(afterIndex + 1),
+            ]
+          }
+          updateCurrentPage([...blocks, ...newBlocks])
+        } else {
+          // Current block is a root block
+          const afterIndex = page.rootBlocks.indexOf(uuid)
+          const newRootBlocks = [
+            ...page.rootBlocks.slice(0, afterIndex + 1),
+            ...newBlockUuids,
+            ...page.rootBlocks.slice(afterIndex + 1),
+          ]
+          updateCurrentPage([...blocks, ...newBlocks], newRootBlocks)
+        }
+
+        // Focus the last created block with cursor at end
+        const lastNewBlock = newBlocks[newBlocks.length - 1]
+        focusBlock(lastNewBlock.uuid, lastNewBlock.content.length)
+        break
+      }
     }
   }, [
     handleSplitBlock,
@@ -959,6 +1024,9 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     handleMoveUp,
     handleMoveDown,
     focusBlock,
+    getAllBlocks,
+    updateCurrentPage,
+    page.rootBlocks,
   ])
 
   // ─────────────────────────────────────────────────────────────────────────
