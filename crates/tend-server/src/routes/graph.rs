@@ -89,8 +89,13 @@ pub async fn get_graph(
                 } else {
                     None
                 }
+            } else if ct.id == "page" {
+                garden.file_manager.read_page(&sheet_meta.name).await.ok()
             } else {
-                garden.file_manager.read_sheet(ct, &sheet_meta.name, None).await.ok()
+                // sheet_meta.name includes the directory prefix (e.g., "meetings/StandupNotes")
+                // but read_sheet expects just the bare name without the directory prefix.
+                let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.save_by_date);
+                garden.file_manager.read_sheet(ct, bare_name, sheet_meta.journal_date).await.ok()
             };
 
             if let Some(page) = page {
@@ -131,4 +136,27 @@ pub async fn get_graph(
         edges,
         content_types: graph_content_types,
     }))
+}
+
+/// Strip the directory prefix from a sheet name to get the bare name.
+///
+/// `list_sheets` returns PageMeta with names like "meetings/StandupNotes" or
+/// "meetings/2026-01-23/StandupNotes" (for saveByDate types), but `read_sheet`
+/// expects just "StandupNotes" because it reconstructs the full path internally.
+fn strip_directory_prefix<'a>(name: &'a str, directory: &str, save_by_date: bool) -> &'a str {
+    if let Some(without_dir) = name.strip_prefix(directory).and_then(|s| s.strip_prefix('/')) {
+        if save_by_date {
+            // Format: YYYY-MM-DD/name - strip the date component too
+            if let Some((_date, bare)) = without_dir.split_once('/') {
+                bare
+            } else {
+                without_dir
+            }
+        } else {
+            without_dir
+        }
+    } else {
+        // Name doesn't have the expected prefix; use as-is (e.g., built-in "page" type)
+        name
+    }
 }
