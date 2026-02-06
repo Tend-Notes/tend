@@ -273,12 +273,20 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
     }
   }, [tokens, onActivate])
 
+  // Prevent browser's default mousedown behavior (text selection/focus)
+  // This ensures the click handler can properly activate the block
+  // and hand focus to CodeMirror without interference
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+  }
+
   // For code blocks in dormant mode, render as plain text (no formatting)
   if (isCodeBlock) {
     return (
       <div
         data-seed-editor
         className="block-content outline-none min-h-[1.5em] seed-dormant code-content"
+        onMouseDown={handleMouseDown}
         onClick={handleClick}
       >
         {content}
@@ -290,6 +298,7 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
     <div
       data-seed-editor
       className="block-content outline-none min-h-[1.5em] seed-dormant"
+      onMouseDown={handleMouseDown}
       onClick={handleClick}
     >
       {renderedNodes}
