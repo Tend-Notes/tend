@@ -42,7 +42,7 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
     return { year: now.getFullYear(), month: now.getMonth(), day: now.getDate() }
   }, [])
 
-  const initialDate = currentDate ? parseDate(currentDate) : today
+  const initialDate = currentDate ? parseCalendarDate(currentDate) : today
   const [viewYear, setViewYear] = useState(initialDate.year)
   const [viewMonth, setViewMonth] = useState(initialDate.month)
 
@@ -187,7 +187,7 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
               return <div key={`empty-${index}`} className="w-8 h-8" />
             }
 
-            const dateStr = formatDate(viewYear, viewMonth, day)
+            const dateStr = formatCalendarDate(viewYear, viewMonth, day)
             const blockCount = journalMap.get(dateStr) || 0
             const intensity = getIntensityLevel(blockCount)
             const hasContent = blockCount > 0

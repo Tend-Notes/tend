@@ -3,6 +3,14 @@
 
 import { useState, useRef, useMemo, useLayoutEffect } from 'react'
 import { formatDateYMD, getDateOffset, getNextMonday, getNextMonth } from '../../lib/dateUtils'
+import {
+  getDaysInMonth,
+  getFirstDayOfMonth,
+  formatCalendarDate,
+  parseCalendarDate,
+  MONTH_NAMES,
+  DAY_NAMES,
+} from '../../lib/calendarUtils'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { useEscapeKey } from '../../hooks/useEscapeKey'
 
@@ -12,23 +20,6 @@ interface DatePickerPopoverProps {
   onClose: () => void
   label?: string
 }
-
-// Get the number of days in a month
-function getDaysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate()
-}
-
-// Get the day of week for the first day of a month (0 = Sunday)
-function getFirstDayOfMonth(year: number, month: number): number {
-  return new Date(year, month, 1).getDay()
-}
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-]
-
-const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
 export function DatePickerPopover({ value, onChange, onClose, label }: DatePickerPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -44,14 +35,7 @@ export function DatePickerPopover({ value, onChange, onClose, label }: DatePicke
   // Initialize view to the selected date or today
   const initialDate = useMemo(() => {
     if (value) {
-      const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-      if (match) {
-        return {
-          year: parseInt(match[1], 10),
-          month: parseInt(match[2], 10) - 1,
-          day: parseInt(match[3], 10)
-        }
-      }
+      return parseCalendarDate(value)
     }
     return today
   }, [value, today])
@@ -237,7 +221,7 @@ export function DatePickerPopover({ value, onChange, onClose, label }: DatePicke
             return <div key={`empty-${index}`} className="w-8 h-8" />
           }
 
-          const dateStr = `${viewYear}-${String(viewMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+          const dateStr = formatCalendarDate(viewYear, viewMonth, day)
           const isToday = viewYear === today.year && viewMonth === today.month && day === today.day
           const isSelected = value === dateStr
 
