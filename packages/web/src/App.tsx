@@ -114,9 +114,13 @@ function App() {
         .then(async ({ username }) => {
           const lastUser = localStorage.getItem('tend-last-user')
           if (lastUser && lastUser !== username) {
-            // Clear localStorage cache - server will provide correct data
+            // Clear ALL localStorage caches - different user, different data
+            // This prevents User B from seeing User A's cached state
             clearRecentSheets()
             clearTags()
+            usePageStore.getState().reset()
+            useUIStore.getState().reset()
+            useSettingsStore.getState().resetAll()
             // Redirect to home - current path may not exist for new user
             window.history.replaceState(null, '', '/')
           }

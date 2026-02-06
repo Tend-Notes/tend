@@ -10,6 +10,7 @@ import type {
   GraphEdge,
   Block,
   BlockRef,
+  CreateSheetResponse,
 } from '../types'
 
 import * as demoStore from './demoStore'
@@ -721,7 +722,7 @@ export const sheets = {
     contentTypeId: string,
     name: string,
     options?: { date?: string; content?: string }
-  ): Promise<Page> => {
+  ): Promise<CreateSheetResponse> => {
     if (contentTypeId === 'journal' && options?.date) {
       return journals.get(options.date)
     }

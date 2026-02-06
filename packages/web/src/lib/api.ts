@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // API client for Tend backend
+//
+// In demo mode (VITE_DEMO_MODE=true), all API calls are proxied to demoApi.ts
+// which uses IndexedDB instead of the backend server.
 
 import type {
   Page,
@@ -20,8 +23,11 @@ import type {
   BlockRef,
 } from '../types'
 
-// Demo mode detection - used by components to conditionally import from demoApi
+// Demo mode detection
 export const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+
+// Import demo API for proxying (tree-shaken in non-demo builds)
+import * as demoApi from './demoApi'
 
 const API_BASE = '/api/v1'
 
@@ -63,8 +69,38 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   return res.json()
 }
 
+// Block data format for API requests
+interface BlockData {
+  uuid: string
+  content: string
+  parent_uuid: string | null
+  children: string[]
+  collapsed: boolean
+  properties: Record<string, string>
+}
+
+// Convert frontend Block to API format
+export function blockToApiFormat(block: Block): BlockData {
+  return {
+    uuid: block.uuid,
+    content: block.content,
+    parent_uuid: block.parentUuid,
+    children: block.children,
+    collapsed: block.collapsed,
+    properties: block.properties,
+  }
+}
+
+// Convert Page blocks to API format
+export function pageBlocksToApiFormat(page: Page): BlockData[] {
+  return Object.values(page.blocks).map(blockToApiFormat)
+}
+
+// ============================================================================
 // Pages API
-export const pages = {
+// ============================================================================
+
+const _pages = {
   list: () => fetchJson<PageMeta[]>(`${API_BASE}/pages`),
 
   get: (name: string) => fetchJson<Page>(`${API_BASE}/pages/${encodeURIComponent(name)}`),
@@ -90,8 +126,13 @@ export const pages = {
     fetchJson<BacklinkRef[]>(`${API_BASE}/pages/${encodeURIComponent(name)}/backlinks`),
 }
 
+export const pages = isDemoMode ? demoApi.pages : _pages
+
+// ============================================================================
 // Journals API
-export const journals = {
+// ============================================================================
+
+const _journals = {
   list: () => fetchJson<PageMeta[]>(`${API_BASE}/journals`),
 
   get: (date: string) => fetchJson<Page>(`${API_BASE}/journals/${date}`),
@@ -102,6 +143,12 @@ export const journals = {
       body: JSON.stringify({ blocks, version }),
     }),
 }
+
+export const journals = isDemoMode ? demoApi.journals : _journals
+
+// ============================================================================
+// Search API
+// ============================================================================
 
 /** Search status for encrypted gardens */
 export interface SearchStatus {
@@ -116,40 +163,58 @@ export interface SearchResponse {
   status?: SearchStatus
 }
 
-// Search API
-export const search = {
+const _search = {
   query: (q: string, limit = 20) =>
     fetchJson<SearchResponse>(`${API_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 }
 
+export const search = isDemoMode ? demoApi.search : _search
+
+// ============================================================================
 // Links API
+// ============================================================================
+
 export interface WikilinkTargetsResponse {
   targets: string[]
 }
 
-export const links = {
+const _links = {
   /** Get all unique wikilink targets (pages referenced but not necessarily created) */
   getWikilinkTargets: () =>
     fetchJson<WikilinkTargetsResponse>(`${API_BASE}/links/wikilink-targets`),
 }
 
+export const links = isDemoMode ? demoApi.links : _links
+
+// ============================================================================
 // Graph API
-export const graph = {
+// ============================================================================
+
+const _graph = {
   get: () => fetchJson<Graph>(`${API_BASE}/graph`),
 }
 
-// Tag info from API
+export const graph = isDemoMode ? demoApi.graph : _graph
+
+// ============================================================================
+// Tags API
+// ============================================================================
+
 export interface TagInfo {
   name: string
   count: number
 }
 
-// Tags API
-export const tags = {
+const _tags = {
   list: () => fetchJson<TagInfo[]>(`${API_BASE}/tags`),
 }
 
-// Task item from API
+export const tags = isDemoMode ? demoApi.tags : _tags
+
+// ============================================================================
+// Todos API
+// ============================================================================
+
 export interface TaskItem {
   uuid: string
   status: string
@@ -163,18 +228,21 @@ export interface TaskItem {
   priority: string | null
 }
 
-// Task list from API
 export interface TaskList {
   tasks: TaskItem[]
 }
 
-// Todos API
-export const todos = {
+const _todos = {
   list: () => fetchJson<TaskList>(`${API_BASE}/todos`),
 }
 
+export const todos = isDemoMode ? demoApi.todos : _todos
+
+// ============================================================================
 // Git API
-export const git = {
+// ============================================================================
+
+const _git = {
   status: () => fetchJson<GitStatus>(`${API_BASE}/git/status`),
 
   backup: () =>
@@ -239,7 +307,12 @@ export const git = {
     }),
 }
 
-// Garden types
+export const git = isDemoMode ? demoApi.git : _git
+
+// ============================================================================
+// Gardens API
+// ============================================================================
+
 export interface Garden {
   id: string
   name: string
@@ -267,7 +340,6 @@ export interface GardensResponse {
   archived?: ArchivedGarden[]
 }
 
-// Response type for switch - may indicate unlock required
 export interface SwitchResponse {
   active?: string
   message: string
@@ -275,20 +347,15 @@ export interface SwitchResponse {
   garden_id?: string
 }
 
-/** Options for creating an encrypted garden */
 export interface CreateGardenOptions {
   name: string
   path: string
-  /** Passphrase for encryption. If provided, the garden will be encrypted. */
   passphrase?: string
-  /** Enable search for encrypted gardens (creates plaintext index). Default: false for encrypted. */
   searchEnabled?: boolean
-  /** Hours after last use before search index is auto-deleted. Default: 6 for encrypted. */
   indexTtlHours?: number
 }
 
-// Gardens API
-export const gardens = {
+const _gardens = {
   list: () => fetchJson<GardensResponse>(`${API_BASE}/gardens`),
 
   create: (options: CreateGardenOptions) =>
@@ -337,201 +404,13 @@ export const gardens = {
     }),
 }
 
-// Import types (legacy path-based)
-export interface ImportLogseqRequest {
-  sourcePath: string
-  overwrite?: boolean
-  dryRun?: boolean
-}
+export const gardens = isDemoMode ? demoApi.gardens : _gardens
 
-export interface BrokenLink {
-  sourceFile: string
-  target: string
-}
-
-export interface ImportResult {
-  pagesImported: number
-  journalsImported: number
-  skipped: number
-  brokenLinks: BrokenLink[]
-  warnings: string[]
-  dryRun: boolean
-}
-
-// Import progress event types (for streaming response)
-export type ImportProgress =
-  | { type: 'started'; message: string }
-  | { type: 'extracting'; message: string }
-  | { type: 'processing'; current: number; total: number; file: string }
-  | { type: 'imported'; file: string; target: string }
-  | { type: 'skipped'; file: string; reason: string }
-  | { type: 'failed'; file: string; error: string }
-  | { type: 'completed'; pagesImported: number; journalsImported: number; skipped: number; failed: number; hasAssets: boolean }
-  | { type: 'error'; message: string }
-
-// Import error types
-export interface ImportErrorSummary {
-  name: string
-  originalName: string
-  error: string
-  timestamp: string
-}
-
-export interface ImportErrorList {
-  errors: ImportErrorSummary[]
-}
-
-export interface ImportError {
-  originalName: string
-  error: string
-  content: string
-  timestamp: string
-  source: string
-}
-
-export interface AcceptErrorRequest {
-  contentType: string
-  date?: string
-  /** Optional edited content (if not provided, uses stored content) */
-  content?: string
-  /** Optional custom name for the file (if not provided, uses original name) */
-  name?: string
-}
-
-// Import API
-export const importApi = {
-  // Legacy path-based import
-  logseq: (req: ImportLogseqRequest) =>
-    fetchJson<ImportResult>(`${API_BASE}/import/logseq`, {
-      method: 'POST',
-      body: JSON.stringify(req),
-    }),
-
-  // New zip-based import with streaming progress
-  uploadLogseqZip: async (
-    file: File,
-    options: { overwrite?: boolean; importAssets?: boolean },
-    onProgress: (progress: ImportProgress) => void
-  ): Promise<void> => {
-    const formData = new FormData()
-    formData.append('file', file)
-    if (options.overwrite) formData.append('overwrite', 'true')
-    if (options.importAssets) formData.append('importAssets', 'true')
-
-    const response = await fetch(`${API_BASE}/import/logseq/upload`, {
-      method: 'POST',
-      body: formData,
-    })
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: response.statusText }))
-      throw new Error(`${response.status}: ${error.error || 'Upload failed'}`)
-    }
-
-    // Read streaming NDJSON response
-    const reader = response.body?.getReader()
-    if (!reader) throw new Error('No response body')
-
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || '' // Keep incomplete line in buffer
-
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const progress = JSON.parse(line) as ImportProgress
-            onProgress(progress)
-          } catch {
-            // Ignore malformed progress lines
-          }
-        }
-      }
-    }
-
-    // Process any remaining buffer content
-    if (buffer.trim()) {
-      try {
-        const progress = JSON.parse(buffer) as ImportProgress
-        onProgress(progress)
-      } catch {
-        // Ignore malformed final progress line
-      }
-    }
-  },
-
-  // Import error management
-  errors: {
-    list: () => fetchJson<ImportErrorList>(`${API_BASE}/import/errors`),
-
-    get: (name: string) =>
-      fetchJson<ImportError>(`${API_BASE}/import/errors/${encodeURIComponent(name)}`),
-
-    delete: (name: string) =>
-      fetchJson<{ deleted: string }>(`${API_BASE}/import/errors/${encodeURIComponent(name)}`, {
-        method: 'DELETE',
-      }),
-
-    deleteAll: () =>
-      fetchJson<{ deleted: number }>(`${API_BASE}/import/errors`, {
-        method: 'DELETE',
-      }),
-
-    accept: (name: string, req: AcceptErrorRequest) =>
-      fetchJson<{ saved: string; contentType: string; path: string }>(
-        `${API_BASE}/import/errors/${encodeURIComponent(name)}/accept`,
-        {
-          method: 'POST',
-          body: JSON.stringify(req),
-        }
-      ),
-  },
-}
-
-// Block data format for API requests
-interface BlockData {
-  uuid: string
-  content: string
-  parent_uuid: string | null
-  children: string[]
-  collapsed: boolean
-  properties: Record<string, string>
-}
-
-// Convert frontend Block to API format
-export function blockToApiFormat(block: Block): BlockData {
-  return {
-    uuid: block.uuid,
-    content: block.content,
-    parent_uuid: block.parentUuid,
-    children: block.children,
-    collapsed: block.collapsed,
-    properties: block.properties,
-  }
-}
-
-// Convert Page blocks to API format
-export function pageBlocksToApiFormat(page: Page): BlockData[] {
-  return Object.values(page.blocks).map(blockToApiFormat)
-}
-
-// Content Type definition (matches backend)
-export interface ContentType {
-  id: string
-  name: string
-  directory: string
-  saveByDate: boolean
-  template: string
-}
-
+// ============================================================================
 // Templates API
-export const templates = {
+// ============================================================================
+
+const _templates = {
   get: (contentTypeId: string) =>
     fetchJson<Page>(`${API_BASE}/templates/${encodeURIComponent(contentTypeId)}`),
 
@@ -542,8 +421,21 @@ export const templates = {
     }),
 }
 
+export const templates = isDemoMode ? demoApi.templates : _templates
+
+// ============================================================================
 // Content Types API
-export const contentTypes = {
+// ============================================================================
+
+export interface ContentType {
+  id: string
+  name: string
+  directory: string
+  saveByDate: boolean
+  template: string
+}
+
+const _contentTypes = {
   list: () => fetchJson<ContentType[]>(`${API_BASE}/content-types`),
 
   update: (types: ContentType[]) =>
@@ -553,8 +445,13 @@ export const contentTypes = {
     }),
 }
 
-// Sheets API (generic content type operations)
-export const sheets = {
+export const contentTypes = isDemoMode ? demoApi.contentTypes : _contentTypes
+
+// ============================================================================
+// Sheets API
+// ============================================================================
+
+const _sheets = {
   list: (contentTypeId: string) =>
     fetchJson<PageMeta[]>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}`),
 
@@ -585,22 +482,29 @@ export const sheets = {
   },
 }
 
+export const sheets = isDemoMode ? demoApi.sheets : _sheets
+
+// ============================================================================
 // Identity API
+// ============================================================================
+
 export interface WhoamiResponse {
   username: string
 }
 
-export const identity = {
+const _identity = {
   whoami: () => fetchJson<WhoamiResponse>(`${API_BASE}/whoami`),
 }
 
-// User preferences and state API (multi-tenant)
-// Preferences are stored on the server per-user
-export const user = {
-  // Get user preferences (theme, fonts, git settings, etc.)
+export const identity = isDemoMode ? demoApi.identity : _identity
+
+// ============================================================================
+// User API
+// ============================================================================
+
+const _user = {
   getPrefs: () => fetchJson<Record<string, unknown>>(`${API_BASE}/user/prefs`),
 
-  // Save user preferences
   savePrefs: (prefs: Record<string, unknown>) =>
     fetch(`${API_BASE}/user/prefs`, {
       method: 'PUT',
@@ -610,10 +514,8 @@ export const user = {
       if (!res.ok) throw new Error('Failed to save preferences')
     }),
 
-  // Get user UI state (sidebar, recent sheets, tag colors, etc.)
   getState: () => fetchJson<Record<string, unknown>>(`${API_BASE}/user/state`),
 
-  // Save user UI state
   saveState: (state: Record<string, unknown>) =>
     fetch(`${API_BASE}/user/state`, {
       method: 'PUT',
@@ -624,13 +526,13 @@ export const user = {
     }),
 }
 
-// Blocks API (for block references)
-export const blocks = {
-  /**
-   * Look up a block by UUID.
-   * Returns block data if found, null if not found (404).
-   * Throws on 403 (encrypted garden) or other errors.
-   */
+export const user = isDemoMode ? demoApi.user : _user
+
+// ============================================================================
+// Blocks API
+// ============================================================================
+
+const _blocks = {
   lookup: async (uuid: string): Promise<BlockRef | null> => {
     const res = await fetch(`${API_BASE}/blocks/${encodeURIComponent(uuid)}`, {
       headers: { 'Content-Type': 'application/json' },
@@ -649,7 +551,164 @@ export const blocks = {
   },
 }
 
+export const blocks = isDemoMode ? demoApi.blocks : _blocks
+
+// ============================================================================
+// Import API
+// ============================================================================
+
+export interface ImportLogseqRequest {
+  sourcePath: string
+  overwrite?: boolean
+  dryRun?: boolean
+}
+
+export interface BrokenLink {
+  sourceFile: string
+  target: string
+}
+
+export interface ImportResult {
+  pagesImported: number
+  journalsImported: number
+  skipped: number
+  brokenLinks: BrokenLink[]
+  warnings: string[]
+  dryRun: boolean
+}
+
+export type ImportProgress =
+  | { type: 'started'; message: string }
+  | { type: 'extracting'; message: string }
+  | { type: 'processing'; current: number; total: number; file: string }
+  | { type: 'imported'; file: string; target: string }
+  | { type: 'skipped'; file: string; reason: string }
+  | { type: 'failed'; file: string; error: string }
+  | { type: 'completed'; pagesImported: number; journalsImported: number; skipped: number; failed: number; hasAssets: boolean }
+  | { type: 'error'; message: string }
+
+export interface ImportErrorSummary {
+  name: string
+  originalName: string
+  error: string
+  timestamp: string
+}
+
+export interface ImportErrorList {
+  errors: ImportErrorSummary[]
+}
+
+export interface ImportError {
+  originalName: string
+  error: string
+  content: string
+  timestamp: string
+  source: string
+}
+
+export interface AcceptErrorRequest {
+  contentType: string
+  date?: string
+  content?: string
+  name?: string
+}
+
+const _importApi = {
+  logseq: (req: ImportLogseqRequest) =>
+    fetchJson<ImportResult>(`${API_BASE}/import/logseq`, {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  uploadLogseqZip: async (
+    file: File,
+    options: { overwrite?: boolean; importAssets?: boolean },
+    onProgress: (progress: ImportProgress) => void
+  ): Promise<void> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    if (options.overwrite) formData.append('overwrite', 'true')
+    if (options.importAssets) formData.append('importAssets', 'true')
+
+    const response = await fetch(`${API_BASE}/import/logseq/upload`, {
+      method: 'POST',
+      body: formData,
+    })
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(`${response.status}: ${error.error || 'Upload failed'}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.trim()) {
+          try {
+            const progress = JSON.parse(line) as ImportProgress
+            onProgress(progress)
+          } catch {
+            // Ignore malformed progress lines
+          }
+        }
+      }
+    }
+
+    if (buffer.trim()) {
+      try {
+        const progress = JSON.parse(buffer) as ImportProgress
+        onProgress(progress)
+      } catch {
+        // Ignore malformed final progress line
+      }
+    }
+  },
+
+  errors: {
+    list: () => fetchJson<ImportErrorList>(`${API_BASE}/import/errors`),
+
+    get: (name: string) =>
+      fetchJson<ImportError>(`${API_BASE}/import/errors/${encodeURIComponent(name)}`),
+
+    delete: (name: string) =>
+      fetchJson<{ deleted: string }>(`${API_BASE}/import/errors/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      }),
+
+    deleteAll: () =>
+      fetchJson<{ deleted: number }>(`${API_BASE}/import/errors`, {
+        method: 'DELETE',
+      }),
+
+    accept: (name: string, req: AcceptErrorRequest) =>
+      fetchJson<{ saved: string; contentType: string; path: string }>(
+        `${API_BASE}/import/errors/${encodeURIComponent(name)}/accept`,
+        {
+          method: 'POST',
+          body: JSON.stringify(req),
+        }
+      ),
+  },
+}
+
+export const importApi = isDemoMode ? demoApi.importApi : _importApi
+
+// ============================================================================
 // Reindex API
+// ============================================================================
+
 export interface ReindexResponse {
   pagesIndexed: number
   journalsIndexed: number
@@ -659,15 +718,19 @@ export interface ReindexResponse {
   message: string
 }
 
-export const reindex = {
-  /** Rebuild all indices (search, links, blocks) from disk */
+const _reindex = {
   rebuildAll: () =>
     fetchJson<ReindexResponse>(`${API_BASE}/reindex`, {
       method: 'POST',
     }),
 }
 
+export const reindex = isDemoMode ? demoApi.reindex : _reindex
+
+// ============================================================================
 // Stabilize API
+// ============================================================================
+
 export interface StabilizeResponse {
   stabilized: number
   alreadyStable: number
@@ -675,10 +738,11 @@ export interface StabilizeResponse {
   message: string
 }
 
-export const stabilize = {
-  /** Add Tend footers to files missing them, then rebuild indices */
+const _stabilize = {
   stabilizeUuids: () =>
     fetchJson<StabilizeResponse>(`${API_BASE}/stabilize`, {
       method: 'POST',
     }),
 }
+
+export const stabilize = isDemoMode ? demoApi.stabilize : _stabilize
