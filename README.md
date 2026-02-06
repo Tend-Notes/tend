@@ -28,7 +28,7 @@ docker run -d \
   --name tend \
   -p 3000:3000 \
   -v ~/tend-data:/data \
-  ghcr.io/crawfordlong/tend:latest
+  ghcr.io/tend-notes/tend:latest
 
 # Open http://localhost:3000
 ```
@@ -37,7 +37,7 @@ Or use Docker Compose:
 
 ```bash
 # Clone the repository
-git clone https://github.com/crawfordlong/tend.git
+git clone https://github.com/tend-notes/tend.git
 cd tend
 
 # Start with docker-compose
@@ -79,7 +79,7 @@ Add Tend to your NixOS configuration:
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    tend.url = "github:crawfordlong/tend";
+    tend.url = "github:tend-notes/tend";
   };
 
   outputs = { self, nixpkgs, tend }: {
@@ -130,10 +130,10 @@ Add Tend to your NixOS configuration:
 
 ```bash
 # Run directly
-nix run github:crawfordlong/tend
+nix run github:tend-notes/tend
 
 # Or build and run
-nix build github:crawfordlong/tend
+nix build github:tend-notes/tend
 ./result/bin/tend
 ```
 

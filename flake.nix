@@ -118,7 +118,7 @@
 
           meta = with pkgs.lib; {
             description = "A digital garden for your thoughts";
-            homepage = "https://github.com/crawfordlong/tend";
+            homepage = "https://github.com/tend-notes/tend";
             license = licenses.mit; # Note: With Commons Clause
             mainProgram = "tend";
           };
