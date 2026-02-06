@@ -4,10 +4,12 @@
 //! This module provides common functionality used across multiple route handlers
 //! to reduce code duplication.
 
-use tend_core::{Block, Page};
+use chrono::NaiveDate;
+use tend_core::{Block, ContentType, Page};
 use tracing::warn;
 
 use crate::error::AppError;
+use crate::indices::PageKey;
 use crate::state::GardenState;
 
 use super::pages::BlockData;
@@ -82,12 +84,14 @@ pub fn apply_block_updates(
     Ok(())
 }
 
-/// Update all indices (search, link, block) for a page.
+/// Update all indices (search, link, block, tag, todo) for a page.
 ///
 /// This function updates:
 /// 1. Search index (Tantivy) - if enabled
 /// 2. Link index - for backlink tracking
 /// 3. Block index - if available (not for encrypted gardens)
+/// 4. Tag index - for tag aggregation
+/// 5. Todo index - for task aggregation
 ///
 /// Failures are logged as warnings but do not cause the operation to fail,
 /// since the primary write has already succeeded.
@@ -97,6 +101,29 @@ pub fn apply_block_updates(
 /// * `page` - The page that was updated
 /// * `entity_type` - Human-readable name for log messages (e.g., "page", "journal", "sheet")
 pub async fn update_all_indices(garden: &GardenState, page: &Page, entity_type: &str) {
+    // For regular pages and journals, use appropriate content type
+    let (content_type, date) = if entity_type == "journal" {
+        // Parse date from page name (YYYY-MM-DD format)
+        let date = page.name.parse::<NaiveDate>().ok();
+        (ContentType::journal(), date)
+    } else {
+        (ContentType::page(), None)
+    };
+
+    update_all_indices_with_content_type(garden, page, entity_type, &content_type, date).await;
+}
+
+/// Update all indices for a sheet with explicit content type.
+///
+/// This is used for custom content types (sheets) where we need to specify
+/// the content type explicitly.
+pub async fn update_all_indices_with_content_type(
+    garden: &GardenState,
+    page: &Page,
+    entity_type: &str,
+    content_type: &ContentType,
+    date: Option<NaiveDate>,
+) {
     // Update search index (if search is enabled)
     if let Some(search_index) = &garden.search_index {
         let mut index = search_index.write().await;
@@ -122,5 +149,67 @@ pub async fn update_all_indices(garden: &GardenState, page: &Page, entity_type: 
         if let Err(e) = index.update_page(page) {
             warn!("Failed to update block index for {} {}: {}", entity_type, page.name, e);
         }
+    }
+
+    // Update tag index
+    {
+        let mut tag_index = garden.tag_index.write().await;
+        tag_index.index_page(page);
+    }
+
+    // Update todo index
+    {
+        let mut todo_index = garden.todo_index.write().await;
+        todo_index.index_page(page, content_type, date);
+    }
+}
+
+/// Remove a page from all indices.
+///
+/// This is called when a page is deleted.
+pub async fn remove_from_all_indices(
+    garden: &GardenState,
+    page_name: &str,
+    entity_type: &str,
+    content_type: &ContentType,
+    date: Option<NaiveDate>,
+) {
+    // Remove from search index
+    if let Some(search_index) = &garden.search_index {
+        let mut index = search_index.write().await;
+        if let Err(e) = index.remove_page(page_name) {
+            warn!("Failed to remove {} {} from search index: {}", entity_type, page_name, e);
+        } else if let Err(e) = index.commit() {
+            warn!("Failed to commit search index after removing {} {}: {}", entity_type, page_name, e);
+        }
+    }
+
+    // Remove from link index
+    {
+        let mut link_index = garden.link_index.write().await;
+        if let Err(e) = link_index.remove_page(page_name).await {
+            warn!("Failed to remove {} {} from link index: {}", entity_type, page_name, e);
+        }
+    }
+
+    // Remove from block index
+    if let Some(block_index) = &garden.block_index {
+        let mut index = block_index.lock().await;
+        if let Err(e) = index.delete_page(page_name) {
+            warn!("Failed to remove {} {} from block index: {}", entity_type, page_name, e);
+        }
+    }
+
+    // Remove from tag index
+    {
+        let mut tag_index = garden.tag_index.write().await;
+        tag_index.remove_page(page_name);
+    }
+
+    // Remove from todo index
+    {
+        let key = PageKey::new(&content_type.id, page_name, date);
+        let mut todo_index = garden.todo_index.write().await;
+        todo_index.remove_page(&key);
     }
 }

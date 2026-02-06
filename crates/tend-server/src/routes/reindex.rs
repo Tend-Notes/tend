@@ -33,6 +33,10 @@ pub struct ReindexResponse {
     pub block_count: Option<usize>,
     /// Number of search documents after rebuild (if search enabled)
     pub search_docs: Option<u64>,
+    /// Number of unique tags after rebuild
+    pub tag_count: usize,
+    /// Number of tasks after rebuild
+    pub task_count: usize,
     /// Human-readable summary message
     pub message: String,
 }
@@ -43,6 +47,8 @@ pub struct ReindexResponse {
 /// 1. The link index (wikilinks, tags, backlinks)
 /// 2. The search index (full-text search)
 /// 3. The block reference index (block UUID lookups)
+/// 4. The tag index (tag aggregation)
+/// 5. The todo index (task aggregation)
 ///
 /// Returns counts of what was indexed.
 pub async fn reindex(
@@ -117,11 +123,32 @@ pub async fn reindex(
         }
     };
 
-    // Get final link count
-    let link_entries = {
+    // 4. Rebuild tag index (requires read lock)
+    {
+        let garden = user_state.garden.read().await;
+        garden
+            .rebuild_tag_index()
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to rebuild tag index: {}", e)))?;
+    }
+
+    // 5. Rebuild todo index (requires read lock and content types)
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
+    {
+        let garden = user_state.garden.read().await;
+        garden
+            .rebuild_todo_index(&content_types)
+            .await
+            .map_err(|e| AppError::Internal(format!("Failed to rebuild todo index: {}", e)))?;
+    }
+
+    // Get final counts
+    let (link_entries, tag_count, task_count) = {
         let garden = user_state.garden.read().await;
         let link_index = garden.link_index.read().await;
-        link_index.len()
+        let tag_index = garden.tag_index.read().await;
+        let todo_index = garden.todo_index.read().await;
+        (link_index.len(), tag_index.len(), todo_index.len())
     };
 
     let total = pages_count + journals_count;
@@ -138,6 +165,8 @@ pub async fn reindex(
         link_entries,
         block_count,
         search_docs: search_doc_count,
+        tag_count,
+        task_count,
         message,
     }))
 }
@@ -305,6 +334,22 @@ pub async fn stabilize(
             let garden = user_state.garden.read().await;
             if let Err(e) = garden.rebuild_block_index().await {
                 tracing::warn!("Block index rebuild after stabilize skipped: {}", e);
+            }
+        }
+
+        // Rebuild tag index
+        {
+            let garden = user_state.garden.read().await;
+            if let Err(e) = garden.rebuild_tag_index().await {
+                tracing::warn!("Failed to rebuild tag index after stabilize: {}", e);
+            }
+        }
+
+        // Rebuild todo index
+        {
+            let garden = user_state.garden.read().await;
+            if let Err(e) = garden.rebuild_todo_index(&content_types).await {
+                tracing::warn!("Failed to rebuild todo index after stabilize: {}", e);
             }
         }
     }

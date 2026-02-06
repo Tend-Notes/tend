@@ -14,7 +14,8 @@ use crate::error::AppError;
 use crate::state::AppState;
 use crate::ws::{BroadcastEvent, WsEvent};
 
-use super::helpers::{apply_block_updates, update_all_indices};
+use super::helpers::{apply_block_updates, remove_from_all_indices, update_all_indices};
+use tend_core::ContentType;
 
 /// List all pages
 pub async fn list_pages(
@@ -217,28 +218,8 @@ pub async fn delete_page(
     let garden = user_state.garden.read().await;
     garden.file_manager.delete_page(&name).await?;
 
-    // Remove from search index (if search is enabled)
-    if let Some(search_index) = &garden.search_index {
-        let mut index = search_index.write().await;
-        index.remove_page(&name)?;
-        index.commit()?;
-    }
-
-    // Remove from link index
-    {
-        let mut link_index = garden.link_index.write().await;
-        if let Err(e) = link_index.remove_page(&name).await {
-            tracing::warn!("Failed to remove page {} from link index: {}", name, e);
-        }
-    }
-
-    // Remove from block index (if available - not for encrypted gardens)
-    if let Some(block_index) = &garden.block_index {
-        let mut index = block_index.lock().await;
-        if let Err(e) = index.delete_page(&name) {
-            tracing::warn!("Failed to remove page {} from block index: {}", name, e);
-        }
-    }
+    // Remove from all indices (search, link, block, tag, todo)
+    remove_from_all_indices(&garden, &name, "page", &ContentType::page(), None).await;
 
     debug!("Deleted page: {}", name);
     Ok(Json(serde_json::json!({ "deleted": name })))

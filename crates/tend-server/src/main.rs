@@ -16,6 +16,7 @@ use tracing::{info, Level};
 mod auth;
 mod config;
 mod error;
+mod indices;
 mod routes;
 mod state;
 mod ws;
