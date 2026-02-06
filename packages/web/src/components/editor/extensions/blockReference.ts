@@ -154,11 +154,18 @@ class BlockReferenceWidget extends WidgetType {
 
   toDOM(view: EditorView): HTMLElement {
     const container = document.createElement('span')
-    container.className = 'block-reference block-reference-loading'
     container.setAttribute('data-uuid', this.uuid)
 
-    // Start loading
-    this.loadContent(container, view)
+    // Check cache synchronously to avoid flicker on widget recreation
+    const cached = blockRefCache.get(this.uuid)
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      // Render immediately from cache - no loading state
+      this.renderEntry(container, cached, view)
+    } else {
+      // Not cached - show loading and fetch async
+      container.className = 'block-reference block-reference-loading'
+      this.loadContent(container, view)
+    }
 
     return container
   }
@@ -169,6 +176,13 @@ class BlockReferenceWidget extends WidgetType {
     // Widget might have been destroyed while loading
     if (!container.isConnected) return
 
+    this.renderEntry(container, entry, view)
+
+    // Trigger a redraw to ensure decorations are positioned correctly
+    view.requestMeasure()
+  }
+
+  private renderEntry(container: HTMLElement, entry: CacheEntry, _view: EditorView): void {
     container.classList.remove('block-reference-loading')
     container.innerHTML = ''
 
@@ -250,9 +264,6 @@ class BlockReferenceWidget extends WidgetType {
 
       container.appendChild(childrenBar)
     }
-
-    // Trigger a redraw to ensure decorations are positioned correctly
-    view.requestMeasure()
   }
 
   eq(other: BlockReferenceWidget): boolean {
