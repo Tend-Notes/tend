@@ -18,6 +18,7 @@ import { Toasts } from './components/ui/Toasts'
 import { useUIStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
+import { formatDateYMD } from './lib/dateUtils'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
 import { contentTypes as contentTypesApi, identity } from './lib/api'
@@ -142,7 +143,7 @@ function App() {
       // Alt + Shift + J - Navigate to today's journal (Home, works even when editing)
       if (e.altKey && e.shiftKey && e.code === 'KeyJ') {
         e.preventDefault()
-        navigateToJournal(new Date().toISOString().slice(0, 10))
+        navigateToJournal(formatDateYMD(new Date()))
         return
       }
 

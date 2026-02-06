@@ -10,6 +10,7 @@ import { EditorView } from '@codemirror/view'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../../stores/settingsStore'
 import { useUIStore } from '../../../stores/uiStore'
 import type { SlashCommandState } from './slashCommand'
+import { formatDateYMD } from '../../../lib/dateUtils'
 import { completeSlashCommand, cancelSlashCommand } from './slashCommand'
 
 interface SlashCommandSuggestionsProps {
@@ -106,7 +107,7 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
         label: "Today's Date",
         description: 'Insert link to today\'s journal',
         action: () => {
-          const today = new Date().toISOString().split('T')[0]
+          const today = formatDateYMD(new Date())
           return `[[journals/${today}]] `
         },
       },

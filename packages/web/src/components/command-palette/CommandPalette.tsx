@@ -7,6 +7,7 @@ import { useSettingsStore, type ContentType } from '../../stores/settingsStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useToastStore } from '../../stores/toastStore'
 import * as api from '../../lib/api'
+import { formatDateYMD } from '../../lib/dateUtils'
 
 interface CommandPaletteProps {
   open: boolean
@@ -116,7 +117,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setCreatingSheet(ct)
       setSheetName('')
       setUseToday(true)
-      setSheetDate(new Date().toISOString().split('T')[0])
+      setSheetDate(formatDateYMD(new Date()))
       setSheetError(null)
       clearPendingContentType()
 
@@ -133,7 +134,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     setCreatingSheet(contentType)
     setSheetName('')
     setUseToday(true)
-    setSheetDate(new Date().toISOString().split('T')[0])
+    setSheetDate(formatDateYMD(new Date()))
     setSheetError(null)
 
     // Load existing sheets for collision detection
@@ -161,7 +162,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     // Build the wiki link path based on content type
     // Format: [[directory/name]] or [[directory/date/name]] for saveByDate types
     const dateOption = creatingSheet.saveByDate
-      ? (useToday ? new Date().toISOString().split('T')[0] : sheetDate)
+      ? (useToday ? formatDateYMD(new Date()) : sheetDate)
       : undefined
     const linkPath = creatingSheet.saveByDate && dateOption
       ? `${creatingSheet.directory}/${dateOption}/${sheetName.trim()}`

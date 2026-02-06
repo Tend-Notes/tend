@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useSettingsStore, TASK_STATUS_SETS, type ContentType } from '../../stores/settingsStore'
+import { formatDateYMD } from '../../lib/dateUtils'
 
 export interface SlashCommand {
   id: string
@@ -76,7 +77,7 @@ const BASE_SLASH_COMMANDS: SlashCommand[] = [
     description: 'Insert current date',
     action: (ctx) => {
       const today = new Date()
-      const formatted = today.toISOString().split('T')[0]
+      const formatted = formatDateYMD(today)
       ctx.insertContent(`[[journal/${formatted}]]`)
     },
   },

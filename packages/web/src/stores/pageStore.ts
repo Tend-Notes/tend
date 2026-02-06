@@ -11,6 +11,7 @@ import { useActivityLogStore } from './activityLogStore'
 import { useSyncStatusStore } from './syncStatusStore'
 import { useSettingsStore, type ContentType } from './settingsStore'
 import { useRecentSheetsStore } from './recentSheetsStore'
+import { formatDateYMD } from '../lib/dateUtils'
 
 interface PageState {
   // Current page/journal being viewed
@@ -264,7 +265,7 @@ export const usePageStore = create<PageState>()(
     loadTodaysJournal: async () => {
       // Use browser's local date, not server's, so "Today" works correctly
       // when traveling across timezones
-      const today = new Date().toISOString().slice(0, 10)
+      const today = formatDateYMD(new Date())
       return get().navigateToJournal(today)
     },
 

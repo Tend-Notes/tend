@@ -7,7 +7,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import type { Page, Block } from '../../types'
 import { Plots } from './plots/Plots'
 import { DatePickerPopover } from '../ui/DatePickerPopover'
-import { formatShortDate } from '../../lib/dateUtils'
+import { formatShortDate, formatDateYMD } from '../../lib/dateUtils'
 
 interface ImportErrorEditorProps {
   errorName: string
@@ -101,7 +101,7 @@ export function ImportErrorEditor({
 
   // Default to today's date if not detected (consistent with CommandPalette date picker)
   const [sheetDate, setSheetDate] = useState(() =>
-    parsedFilename.date || new Date().toISOString().split('T')[0]
+    parsedFilename.date || formatDateYMD(new Date())
   )
   const [saving, setSaving] = useState(false)
   const [discarding, setDiscarding] = useState(false)
