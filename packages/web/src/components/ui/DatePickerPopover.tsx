@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Date picker popover for task due dates and start dates
 
-import { useState, useRef, useEffect, useMemo, useLayoutEffect } from 'react'
+import { useState, useRef, useMemo, useLayoutEffect } from 'react'
 import { formatDateYMD, getDateOffset, getNextMonday, getNextMonth } from '../../lib/dateUtils'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 interface DatePickerPopoverProps {
   value: string | null
@@ -57,27 +59,8 @@ export function DatePickerPopover({ value, onChange, onClose, label }: DatePicke
   const [viewYear, setViewYear] = useState(initialDate.year)
   const [viewMonth, setViewMonth] = useState(initialDate.month)
 
-  // Close on click outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [onClose])
-
-  // Close on Escape
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useClickOutside(popoverRef, onClose)
+  useEscapeKey(onClose)
 
   // Navigate months
   const goToPrevMonth = () => {
