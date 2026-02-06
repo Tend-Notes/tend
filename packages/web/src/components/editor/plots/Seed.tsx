@@ -239,8 +239,8 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
   // Parse and render content
   const tokens = useMemo(() => parseContent(content), [content])
   const renderedNodes = useMemo(
-    () => renderContentReact(tokens, handleLinkNavigate, getTagColors),
-    [tokens, handleLinkNavigate, getTagColors]
+    () => renderContentReact(tokens, handleLinkNavigate, getTagColors, navigateToPage),
+    [tokens, handleLinkNavigate, getTagColors, navigateToPage]
   )
 
   // Handle click: determine caret offset and call onActivate

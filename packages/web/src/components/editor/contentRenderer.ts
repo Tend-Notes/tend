@@ -5,7 +5,9 @@
 // URLs, task statuses, block references, header prefixes) and renderers for both
 // CodeMirror DOM widgets and React components.
 
-import React from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { blocks } from '../../lib/api'
+import type { BlockRef } from '../../types'
 
 /**
  * Tag color values for rendering tags
@@ -325,6 +327,133 @@ export function renderContent(
   return fragment
 }
 
+// ============================================================================
+// Block Reference Display (React component for dormant mode)
+// ============================================================================
+
+// Simple cache for block references (shared across all BlockReferenceDisplay instances)
+const blockRefReactCache = new Map<string, { data: BlockRef | null; timestamp: number }>()
+const BLOCK_REF_CACHE_TTL = 60000 // 1 minute
+
+interface BlockReferenceDisplayProps {
+  uuid: string
+  onNavigate?: (target: string) => void
+  onLinkNavigate?: (target: string) => void
+  getTagColors?: (name: string) => TagColors
+}
+
+/**
+ * React component that fetches and displays a block reference.
+ * Used by DormantSeed to render block references without CodeMirror.
+ */
+function BlockReferenceDisplay({ uuid, onNavigate, onLinkNavigate, getTagColors }: BlockReferenceDisplayProps) {
+  const [blockData, setBlockData] = useState<BlockRef | null | 'loading' | 'error'>('loading')
+
+  useEffect(() => {
+    let cancelled = false
+
+    // Check cache first
+    const cached = blockRefReactCache.get(uuid)
+    if (cached && Date.now() - cached.timestamp < BLOCK_REF_CACHE_TTL) {
+      setBlockData(cached.data)
+      return
+    }
+
+    // Fetch block data
+    blocks.lookup(uuid).then((data) => {
+      if (cancelled) return
+      blockRefReactCache.set(uuid, { data, timestamp: Date.now() })
+      setBlockData(data)
+    }).catch(() => {
+      if (cancelled) return
+      setBlockData('error')
+    })
+
+    return () => { cancelled = true }
+  }, [uuid])
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (blockData && blockData !== 'loading' && blockData !== 'error') {
+      onNavigate?.(blockData.pageName)
+    }
+  }, [blockData, onNavigate])
+
+  // Loading state
+  if (blockData === 'loading') {
+    return React.createElement(
+      'span',
+      { className: 'block-reference block-reference-loading', 'data-block-ref': uuid },
+      '...'
+    )
+  }
+
+  // Error state
+  if (blockData === 'error') {
+    return React.createElement(
+      'span',
+      { className: 'block-reference block-reference-error', 'data-block-ref': uuid },
+      'failed to load'
+    )
+  }
+
+  // Not found
+  if (blockData === null) {
+    return React.createElement(
+      'span',
+      { className: 'block-reference block-reference-missing', 'data-block-ref': uuid },
+      'reference missing'
+    )
+  }
+
+  // Parse and render the referenced content
+  const contentTokens = parseContent(blockData.content)
+  const renderedContent = renderContentReact(contentTokens, onLinkNavigate, getTagColors)
+
+  // Render like the CodeMirror widget: chain icon + content
+  return React.createElement(
+    'span',
+    { className: 'block-reference', 'data-block-ref': uuid },
+    // Chain link icon (clickable to navigate)
+    React.createElement(
+      'span',
+      {
+        className: 'block-reference-chain',
+        onClick: handleClick,
+        title: `Go to ${blockData.pageName}`,
+      },
+      React.createElement(
+        'svg',
+        {
+          width: 14,
+          height: 14,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: 2,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+        },
+        React.createElement('path', { d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' }),
+        React.createElement('path', { d: 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' })
+      )
+    ),
+    // Content
+    React.createElement(
+      'span',
+      { className: 'block-reference-content' },
+      renderedContent
+    ),
+    // Children indicator (if has children)
+    blockData.hasChildren && React.createElement(
+      'span',
+      { className: 'block-reference-children' },
+      'View sub-bullets'
+    )
+  )
+}
+
 /**
  * Render parsed content tokens as React elements.
  * Returns an array of React nodes suitable for use in JSX.
@@ -332,7 +461,8 @@ export function renderContent(
 export function renderContentReact(
   tokens: ContentToken[],
   onLinkNavigate?: (target: string) => void,
-  getTagColors?: (name: string) => TagColors
+  getTagColors?: (name: string) => TagColors,
+  onBlockRefNavigate?: (pageName: string) => void
 ): React.ReactNode[] {
   const nodes: React.ReactNode[] = []
 
@@ -474,11 +604,13 @@ export function renderContentReact(
       }
       case 'blockReference': {
         nodes.push(
-          React.createElement(
-            'span',
-            { key, 'data-block-ref': token.uuid },
-            `((${token.uuid}))`
-          )
+          React.createElement(BlockReferenceDisplay, {
+            key,
+            uuid: token.uuid,
+            onNavigate: onBlockRefNavigate,
+            onLinkNavigate,
+            getTagColors,
+          })
         )
         break
       }
