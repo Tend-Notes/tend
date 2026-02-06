@@ -8,7 +8,7 @@ import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
-import { contentTypes as contentTypesApi } from '../../lib/api'
+import { contentTypes as contentTypesApi, isDemoMode } from '../../lib/api'
 import {
   getDarkThemes,
   getLightThemes,
@@ -26,15 +26,16 @@ interface SidebarOptionsProps {
 }
 
 // Section IDs
-type SectionId = 'appearance' | 'tasks' | 'backup' | 'content-types' | 'gardens' | 'import'
+type SectionId = 'appearance' | 'tasks' | 'backup' | 'content-types' | 'gardens' | 'import' | 'demo'
 
-const SECTIONS: { id: SectionId; label: string }[] = [
+const SECTIONS: { id: SectionId; label: string; hideInDemo?: boolean; demoOnly?: boolean }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'tasks', label: 'Tasks' },
-  { id: 'backup', label: 'Backup' },
+  { id: 'demo', label: 'Demo', demoOnly: true },
+  { id: 'backup', label: 'Backup', hideInDemo: true },
   { id: 'content-types', label: 'Content Types' },
-  { id: 'gardens', label: 'Gardens' },
-  { id: 'import', label: 'Import' },
+  { id: 'gardens', label: 'Gardens', hideInDemo: true },
+  { id: 'import', label: 'Import', hideInDemo: true },
 ]
 
 export function SidebarOptions({ onBack }: SidebarOptionsProps) {
@@ -43,6 +44,13 @@ export function SidebarOptions({ onBack }: SidebarOptionsProps) {
   const handleSectionClick = (sectionId: SectionId) => {
     setOpenSection(openSection === sectionId ? null : sectionId)
   }
+
+  // Filter sections based on demo mode
+  const visibleSections = SECTIONS.filter(section => {
+    if (isDemoMode && section.hideInDemo) return false
+    if (!isDemoMode && section.demoOnly) return false
+    return true
+  })
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
@@ -63,7 +71,7 @@ export function SidebarOptions({ onBack }: SidebarOptionsProps) {
 
       {/* Sections */}
       <div className="flex-1 overflow-y-auto">
-        {SECTIONS.map(({ id, label }) => (
+        {visibleSections.map(({ id, label }) => (
           <CollapsibleSection
             key={id}
             id={id}
@@ -73,6 +81,7 @@ export function SidebarOptions({ onBack }: SidebarOptionsProps) {
           >
             {id === 'appearance' && <AppearanceSection />}
             {id === 'tasks' && <TasksSection />}
+            {id === 'demo' && <DemoSection />}
             {id === 'backup' && <BackupSection />}
             {id === 'content-types' && <ContentTypesSection />}
             {id === 'gardens' && <GardensSection />}
@@ -662,6 +671,105 @@ function TasksSection() {
       <p className="text-xs text-base-03 italic">
         Custom status keywords coming in a future update.
       </p>
+    </div>
+  )
+}
+
+// Demo section - shown only in demo mode
+function DemoSection() {
+  const [expiryHours, setExpiryHoursState] = useState(6)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const loadExpiry = async () => {
+      try {
+        const { getExpiryHours } = await import('../../lib/demoStore')
+        const hours = await getExpiryHours()
+        setExpiryHoursState(hours)
+      } catch {
+        // Use default
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadExpiry()
+  }, [])
+
+  const handleExpiryChange = async (hours: number) => {
+    setExpiryHoursState(hours)
+    try {
+      const { setExpiryHours } = await import('../../lib/demoStore')
+      await setExpiryHours(hours)
+    } catch {
+      // Ignore errors
+    }
+  }
+
+  const handleClearData = async () => {
+    if (!confirm('This will clear all your demo data and start fresh. Continue?')) return
+    try {
+      const { resetDemoContent } = await import('../../lib/demoContent')
+      await resetDemoContent()
+      window.location.reload()
+    } catch (err) {
+      console.error('Failed to clear demo data:', err)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-base-03">
+        You are using Tend in demo mode. Your notes are stored in your browser only.
+      </p>
+
+      {/* Expiry hours setting */}
+      <SettingsRow label="Session expires after">
+        <div className="flex items-center gap-2">
+          {loading ? (
+            <span className="text-xs text-base-03">...</span>
+          ) : (
+            <>
+              <input
+                type="range"
+                min={3}
+                max={24}
+                value={expiryHours}
+                onChange={(e) => handleExpiryChange(Number(e.target.value))}
+                className="w-20 h-1 bg-base-02 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-base-0D"
+              />
+              <span className="text-xs text-base-05 w-6 text-right">{expiryHours}h</span>
+            </>
+          )}
+        </div>
+      </SettingsRow>
+      <p className="text-xs text-base-03">
+        of inactivity
+      </p>
+
+      {/* Clear data button */}
+      <div className="pt-2 border-t border-base-02">
+        <button
+          onClick={handleClearData}
+          className="w-full py-1.5 text-xs text-base-08 hover:text-base-09 border border-base-08/30 rounded transition-colors hover:bg-base-08/10"
+        >
+          Clear all demo data
+        </button>
+      </div>
+
+      {/* Install link */}
+      <div className="pt-2">
+        <p className="text-xs text-base-03">
+          Want to keep your notes?{' '}
+          <a
+            href="https://github.com/tend-notes/tend"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-base-0D hover:underline"
+          >
+            Install Tend
+          </a>
+        </p>
+      </div>
     </div>
   )
 }

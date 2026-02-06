@@ -20,6 +20,9 @@ import type {
   BlockRef,
 } from '../types'
 
+// Demo mode detection - used by components to conditionally import from demoApi
+export const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+
 const API_BASE = '/api/v1'
 
 /**

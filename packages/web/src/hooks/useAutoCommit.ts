@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Auto-commit hook - manages periodic and smart commit triggers
+// Skipped in demo mode since there's no git backend.
 
 import { useEffect, useRef, useCallback } from 'react'
 import { useGitStore, SMART_THRESHOLDS } from '../stores/gitStore'
@@ -7,6 +8,7 @@ import { usePageStore } from '../stores/pageStore'
 import { useActivityLogStore } from '../stores/activityLogStore'
 import { useSyncStatusStore } from '../stores/syncStatusStore'
 import * as api from '../lib/api'
+import { isDemoMode } from '../lib/api'
 
 // Calculate total character count from blocks
 function calculateTotalChars(blocks: Record<string, { content: string }>): number {
@@ -33,6 +35,8 @@ export function useAutoCommit() {
 
   // Trigger auto-commit
   const triggerAutoCommit = useCallback(async () => {
+    // Skip in demo mode - no git backend
+    if (isDemoMode) return
     if (!autoCommitEnabled) return
 
     try {

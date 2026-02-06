@@ -7,7 +7,7 @@ import { useSyncStatusStore } from '../stores/syncStatusStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 import { useRecentSheetsStore } from '../stores/recentSheetsStore'
-import { contentTypes as contentTypesApi } from '../lib/api'
+import { contentTypes as contentTypesApi, isDemoMode } from '../lib/api'
 
 // WebSocket event types (must match server-side WsEvent enum)
 interface WsEventBase {
@@ -77,6 +77,7 @@ type WsEvent =
 /**
  * Hook that maintains a WebSocket connection to the server for real-time updates.
  * Automatically handles reconnection and dispatches events to relevant stores.
+ * Skips connection in demo mode since there's no backend server.
  */
 export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
@@ -84,6 +85,11 @@ export function useWebSocket() {
   const closingIntentionallyRef = useRef(false)
 
   useEffect(() => {
+    // Skip WebSocket in demo mode - no backend server
+    if (isDemoMode) {
+      return
+    }
+
     const connect = () => {
       // Clear any pending reconnect
       if (reconnectTimeoutRef.current) {

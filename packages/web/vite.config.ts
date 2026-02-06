@@ -3,11 +3,17 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import path from 'path'
 
+// Check if building for demo mode (GitHub Pages deployment)
+const isDemo = process.env.VITE_DEMO_MODE === 'true'
+
 // https://vite.dev/config/
 export default defineConfig({
+  // Use /tend/ base path for GitHub Pages demo, root for normal deployment
+  base: isDemo ? '/tend/' : '/',
   plugins: [
     react(),
-    VitePWA({
+    // PWA is disabled in demo mode since there's no backend to cache
+    !isDemo && VitePWA({
       registerType: 'autoUpdate',
       // Force new service worker to activate immediately (helps with stale caches)
       devOptions: {
@@ -84,7 +90,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
       },
     }),
-  ],
+  ].filter(Boolean),
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

@@ -5,7 +5,7 @@ import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { useTagStore } from '../../stores/tagStore'
-import { todos as todosApi, type TaskItem } from '../../lib/api'
+import { todos as todosApi, isDemoMode, type TaskItem } from '../../lib/api'
 import { formatDateYMD } from '../../lib/dateUtils'
 import { SidebarOptions } from './SidebarOptions'
 import { SidebarTags } from './SidebarTags'
@@ -435,19 +435,22 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 <circle cx="4" cy="9" r="2" />
               </svg>
             </button>
-            <button
-              onClick={() => onModeChange(mode === 'history' ? 'navigation' : 'history')}
-              className={`p-3 rounded-lg transition-colors ${
-                mode === 'history' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
-              }`}
-              title="History"
-            >
-              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v5h5" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l4 2" />
-              </svg>
-            </button>
+            {/* History button - hidden in demo mode (no git backend) */}
+            {!isDemoMode && (
+              <button
+                onClick={() => onModeChange(mode === 'history' ? 'navigation' : 'history')}
+                className={`p-3 rounded-lg transition-colors ${
+                  mode === 'history' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+                }`}
+                title="History"
+              >
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v5h5" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l4 2" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => onModeChange(mode === 'options' ? 'navigation' : 'options')}
               className={`p-3 rounded-lg transition-colors ${
@@ -550,20 +553,23 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
                 <circle cx="4" cy="9" r="2" />
               </svg>
             </button>
-            <button
-              onClick={() => onModeChange(mode === 'history' ? 'navigation' : 'history')}
-              className={`p-2 rounded-lg transition-colors ${
-                mode === 'history' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
-              }`}
-              style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
-              title="History"
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v5h5" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l4 2" />
-              </svg>
-            </button>
+            {/* History button - hidden in demo mode (no git backend) */}
+            {!isDemoMode && (
+              <button
+                onClick={() => onModeChange(mode === 'history' ? 'navigation' : 'history')}
+                className={`p-2 rounded-lg transition-colors ${
+                  mode === 'history' ? 'text-base-06 bg-base-02' : 'text-base-04 hover:text-base-05'
+                }`}
+                style={{ boxShadow: 'inset 0 0 0 1px var(--base02)' }}
+                title="History"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v5h5" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 7v5l4 2" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => onModeChange(mode === 'options' ? 'navigation' : 'options')}
               className={`p-2 rounded-lg transition-colors ${

@@ -6,6 +6,7 @@ import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
 import { LogseqImportDialog } from './components/ui/LogseqImportDialog'
 import { WorkTimerBanner } from './components/ui/WorkTimerBanner'
+import { DemoBanner } from './components/ui/DemoBanner'
 import { usePageStore } from './stores/pageStore'
 import { useRecentSheetsStore } from './stores/recentSheetsStore'
 import { useTagStore } from './stores/tagStore'
@@ -21,11 +22,17 @@ import { useAutoCommit } from './hooks/useAutoCommit'
 import { formatDateYMD } from './lib/dateUtils'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
-import { contentTypes as contentTypesApi, identity } from './lib/api'
+import { contentTypes as contentTypesApi, identity, isDemoMode } from './lib/api'
 import { initUserSync } from './lib/userSync'
+
+// Demo mode imports (only loaded in demo mode)
+import { initializeDemoContent, resetDemoContent } from './lib/demoContent'
+import { checkExpiry, initDemoDb } from './lib/demoStore'
+import { contentTypes as demoContentTypes } from './lib/demoApi'
 
 function App() {
   const [keyboardHelpOpen, setKeyboardHelpOpen] = useState(false)
+  const [demoExpired, setDemoExpired] = useState(false)
   const sidebarMode = useUIStore((state) => state.sidebarMode)
   const setSidebarMode = useUIStore((state) => state.setSidebarMode)
   const commandPaletteOpen = useUIStore((state) => state.commandPaletteOpen)
@@ -33,7 +40,7 @@ function App() {
   const closeCommandPalette = useUIStore((state) => state.closeCommandPalette)
   const importDialogOpen = useUIStore((state) => state.importDialogOpen)
   const closeImportDialog = useUIStore((state) => state.closeImportDialog)
-    const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
+  const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
   const toggleSidebar = useUIStore((state) => state.toggleSidebar)
@@ -42,45 +49,94 @@ function App() {
   const clearRecentSheets = useRecentSheetsStore((state) => state.clearAll)
   const clearTags = useTagStore((state) => state.reset)
 
-  // Initialize auto-commit system
+  // Initialize auto-commit system (skip in demo mode - no git)
   useAutoCommit()
 
-  // Initialize WebSocket connection for real-time updates
+  // Initialize WebSocket connection for real-time updates (skip in demo mode)
   useWebSocket()
 
   // Apply theme based on user settings
   useTheme()
 
+  // Demo mode: Handle expiry reset
+  const handleDemoReset = async () => {
+    await resetDemoContent()
+    setDemoExpired(false)
+    window.location.reload()
+  }
+
   // Load initial data and handle URL - runs once on mount
   useEffect(() => {
-    // Load user preferences and state from server (multi-tenant support)
-    // This overwrites any localStorage cache with the server's authoritative data
-    identity.whoami()
-      .then(async ({ username }) => {
-        const lastUser = localStorage.getItem('tend-last-user')
-        if (lastUser && lastUser !== username) {
-          // Clear localStorage cache - server will provide correct data
-          clearRecentSheets()
-          clearTags()
-          // Redirect to home - current path may not exist for new user
-          window.history.replaceState(null, '', '/')
+    if (isDemoMode) {
+      // Demo mode initialization
+      const initDemo = async () => {
+        try {
+          // Clear any cached state from previous non-demo sessions
+          // This prevents showing stale data from backend-connected sessions
+          const lastMode = localStorage.getItem('tend-last-mode')
+          if (lastMode !== 'demo') {
+            clearRecentSheets()
+            clearTags()
+            usePageStore.getState().reset()
+            useUIStore.getState().reset()
+            localStorage.setItem('tend-last-mode', 'demo')
+          }
+
+          // Initialize IndexedDB
+          await initDemoDb()
+
+          // Check for expiry
+          const expired = await checkExpiry()
+          if (expired) {
+            setDemoExpired(true)
+            return
+          }
+
+          // Initialize demo content if not already done
+          await initializeDemoContent()
+
+          // Load content types (hardcoded in demo mode)
+          const types = await demoContentTypes.list()
+          setContentTypes(types)
+
+          // Initialize page from URL
+          initializeFromUrl()
+        } catch (err) {
+          console.error('Failed to initialize demo mode:', err)
         }
-        localStorage.setItem('tend-last-user', username)
+      }
+      initDemo()
+    } else {
+      // Normal mode: Load user preferences and state from server (multi-tenant support)
+      // This overwrites any localStorage cache with the server's authoritative data
+      localStorage.setItem('tend-last-mode', 'server')
+      identity.whoami()
+        .then(async ({ username }) => {
+          const lastUser = localStorage.getItem('tend-last-user')
+          if (lastUser && lastUser !== username) {
+            // Clear localStorage cache - server will provide correct data
+            clearRecentSheets()
+            clearTags()
+            // Redirect to home - current path may not exist for new user
+            window.history.replaceState(null, '', '/')
+          }
+          localStorage.setItem('tend-last-user', username)
 
-        // Load user's preferences and state from server, then start syncing
-        await initUserSync()
+          // Load user's preferences and state from server, then start syncing
+          await initUserSync()
 
-        // Initialize page from URL AFTER user sync (URL may have been redirected)
-        initializeFromUrl()
-      })
-      .catch((err) => console.error('Failed to get current user:', err))
+          // Initialize page from URL AFTER user sync (URL may have been redirected)
+          initializeFromUrl()
+        })
+        .catch((err) => console.error('Failed to get current user:', err))
 
-    // Load content types from API (needed for content type routing)
-    contentTypesApi.list()
-      .then((types) => {
-        setContentTypes(types)
-      })
-      .catch((err) => console.error('Failed to load content types:', err))
+      // Load content types from API (needed for content type routing)
+      contentTypesApi.list()
+        .then((types) => {
+          setContentTypes(types)
+        })
+        .catch((err) => console.error('Failed to load content types:', err))
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Run only on mount - these are stable store actions
 
@@ -176,8 +232,44 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode, navigateToJournal])
 
+  // Demo expiry modal
+  if (isDemoMode && demoExpired) {
+    return (
+      <div className="flex items-center justify-center h-screen w-full bg-base-00 text-base-05">
+        <div className="max-w-md mx-4 p-6 bg-base-01 border border-base-02 rounded-lg text-center">
+          <svg
+            className="w-12 h-12 mx-auto mb-4 text-base-0A"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+            />
+          </svg>
+          <h1 className="text-xl font-semibold mb-2">Demo Session Expired</h1>
+          <p className="text-base-04 mb-6">
+            Your demo session has expired due to inactivity. Click below to start fresh with new demo content.
+          </p>
+          <button
+            onClick={handleDemoReset}
+            className="px-6 py-2 bg-base-0D text-base-00 rounded-lg hover:opacity-90 transition-opacity"
+          >
+            Start Fresh
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-screen w-full max-w-full overflow-hidden bg-base-00 text-base-05">
+      {/* Demo mode banner - shows in demo mode */}
+      {isDemoMode && <DemoBanner />}
+
       {/* Work timer banner - shows at very top when active */}
       <WorkTimerBanner />
 
