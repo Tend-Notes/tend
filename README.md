@@ -11,7 +11,7 @@ A self-hosted digital garden for your thoughts. Tend is a browser-based outliner
 - **Git backup** - Automatic commits with optional push to remote
 - **Knowledge graph** - Visualize connections between pages
 - **Theming** - 200+ Base16/Base24 themes
-- **Logseq-compatible** - Markdown files with block IDs
+- **Markdown with structure** - Markdown files with block IDs
 
 ## Quick Start
 
@@ -182,7 +182,7 @@ garden/
 └── .git/
 ```
 
-Files are Logseq-compatible Markdown with block IDs:
+Files are Markdown with block IDs:
 
 ```markdown
 - This is a block with a [[wiki-link]]
