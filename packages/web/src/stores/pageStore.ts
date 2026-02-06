@@ -22,7 +22,6 @@ interface PageState {
   error: string | null
 
   // Draft state
-  hasUnsavedChanges: boolean
   pendingDraftRecovery: {
     pageName: string
     blocks: Block[]
@@ -175,7 +174,7 @@ let lastSaveTimestamp: number = 0
 
 // Grace period after a save during which file watcher events are ignored
 // This prevents race conditions where the file watcher triggers faster
-// than we can update hasUnsavedChanges
+// than we can update sync status
 const SAVE_GRACE_PERIOD_MS = 2000
 
 /**
@@ -186,8 +185,8 @@ const SAVE_GRACE_PERIOD_MS = 2000
  * - We just completed a save recently (within grace period)
  */
 export function shouldSkipFileWatcherReload(): boolean {
-  // Check for unsaved changes
-  const hasUnsaved = usePageStore.getState().hasUnsavedChanges
+  // Check for unsaved changes via syncStatusStore (single source of truth)
+  const hasUnsaved = useSyncStatusStore.getState().status === 'unsaved'
   if (hasUnsaved) return true
 
   // Check for pending debounced save
@@ -255,7 +254,6 @@ export const usePageStore = create<PageState>()(
     currentPageName: null,
     isLoading: false,
     error: null,
-    hasUnsavedChanges: false,
     pendingDraftRecovery: null,
     pendingConflict: null,
     editingTemplate: null,
@@ -281,9 +279,11 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.isLoading = true
         state.error = null
-        state.hasUnsavedChanges = false
         state.pendingDraftRecovery = null
       })
+
+      // Reset sync status when navigating to a new page
+      useSyncStatusStore.getState().reset()
 
       // Check if this is a content type path (e.g., "person/John Smith" or "meeting/2026-01-23/Name")
       // by looking for a matching content type directory
@@ -417,9 +417,11 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.isLoading = true
         state.error = null
-        state.hasUnsavedChanges = false
         state.pendingDraftRecovery = null
       })
+
+      // Reset sync status when navigating to a new page
+      useSyncStatusStore.getState().reset()
 
       try {
         const page = await api.journals.get(date)
@@ -606,11 +608,10 @@ export const usePageStore = create<PageState>()(
         if (state.currentPage) {
           state.currentPage.blocks = blockMap
           state.currentPage.rootBlocks = finalRoots
-          state.hasUnsavedChanges = true
         }
       })
 
-      // Update sync status to unsaved
+      // Update sync status to unsaved (single source of truth for unsaved state)
       useSyncStatusStore.getState().setUnsaved()
 
       // Debounced draft save (faster than server save for data loss prevention)
@@ -682,7 +683,6 @@ export const usePageStore = create<PageState>()(
           useActivityLogStore.getState().addEntry('file_save', pageName)
           useSyncStatusStore.getState().setSaved()
           set((state) => {
-            state.hasUnsavedChanges = false
             if (state.currentPage && state.currentPage.name === pageName) {
               state.currentPage.version = updatedPage.version
               state.currentPage.modifiedAt = updatedPage.modifiedAt
@@ -728,9 +728,11 @@ export const usePageStore = create<PageState>()(
           state.currentPage.blocks = blockMap
           state.currentPage.rootBlocks = pendingDraftRecovery.rootBlocks
           state.pendingDraftRecovery = null
-          state.hasUnsavedChanges = true
         }
       })
+
+      // Mark as unsaved (will be saved by updateCurrentPage below)
+      useSyncStatusStore.getState().setUnsaved()
 
       // Trigger a save to server
       get().updateCurrentPage(pendingDraftRecovery.blocks)
@@ -774,8 +776,9 @@ export const usePageStore = create<PageState>()(
         // Record save timestamp to ignore file watcher events
         lastSaveTimestamp = Date.now()
         await draftStore.deleteDraft(localPage.name)
+        // Update sync status to saved
+        useSyncStatusStore.getState().setSaved()
         set((state) => {
-          state.hasUnsavedChanges = false
           if (state.currentPage) {
             state.currentPage.version = updatedPage.version
             state.currentPage.modifiedAt = updatedPage.modifiedAt
@@ -867,7 +870,6 @@ export const usePageStore = create<PageState>()(
           useActivityLogStore.getState().addEntry('file_save', pageName)
           useSyncStatusStore.getState().setSaved()
           set((state) => {
-            state.hasUnsavedChanges = false
             if (state.currentPage && state.currentPage.name === pageName) {
               state.currentPage.version = updatedPage.version
               state.currentPage.modifiedAt = updatedPage.modifiedAt
@@ -898,13 +900,15 @@ export const usePageStore = create<PageState>()(
       }
       pendingSaveData = null
 
+      // Reset sync status store
+      useSyncStatusStore.getState().reset()
+
       // Reset all state to initial values
       set((state) => {
         state.currentPage = null
         state.currentPageName = null
         state.isLoading = false
         state.error = null
-        state.hasUnsavedChanges = false
         state.pendingDraftRecovery = null
         state.pendingConflict = null
         state.editingTemplate = null
