@@ -17,6 +17,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::info;
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
+use crate::indices::{TagIndex, TodoIndex};
 use crate::ws::{BroadcastEvent, EventSender, WsEvent};
 use std::time::Duration;
 use tend_storage::watcher::SimpleFileWatcher;
@@ -202,6 +203,10 @@ pub struct GardenState {
     pub link_index: Arc<RwLock<LinkIndex>>,
     /// Block index for block reference lookups - None for encrypted gardens
     pub block_index: Option<Arc<Mutex<BlockIndex>>>,
+    /// Tag index for efficient tag lookups
+    pub tag_index: Arc<RwLock<TagIndex>>,
+    /// Todo index for efficient todo lookups
+    pub todo_index: Arc<RwLock<TodoIndex>>,
     pub backup_manager: BackupManager,
     /// Whether this garden is encrypted
     pub encrypted: bool,
@@ -302,6 +307,10 @@ impl GardenState {
             }
         };
 
+        // Initialize tag and todo indices (empty, populated lazily or on rebuild)
+        let tag_index = Arc::new(RwLock::new(TagIndex::new()));
+        let todo_index = Arc::new(RwLock::new(TodoIndex::new()));
+
         // Determine initial index status and open existing index if available
         let index_path = data_dir.join(".tend").join("search_index");
         let (search_index, index_status) = if !search_config.enabled {
@@ -345,6 +354,8 @@ impl GardenState {
             search_index,
             link_index,
             block_index,
+            tag_index,
+            todo_index,
             backup_manager,
             encrypted,
             search_config,
@@ -628,6 +639,111 @@ impl GardenState {
         info!("Block index rebuilt with {} blocks", index.len().unwrap_or(0));
 
         Ok(())
+    }
+
+    /// Rebuild the tag index from all pages and journals
+    pub async fn rebuild_tag_index(&self) -> anyhow::Result<()> {
+        info!(
+            "Rebuilding tag index for {} garden: {}",
+            if self.encrypted { "encrypted" } else { "plain" },
+            self.data_dir.display()
+        );
+
+        let mut tag_index = self.tag_index.write().await;
+        tag_index.clear();
+
+        // Index regular pages
+        let pages = self.file_manager.list_pages().await?;
+        for page_meta in pages {
+            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
+                tag_index.index_page(&page);
+            }
+        }
+
+        // Index journals
+        let journals = self.file_manager.list_journals().await?;
+        for journal_meta in journals {
+            if let Some(date) = journal_meta.journal_date {
+                if let Ok(page) = self.file_manager.read_journal(date).await {
+                    tag_index.index_page(&page);
+                }
+            }
+        }
+
+        info!("Tag index rebuilt with {} unique tags", tag_index.len());
+
+        Ok(())
+    }
+
+    /// Rebuild the todo index from all pages, journals, and sheets
+    pub async fn rebuild_todo_index(&self, content_types: &[ContentType]) -> anyhow::Result<()> {
+        info!(
+            "Rebuilding todo index for {} garden: {}",
+            if self.encrypted { "encrypted" } else { "plain" },
+            self.data_dir.display()
+        );
+
+        let mut todo_index = self.todo_index.write().await;
+        todo_index.clear();
+
+        // Index all content types
+        for ct in content_types {
+            let sheets = self.file_manager.list_sheets(ct).await?;
+            for sheet_meta in &sheets {
+                let page = if ct.id == "journal" {
+                    if let Some(date) = sheet_meta.journal_date {
+                        self.file_manager.read_journal(date).await.ok()
+                    } else {
+                        None
+                    }
+                } else if ct.id == "page" {
+                    self.file_manager.read_page(&sheet_meta.name).await.ok()
+                } else {
+                    // For custom content types, strip directory prefix
+                    let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.save_by_date);
+                    self.file_manager.read_sheet(ct, bare_name, sheet_meta.journal_date).await.ok()
+                };
+
+                if let Some(page) = page {
+                    todo_index.index_page(&page, ct, sheet_meta.journal_date);
+                }
+            }
+        }
+
+        info!("Todo index rebuilt with {} tasks", todo_index.len());
+
+        Ok(())
+    }
+
+    /// Check if tag index is populated
+    pub async fn is_tag_index_populated(&self) -> bool {
+        let index = self.tag_index.read().await;
+        !index.is_empty()
+    }
+
+    /// Check if todo index is populated
+    pub async fn is_todo_index_populated(&self) -> bool {
+        let index = self.todo_index.read().await;
+        !index.is_empty()
+    }
+}
+
+/// Strip the directory prefix from a sheet name to get the bare name.
+fn strip_directory_prefix<'a>(name: &'a str, directory: &str, save_by_date: bool) -> &'a str {
+    if let Some(without_dir) = name.strip_prefix(directory).and_then(|s| s.strip_prefix('/')) {
+        if save_by_date {
+            // Format: YYYY-MM-DD/name - strip the date component too
+            if let Some((_date, bare)) = without_dir.split_once('/') {
+                bare
+            } else {
+                without_dir
+            }
+        } else {
+            without_dir
+        }
+    } else {
+        // Name doesn't have the expected prefix; use as-is
+        name
     }
 }
 

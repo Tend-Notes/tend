@@ -19,6 +19,7 @@ mod blocks;
 mod git;
 mod graph;
 mod gardens;
+mod helpers;
 mod sheets;
 mod tags;
 mod templates;

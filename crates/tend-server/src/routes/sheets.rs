@@ -18,6 +18,7 @@ use crate::routes::pages::BlockData;
 use crate::state::AppState;
 
 use super::gardens::load_user_content_types;
+use super::helpers::{apply_block_updates, remove_from_all_indices, update_all_indices_with_content_type};
 
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
@@ -401,68 +402,13 @@ pub async fn update_sheet(
         page.name = full_page_name;
     }
 
-    // Version conflict check
-    if let Some(expected_version) = req.version {
-        if page.version != expected_version {
-            return Err(AppError::Conflict {
-                current_version: page.version,
-                message: format!(
-                    "Version mismatch: expected {}, current {}",
-                    expected_version, page.version
-                ),
-            });
-        }
-    }
+    // Apply block updates (version check, clear, parse, add blocks, bump version)
+    apply_block_updates(&mut page, req.blocks, req.version)?;
 
-    // Clear existing blocks
-    page.blocks.clear();
-    page.root_blocks.clear();
-
-    // Add blocks from request (same as update_page)
-    for block_data in req.blocks {
-        let uuid = block_data
-            .uuid
-            .parse()
-            .map_err(|_| AppError::BadRequest("Invalid UUID".to_string()))?;
-
-        let mut block = Block::with_uuid(uuid, &block_data.content);
-
-        block.parent_uuid = block_data
-            .parent_uuid
-            .as_ref()
-            .and_then(|s| s.parse().ok());
-
-        block.children = block_data
-            .children
-            .iter()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-
-        block.collapsed = block_data.collapsed;
-        block.properties = block_data.properties;
-
-        page.add_block(block);
-    }
-
-    // Increment version and update timestamp
-    page.version += 1;
-    page.touch();
     garden.file_manager.write_sheet(&content_type, &page, date).await?;
 
-    // Update search index (if search is enabled)
-    if let Some(search_index) = &garden.search_index {
-        let mut index = search_index.write().await;
-        index.index_page(&page)?;
-        index.commit()?;
-    }
-
-    // Update block index (if available - not for encrypted gardens)
-    if let Some(block_index) = &garden.block_index {
-        let mut index = block_index.lock().await;
-        if let Err(e) = index.update_page(&page) {
-            tracing::warn!("Failed to update block index for sheet {}: {}", page.name, e);
-        }
-    }
+    // Update all indices (search, link, block, tag, todo)
+    update_all_indices_with_content_type(&garden, &page, "sheet", &content_type, date).await;
 
     Ok(Json(page))
 }
@@ -481,20 +427,8 @@ pub async fn delete_sheet(
     let garden = user_state.garden.read().await;
     garden.file_manager.delete_sheet(&content_type, &path.name, date).await?;
 
-    // Remove from search index (if search is enabled)
-    if let Some(search_index) = &garden.search_index {
-        let mut index = search_index.write().await;
-        index.remove_page(&path.name)?;
-        index.commit()?;
-    }
-
-    // Remove from block index (if available - not for encrypted gardens)
-    if let Some(block_index) = &garden.block_index {
-        let mut index = block_index.lock().await;
-        if let Err(e) = index.delete_page(&path.name) {
-            tracing::warn!("Failed to remove sheet {} from block index: {}", path.name, e);
-        }
-    }
+    // Remove from all indices (search, link, block, tag, todo)
+    remove_from_all_indices(&garden, &path.name, "sheet", &content_type, date).await;
 
     Ok(Json(serde_json::json!({
         "deleted": path.name,

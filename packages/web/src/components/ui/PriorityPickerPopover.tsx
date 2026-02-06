@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Priority picker popover for task priority
 
-import { useRef, useEffect } from 'react'
+import { useRef } from 'react'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 interface PriorityPickerPopoverProps {
   value: string | null
@@ -19,27 +21,8 @@ const PRIORITIES = [
 export function PriorityPickerPopover({ value, onChange, onClose }: PriorityPickerPopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null)
 
-  // Close on click outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [onClose])
-
-  // Close on Escape
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useClickOutside(popoverRef, onClose)
+  useEscapeKey(onClose)
 
   const handleSelect = (priorityValue: string | null) => {
     onChange(priorityValue)

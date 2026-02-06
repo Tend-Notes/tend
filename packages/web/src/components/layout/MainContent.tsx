@@ -10,7 +10,6 @@ import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
 import { MobileToolbar } from '../ui/MobileToolbar'
-// import { RadialMenu } from '../ui/RadialMenu' // Disabled - trying vertical toolbar
 
 // Find the currently focused editor element
 function findActiveEditor(): HTMLElement | null {

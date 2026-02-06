@@ -3,33 +3,22 @@
 
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { journals as journalsApi } from '../../lib/api'
+import {
+  getDaysInMonth,
+  getFirstDayOfMonth,
+  formatCalendarDate,
+  parseCalendarDate,
+  MONTH_NAMES,
+  DAY_NAMES,
+} from '../../lib/calendarUtils'
 import { usePageStore } from '../../stores/pageStore'
 import type { PageMeta } from '../../types'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import { useEscapeKey } from '../../hooks/useEscapeKey'
 
 interface HeatmapCalendarProps {
   onClose: () => void
   currentDate?: string // YYYY-MM-DD format
-}
-
-// Get the number of days in a month
-function getDaysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate()
-}
-
-// Get the day of week for the first day of a month (0 = Sunday)
-function getFirstDayOfMonth(year: number, month: number): number {
-  return new Date(year, month, 1).getDay()
-}
-
-// Format date as YYYY-MM-DD
-function formatDate(year: number, month: number, day: number): string {
-  return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-// Parse YYYY-MM-DD to { year, month, day }
-function parseDate(dateStr: string): { year: number; month: number; day: number } {
-  const [year, month, day] = dateStr.split('-').map(Number)
-  return { year, month: month - 1, day }
 }
 
 // Get intensity level (0-4) based on block count
@@ -40,13 +29,6 @@ function getIntensityLevel(blockCount: number): number {
   if (blockCount <= 25) return 3
   return 4
 }
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-]
-
-const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']
 
 export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) {
   const { navigateToJournal } = usePageStore()
@@ -60,7 +42,7 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
     return { year: now.getFullYear(), month: now.getMonth(), day: now.getDate() }
   }, [])
 
-  const initialDate = currentDate ? parseDate(currentDate) : today
+  const initialDate = currentDate ? parseCalendarDate(currentDate) : today
   const [viewYear, setViewYear] = useState(initialDate.year)
   const [viewMonth, setViewMonth] = useState(initialDate.month)
 
@@ -79,27 +61,8 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
     fetchJournals()
   }, [])
 
-  // Close on click outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (popoverRef.current && !popoverRef.current.contains(event.target as Node)) {
-        onClose()
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [onClose])
-
-  // Close on Escape
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
+  useClickOutside(popoverRef, onClose)
+  useEscapeKey(onClose)
 
   // Build a map of date -> blockCount for quick lookup
   const journalMap = useMemo(() => {
@@ -224,7 +187,7 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
               return <div key={`empty-${index}`} className="w-8 h-8" />
             }
 
-            const dateStr = formatDate(viewYear, viewMonth, day)
+            const dateStr = formatCalendarDate(viewYear, viewMonth, day)
             const blockCount = journalMap.get(dateStr) || 0
             const intensity = getIntensityLevel(blockCount)
             const hasContent = blockCount > 0
