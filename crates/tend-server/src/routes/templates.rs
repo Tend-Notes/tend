@@ -9,13 +9,15 @@ use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::Json;
-use tend_core::{Block, Page};
+use tend_core::Page;
 use tracing::debug;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::routes::pages::UpdatePageRequest;
 use crate::state::AppState;
+
+use super::helpers::apply_block_updates;
 
 /// Get a template for a content type
 ///
@@ -89,54 +91,11 @@ pub async fn update_template(
         Page::new(&content_type_id)
     };
 
-    // Version conflict check
-    if let Some(expected_version) = req.version {
-        if page.version != expected_version {
-            return Err(AppError::Conflict {
-                current_version: page.version,
-                message: format!(
-                    "Version mismatch: expected {}, current {}",
-                    expected_version, page.version
-                ),
-            });
-        }
-    }
-
-    // Clear existing blocks
-    page.blocks.clear();
-    page.root_blocks.clear();
-
-    // Add blocks from request
-    for block_data in req.blocks {
-        let uuid = block_data
-            .uuid
-            .parse()
-            .map_err(|_| AppError::BadRequest("Invalid UUID".to_string()))?;
-
-        let mut block = Block::with_uuid(uuid, &block_data.content);
-
-        block.parent_uuid = block_data
-            .parent_uuid
-            .as_ref()
-            .and_then(|s| s.parse().ok());
-
-        block.children = block_data
-            .children
-            .iter()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-
-        block.collapsed = block_data.collapsed;
-        block.properties = block_data.properties;
-
-        page.add_block(block);
-    }
-
-    // Increment version and update timestamp
-    page.version += 1;
-    page.touch();
+    // Apply block updates (version check, clear, parse, add blocks, bump version)
+    apply_block_updates(&mut page, req.blocks, req.version)?;
 
     // Serialize and write atomically
+    // Note: Templates are not indexed (no search, link, or block index updates)
     let content = tend_core::serializer::serialize_page(&page);
     let tmp_path = template_path.with_extension("md.tmp");
 
