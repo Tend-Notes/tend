@@ -109,6 +109,16 @@ function App() {
     } else {
       // Normal mode: Load user preferences and state from server (multi-tenant support)
       // This overwrites any localStorage cache with the server's authoritative data
+      const lastMode = localStorage.getItem('tend-last-mode')
+      if (lastMode === 'demo') {
+        // Clear ALL localStorage caches - switching from demo to server mode
+        // This prevents demo content from appearing in regular mode
+        clearRecentSheets()
+        clearTags()
+        usePageStore.getState().reset()
+        useUIStore.getState().reset()
+        useSettingsStore.getState().resetAll()
+      }
       localStorage.setItem('tend-last-mode', 'server')
       identity.whoami()
         .then(async ({ username }) => {
