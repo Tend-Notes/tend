@@ -32,6 +32,10 @@ async function initDB(): Promise<IDBDatabase> {
 
     request.onsuccess = () => {
       db = request.result
+      // Clear cache if browser closes the connection (idle tab, memory pressure)
+      db.onclose = () => {
+        db = null
+      }
       resolve(db)
     }
 
