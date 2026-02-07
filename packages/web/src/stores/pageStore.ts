@@ -134,8 +134,12 @@ function buildUrlPath(type: 'page' | 'journal' | 'content-type', name: string): 
 // - { type: 'page', name: 'pagename' } for /page/pagename
 // - { type: 'content-type', name: 'person/John Smith' } for /person/John%20Smith
 function parseUrlPath(path: string): { type: 'page' | 'journal' | 'content-type' | null; name: string | null } {
+  // Strip base path (e.g., '/tend/' for GitHub Pages demo)
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+  const normalizedPath = base && path.startsWith(base) ? path.slice(base.length) : path
+
   // Check for journal or page prefix first
-  const match = path.match(/^\/(page|journal)\/(.+)$/)
+  const match = normalizedPath.match(/^\/(page|journal)\/(.+)$/)
   if (match) {
     const decodedSegments = match[2].split('/').map(segment => decodeURIComponent(segment))
     return { type: match[1] as 'page' | 'journal', name: decodedSegments.join('/') }
@@ -143,7 +147,7 @@ function parseUrlPath(path: string): { type: 'page' | 'journal' | 'content-type'
 
   // Check for content type paths (e.g., /person/John%20Smith or /meeting/2026-01-23/Name)
   // These are at root level with format: /directory/... (remaining path)
-  const contentTypeMatch = path.match(/^\/([^/]+)\/(.+)$/)
+  const contentTypeMatch = normalizedPath.match(/^\/([^/]+)\/(.+)$/)
   if (contentTypeMatch) {
     const directory = decodeURIComponent(contentTypeMatch[1])
     // Decode each segment separately to handle paths like /meeting/2026-01-23/Name%20Here
