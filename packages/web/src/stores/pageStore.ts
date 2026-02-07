@@ -116,11 +116,14 @@ interface PageState {
 // - Custom content types: /content-type-dir/name (e.g., /person/John%20Smith)
 function buildUrlPath(type: 'page' | 'journal' | 'content-type', name: string): string {
   const encodedSegments = name.split('/').map(segment => encodeURIComponent(segment))
+  // Get base path from Vite (e.g., '/tend/' for GitHub Pages demo, '/' normally)
+  // Remove trailing slash to avoid double slashes
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '')
   if (type === 'content-type') {
-    // Content types go directly at root: /person/John%20Smith
-    return `/${encodedSegments.join('/')}`
+    // Content types go directly at root: /tend/person/John%20Smith
+    return `${base}/${encodedSegments.join('/')}`
   }
-  return `/${type}/${encodedSegments.join('/')}`
+  return `${base}/${type}/${encodedSegments.join('/')}`
 }
 
 // Helper to parse URL path into type and name

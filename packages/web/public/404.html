@@ -7,7 +7,7 @@
       // Single Page App redirect for GitHub Pages
       // This handles client-side routing by redirecting 404s to index.html
       // See: https://github.com/rafgraph/spa-github-pages
-      var pathSegmentsToKeep = 1; // Keep /tend/ prefix
+      var pathSegmentsToKeep = 0; // No prefix, using root
       var l = window.location;
       l.replace(
         l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') +
