@@ -2257,7 +2257,21 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       // Focus the container so it can receive keyboard events
       // Use requestAnimationFrame to avoid interfering with the selection
       requestAnimationFrame(() => {
+        // Save the selection before focusing - focus() can clear it when
+        // the mousedown originated outside the container
+        const sel = window.getSelection()
+        const savedRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null
+
         container.focus({ preventScroll: true })
+
+        // Restore the selection if it was cleared by focus()
+        if (savedRange && sel) {
+          const currentSel = window.getSelection()
+          if (!currentSel || currentSel.isCollapsed) {
+            sel.removeAllRanges()
+            sel.addRange(savedRange)
+          }
+        }
       })
     }
 
