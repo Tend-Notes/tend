@@ -8,7 +8,8 @@ const isDemo = process.env.VITE_DEMO_MODE === 'true'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/',
+  // Use /tend/ base path for GitHub Pages (repo is tend-notes/tend)
+  base: isDemo ? '/tend/' : '/',
   plugins: [
     react(),
     // PWA is disabled in demo mode since there's no backend to cache
