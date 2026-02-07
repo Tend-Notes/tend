@@ -7,6 +7,7 @@ import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDial
 import { LogseqImportDialog } from './components/ui/LogseqImportDialog'
 import { WorkTimerBanner } from './components/ui/WorkTimerBanner'
 import { DemoBanner } from './components/ui/DemoBanner'
+import { DemoWelcomeOverlay } from './components/ui/DemoWelcomeOverlay'
 import { usePageStore } from './stores/pageStore'
 import { useRecentSheetsStore } from './stores/recentSheetsStore'
 import { useTagStore } from './stores/tagStore'
@@ -330,6 +331,9 @@ function App() {
 
       {/* Toast notifications */}
       <Toasts />
+
+      {/* Demo welcome overlay - shows once per session */}
+      {isDemoMode && <DemoWelcomeOverlay />}
     </div>
   )
 }
