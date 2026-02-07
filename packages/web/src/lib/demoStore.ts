@@ -4,7 +4,7 @@
 import type { Page, PageMeta } from '../types'
 
 const DB_NAME = 'tend-demo'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 // Object store names
 const STORES = {
