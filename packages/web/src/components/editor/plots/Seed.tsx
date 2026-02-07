@@ -845,16 +845,21 @@ const ActiveSeed = forwardRef<SeedHandle, {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Position cursor when transitioning from dormant to active
-  // Uses initialCursorPosition prop to set cursor at the click offset
+  // Focus and position cursor when ActiveSeed mounts (transitioning from dormant to active).
+  // The initialCursorPosition prop tells us where to place the cursor (from the click offset).
+  // If undefined, we default to position 0.
+  //
+  // Note: We must use requestAnimationFrame because CodeMirror initialization happens in a
+  // separate useEffect with empty deps, and React doesn't guarantee effect order. By the time
+  // this effect runs, viewRef.current might not be set yet.
   useEffect(() => {
-    if (initialCursorPosition === undefined) return
-    const view = viewRef.current
-    if (!view) return
-
-    // Schedule after mount so CodeMirror is fully initialized
+    // Schedule after CodeMirror initialization
     requestAnimationFrame(() => {
-      const pos = Math.max(0, Math.min(initialCursorPosition, view.state.doc.length))
+      const view = viewRef.current
+      if (!view) return
+
+      const targetPos = initialCursorPosition ?? 0
+      const pos = Math.max(0, Math.min(targetPos, view.state.doc.length))
       view.focus()
       view.dispatch({
         selection: { anchor: pos },
