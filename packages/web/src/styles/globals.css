@@ -1031,6 +1031,58 @@ code {
   animation: page-enter var(--duration-normal) var(--ease-out);
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Scroll Title
+   A smaller, faded title that appears when the main page title scrolls out
+   of view. Provides persistent context about which page is being edited.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.scroll-title {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  /* Match page-content horizontal positioning */
+  padding: 8px 24px;
+  pointer-events: none;
+  /* Hidden by default */
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+}
+
+.scroll-title--visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.scroll-title-text {
+  /* Smaller than the main title (text-xl = 1.25rem) */
+  font-size: 0.875rem;
+  font-weight: 500;
+  /* Reduced prominence - use muted text color */
+  color: var(--base04);
+  /* Truncate long titles */
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Desktop: center the scroll title to match page content max-width */
+@media (min-width: 768px) {
+  .scroll-title {
+    padding: 12px 24px;
+    /* Match md:max-w-2xl md:mx-auto from page-content */
+    max-width: 42rem; /* 2xl = 42rem */
+    margin: 0 auto;
+  }
+}
+
 @keyframes page-enter {
   from {
     opacity: 0;
