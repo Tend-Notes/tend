@@ -411,45 +411,55 @@ function BlockReferenceDisplay({ uuid, onNavigate, onLinkNavigate, getTagColors 
   const contentTokens = parseContent(blockData.content)
   const renderedContent = renderContentReact(contentTokens, onLinkNavigate, getTagColors)
 
-  // Render like the CodeMirror widget: chain icon + content
+  // Render like the CodeMirror widget: chain icon + content in a row
   return React.createElement(
     'span',
     { className: 'block-reference', 'data-block-ref': uuid },
-    // Chain link icon (clickable to navigate)
+    // Row wrapper for icon + content (horizontal layout)
     React.createElement(
       'span',
-      {
-        className: 'block-reference-chain',
-        onClick: handleClick,
-        title: `Go to ${blockData.pageName}`,
-      },
+      { className: 'block-reference-row' },
+      // Chain link icon (clickable to navigate)
       React.createElement(
-        'svg',
+        'span',
         {
-          width: 14,
-          height: 14,
-          viewBox: '0 0 24 24',
-          fill: 'none',
-          stroke: 'currentColor',
-          strokeWidth: 2,
-          strokeLinecap: 'round',
-          strokeLinejoin: 'round',
+          className: 'block-reference-chain',
+          onClick: handleClick,
+          title: `Go to ${blockData.pageName}`,
         },
-        React.createElement('path', { d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' }),
-        React.createElement('path', { d: 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' })
+        React.createElement(
+          'svg',
+          {
+            width: 14,
+            height: 14,
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            stroke: 'currentColor',
+            strokeWidth: 2,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+          },
+          React.createElement('path', { d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' }),
+          React.createElement('path', { d: 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' })
+        )
+      ),
+      // Content
+      React.createElement(
+        'span',
+        { className: 'block-reference-content' },
+        renderedContent
       )
     ),
-    // Content
-    React.createElement(
-      'span',
-      { className: 'block-reference-content' },
-      renderedContent
-    ),
-    // Children indicator (if has children)
+    // Children indicator (if has children) - clicking navigates to the page
     blockData.hasChildren && React.createElement(
       'span',
-      { className: 'block-reference-children' },
-      'View sub-bullets'
+      {
+        className: 'block-reference-children',
+        onClick: handleClick,
+        title: `View children in ${blockData.pageName}`,
+      },
+      React.createElement('span', { className: 'block-reference-children-chevron' }, '›'),
+      React.createElement('span', { className: 'block-reference-children-text' }, 'View sub-bullets')
     )
   )
 }

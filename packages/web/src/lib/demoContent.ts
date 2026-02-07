@@ -4,6 +4,10 @@
 import type { Page, Block } from '../types'
 import { v4 as uuidv4 } from 'uuid'
 
+// Bump this version when demo content changes to force re-initialization
+// for users who have already visited the demo site
+export const DEMO_CONTENT_VERSION = 2
+
 // Generate stable UUIDs for demo content (so block references work consistently)
 const UUIDS = {
   // Welcome page blocks
@@ -285,11 +289,19 @@ export function getDemoJournal(): Page {
  * Initialize demo content in IndexedDB
  */
 export async function initializeDemoContent(): Promise<void> {
-  const { savePage, saveJournal, setInitialized, isInitialized } = await import('./demoStore')
+  const { savePage, saveJournal, setInitialized, isInitialized, getContentVersion, setContentVersion, clearAll } = await import('./demoStore')
 
-  // Check if already initialized
-  if (await isInitialized()) {
+  // Check if already initialized with current version
+  const initialized = await isInitialized()
+  const storedVersion = await getContentVersion()
+
+  if (initialized && storedVersion >= DEMO_CONTENT_VERSION) {
     return
+  }
+
+  // Version mismatch or not initialized - clear and reinitialize
+  if (initialized) {
+    await clearAll()
   }
 
   // Save demo pages
@@ -302,15 +314,16 @@ export async function initializeDemoContent(): Promise<void> {
   const journal = getDemoJournal()
   await saveJournal(journal)
 
-  // Mark as initialized
+  // Mark as initialized with current version
   await setInitialized(true)
+  await setContentVersion(DEMO_CONTENT_VERSION)
 }
 
 /**
  * Reset demo content (after expiry or manual reset)
  */
 export async function resetDemoContent(): Promise<void> {
-  const { clearAll, setInitialized, savePage, saveJournal } = await import('./demoStore')
+  const { clearAll, setInitialized, setContentVersion, savePage, saveJournal } = await import('./demoStore')
 
   // Clear existing content
   await clearAll()
@@ -325,4 +338,5 @@ export async function resetDemoContent(): Promise<void> {
   await saveJournal(journal)
 
   await setInitialized(true)
+  await setContentVersion(DEMO_CONTENT_VERSION)
 }

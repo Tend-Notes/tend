@@ -20,6 +20,7 @@ const META_KEYS = {
   LAST_ACTIVITY: 'lastActivity',
   EXPIRY_HOURS: 'expiryHours',
   INITIALIZED: 'initialized',
+  CONTENT_VERSION: 'contentVersion',
 } as const
 
 // Default expiry hours (6 hours of inactivity)
@@ -214,6 +215,15 @@ export async function isInitialized(): Promise<boolean> {
 
 export async function setInitialized(value: boolean): Promise<void> {
   await putInStore(STORES.META, value, META_KEYS.INITIALIZED)
+}
+
+export async function getContentVersion(): Promise<number> {
+  const version = await getFromStore<number>(STORES.META, META_KEYS.CONTENT_VERSION)
+  return version ?? 0
+}
+
+export async function setContentVersion(version: number): Promise<void> {
+  await putInStore(STORES.META, version, META_KEYS.CONTENT_VERSION)
 }
 
 /**
