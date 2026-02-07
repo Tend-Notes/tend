@@ -283,16 +283,16 @@ export function MainContent() {
 
   return (
     <main className="flex-1 flex flex-col overflow-hidden relative">
-      {/* Scroll title - appears when main title scrolls out of view */}
-      <div
-        className={`scroll-title ${showScrollTitle ? 'scroll-title--visible' : ''}`}
-        aria-hidden={!showScrollTitle}
-      >
-        <span className="scroll-title-text">{currentPage.title}</span>
-      </div>
-
       {/* Editor area with backlinks */}
       <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+        {/* Scroll title - appears when main title scrolls out of view */}
+        {/* Must be inside scroll container for position: sticky to work */}
+        <div
+          className={`scroll-title ${showScrollTitle ? 'scroll-title--visible' : ''}`}
+          aria-hidden={!showScrollTitle}
+        >
+          <span className="scroll-title-text">{currentPage.title}</span>
+        </div>
         {/* Key changes with page name to trigger crossfade animation */}
         {/* Mobile-first: minimal padding on mobile, constrained width on md+ */}
         <div key={currentPage.name} className="page-content px-2 py-3 pb-24 md:max-w-2xl md:mx-auto md:px-6 md:py-12 md:pb-12" onAnimationEnd={handlePageChange}>

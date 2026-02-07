@@ -1038,24 +1038,29 @@ code {
    ───────────────────────────────────────────────────────────────────────────── */
 
 .scroll-title {
-  position: absolute;
+  position: sticky;
   top: 0;
-  left: 0;
-  right: 0;
   z-index: 10;
   /* Match page-content horizontal positioning */
-  padding: 8px 24px;
+  padding: 0 8px;
+  background: var(--base00);
   pointer-events: none;
-  /* Hidden by default */
+  /* Hidden by default - collapsed height */
   opacity: 0;
+  max-height: 0;
+  overflow: hidden;
   transform: translateY(-4px);
   transition:
     opacity var(--duration-normal) var(--ease-out),
-    transform var(--duration-normal) var(--ease-out);
+    transform var(--duration-normal) var(--ease-out),
+    max-height var(--duration-normal) var(--ease-out),
+    padding var(--duration-normal) var(--ease-out);
 }
 
 .scroll-title--visible {
   opacity: 1;
+  max-height: 40px; /* Enough for text + padding */
+  padding: 8px 8px;
   transform: translateY(0);
 }
 
@@ -1076,10 +1081,14 @@ code {
 /* Desktop: center the scroll title to match page content max-width */
 @media (min-width: 768px) {
   .scroll-title {
-    padding: 12px 24px;
+    padding: 0 24px;
     /* Match md:max-w-2xl md:mx-auto from page-content */
     max-width: 42rem; /* 2xl = 42rem */
     margin: 0 auto;
+  }
+
+  .scroll-title--visible {
+    padding: 12px 24px;
   }
 }
 
