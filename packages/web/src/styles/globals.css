@@ -934,6 +934,13 @@ code {
   outline: none;
 }
 
+/* Outliner container focus - suppress focus-visible outline when container
+   receives focus for keyboard event handling (e.g., cross-block selection delete) */
+.outliner-editor:focus,
+.outliner-editor:focus-visible {
+  outline: none;
+}
+
 /* Transitions */
 .transition-colors {
   transition:

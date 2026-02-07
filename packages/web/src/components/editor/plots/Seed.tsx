@@ -243,58 +243,56 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
     [tokens, handleLinkNavigate, getTagColors, navigateToPage]
   )
 
-  // Track drag state to distinguish click vs drag-to-select
+  // Track mousedown position to detect drags vs clicks
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null)
-  const isDraggingRef = useRef(false)
 
-  // Handle mousedown: record position but allow native behavior
+  // Handle mousedown: record position for drag detection
+  // We do NOT preventDefault here - that would block native text selection
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    mouseDownPosRef.current = { x: e.clientX, y: e.clientY }
-    isDraggingRef.current = false
-  }, [])
-
-  // Handle mousemove: detect if user is dragging
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!mouseDownPosRef.current) return
-    const dx = e.clientX - mouseDownPosRef.current.x
-    const dy = e.clientY - mouseDownPosRef.current.y
-    // Consider it a drag if moved more than 5 pixels
-    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-      isDraggingRef.current = true
-    }
-  }, [])
-
-  // Handle mouseup: activate block only if this was a click (not a drag)
-  const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    const wasDragging = isDraggingRef.current
-    mouseDownPosRef.current = null
-    isDraggingRef.current = false
-
-    // If user was dragging to select, don't activate - let selection persist
-    if (wasDragging) {
-      return
-    }
-
-    // If the click was on a wikilink or tag, those handle navigation themselves
+    // If the mousedown is on a wikilink or tag, let those handle it
     const target = e.target as HTMLElement
     if (target.closest('.wiki-link') || target.closest('.tag-pill')) {
       return
     }
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY }
+  }, [])
 
-    // If there's an active text selection, don't activate
-    const sel = window.getSelection()
-    if (sel && !sel.isCollapsed) {
+  // Handle mouseup: only activate if this was a click (not a drag)
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    // If the mouseup is on a wikilink or tag, those handle navigation themselves
+    const target = e.target as HTMLElement
+    if (target.closest('.wiki-link') || target.closest('.tag-pill')) {
+      mouseDownPosRef.current = null
       return
     }
 
-    // Calculate the rendered text offset from click position
+    // If there's an active text selection (user just finished a drag-select),
+    // do NOT activate. Activating would destroy the dormant HTML and the selection.
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed) {
+      mouseDownPosRef.current = null
+      return
+    }
+
+    // Check if this was a drag (mouse moved significantly since mousedown)
+    const downPos = mouseDownPosRef.current
+    mouseDownPosRef.current = null
+    if (downPos) {
+      const dx = e.clientX - downPos.x
+      const dy = e.clientY - downPos.y
+      const dragThreshold = 5 // pixels
+      if (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold) {
+        // This was a drag, not a click - don't activate
+        return
+      }
+    }
+
+    // This was a click - activate the block with cursor at click position
     const renderedOffset = getCaretOffsetFromClick(e)
     if (renderedOffset !== undefined) {
-      // Map rendered offset to source markdown offset
       const sourceOffset = mapRenderedOffsetToSource(tokens, renderedOffset)
       onActivate?.(sourceOffset)
     } else {
-      // Fallback: activate without specific cursor position
       onActivate?.()
     }
   }, [tokens, onActivate])
@@ -306,7 +304,6 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
         data-seed-editor
         className="block-content outline-none min-h-[1.5em] seed-dormant code-content"
         onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
       >
         {content}
@@ -319,7 +316,6 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
       data-seed-editor
       className="block-content outline-none min-h-[1.5em] seed-dormant"
       onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
       {renderedNodes}
@@ -739,25 +735,20 @@ const ActiveSeed = forwardRef<SeedHandle, {
       const view = update.view
       const pos = view.state.selection.main.head
 
-      // Get cursor coordinates (screen/client coordinates)
+      // Get cursor coordinates
       const cursorCoords = view.coordsAtPos(pos)
       if (!cursorCoords) return
 
-      // Find the scroll container (overflow-y-auto ancestor)
-      const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
-      if (!scrollContainer) return
+      // Check if cursor is below the middle of the viewport
+      const viewportMiddle = window.innerHeight / 2
 
-      // Get the scroll container's bounding rect
-      const containerRect = scrollContainer.getBoundingClientRect()
-      const containerMiddle = containerRect.top + containerRect.height / 2
-
-      // If cursor is below the middle of the scroll container, scroll to center it
-      if (cursorCoords.top > containerMiddle) {
+      // If cursor is below the middle of the viewport, scroll to center it
+      if (cursorCoords.top > viewportMiddle) {
         // Use requestAnimationFrame to avoid layout thrashing
         requestAnimationFrame(() => {
-          // Calculate how much to scroll: move cursor to center
-          const scrollOffset = cursorCoords.top - containerMiddle
-          scrollContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' })
+          view.dispatch({
+            effects: EditorView.scrollIntoView(pos, { y: 'center' })
+          })
         })
       }
     })
@@ -854,16 +845,21 @@ const ActiveSeed = forwardRef<SeedHandle, {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Position cursor when transitioning from dormant to active
-  // Uses initialCursorPosition prop to set cursor at the click offset
+  // Focus and position cursor when ActiveSeed mounts (transitioning from dormant to active).
+  // The initialCursorPosition prop tells us where to place the cursor (from the click offset).
+  // If undefined, we default to position 0.
+  //
+  // Note: We must use requestAnimationFrame because CodeMirror initialization happens in a
+  // separate useEffect with empty deps, and React doesn't guarantee effect order. By the time
+  // this effect runs, viewRef.current might not be set yet.
   useEffect(() => {
-    if (initialCursorPosition === undefined) return
-    const view = viewRef.current
-    if (!view) return
-
-    // Schedule after mount so CodeMirror is fully initialized
+    // Schedule after CodeMirror initialization
     requestAnimationFrame(() => {
-      const pos = Math.max(0, Math.min(initialCursorPosition, view.state.doc.length))
+      const view = viewRef.current
+      if (!view) return
+
+      const targetPos = initialCursorPosition ?? 0
+      const pos = Math.max(0, Math.min(targetPos, view.state.doc.length))
       view.focus()
       view.dispatch({
         selection: { anchor: pos },

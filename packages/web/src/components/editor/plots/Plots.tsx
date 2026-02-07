@@ -1870,7 +1870,9 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return
 
     // Don't intercept keyboard shortcuts (Ctrl/Cmd+key, Alt+Shift+key)
+    // Also don't intercept Shift+Arrow - allow native selection extension
     if (e.ctrlKey || e.metaKey || (e.altKey && e.shiftKey)) return
+    if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
 
     const targetUuid = lastActiveBlockUuidRef.current && flatBlockOrder.includes(lastActiveBlockUuidRef.current)
       ? lastActiveBlockUuidRef.current
@@ -2224,9 +2226,6 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     if (!container) return
 
     const handleMouseUp = () => {
-      // Skip if a seed is active (CodeMirror handles its own focus)
-      if (activeBlockUuid !== null) return
-
       const selection = window.getSelection()
       if (!selection || selection.isCollapsed || selection.rangeCount === 0) return
 
@@ -2234,10 +2233,47 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       const range = selection.getRangeAt(0)
       if (!container.contains(range.commonAncestorContainer)) return
 
+      // Check if selection spans multiple blocks (cross-block selection)
+      const allBlockEls = container.querySelectorAll('[data-block-id]')
+      let crossBlockCount = 0
+      for (const el of allBlockEls) {
+        const seedEl = el.querySelector('[data-seed-editor]')
+        if (seedEl && (range.intersectsNode(seedEl) || selection.containsNode(seedEl, true))) {
+          crossBlockCount++
+          if (crossBlockCount >= 2) break
+        }
+      }
+
+      const isCrossBlockSelection = crossBlockCount >= 2
+
+      // If a seed is active but this is NOT a cross-block selection, skip
+      // (CodeMirror handles single-block selections itself)
+      if (activeBlockUuid !== null && !isCrossBlockSelection) return
+
+      // For cross-block selections, deactivate the active seed so the container
+      // can handle Delete/Backspace events
+      if (activeBlockUuid !== null && isCrossBlockSelection) {
+        setActiveBlockUuid(null)
+      }
+
       // Focus the container so it can receive keyboard events
       // Use requestAnimationFrame to avoid interfering with the selection
       requestAnimationFrame(() => {
+        // Save the selection before focusing - focus() can clear it when
+        // the mousedown originated outside the container
+        const sel = window.getSelection()
+        const savedRange = sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null
+
         container.focus({ preventScroll: true })
+
+        // Restore the selection if it was cleared by focus()
+        if (savedRange && sel) {
+          const currentSel = window.getSelection()
+          if (!currentSel || currentSel.isCollapsed) {
+            sel.removeAllRanges()
+            sel.addRange(savedRange)
+          }
+        }
       })
     }
 
