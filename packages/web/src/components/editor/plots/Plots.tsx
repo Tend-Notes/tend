@@ -1870,7 +1870,9 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return
 
     // Don't intercept keyboard shortcuts (Ctrl/Cmd+key, Alt+Shift+key)
+    // Also don't intercept Shift+Arrow - allow native selection extension
     if (e.ctrlKey || e.metaKey || (e.altKey && e.shiftKey)) return
+    if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return
 
     const targetUuid = lastActiveBlockUuidRef.current && flatBlockOrder.includes(lastActiveBlockUuidRef.current)
       ? lastActiveBlockUuidRef.current
