@@ -729,13 +729,14 @@ const ActiveSeed = forwardRef<SeedHandle, {
       const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 768
       if (isMobile) return
 
-      // Only trigger on selection changes (cursor movement or typing)
-      if (!update.selectionSet && !update.docChanged) return
+      // Only trigger on doc changes (typing) - not just cursor movement
+      // This gives true "typewriter" behavior: scroll when adding content, not when navigating
+      if (!update.docChanged) return
 
       const view = update.view
       const pos = view.state.selection.main.head
 
-      // Get cursor coordinates
+      // Get cursor coordinates relative to viewport
       const cursorCoords = view.coordsAtPos(pos)
       if (!cursorCoords) return
 
@@ -743,11 +744,28 @@ const ActiveSeed = forwardRef<SeedHandle, {
       const viewportMiddle = window.innerHeight / 2
 
       // If cursor is below the middle of the viewport, scroll to center it
+      // CodeMirror's scroller is set to overflow: visible, so we need to scroll
+      // the parent scroll container instead of using EditorView.scrollIntoView
       if (cursorCoords.top > viewportMiddle) {
+        // Find the scroll container - it's the ancestor with overflow-y: auto
+        const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
+        if (!scrollContainer) return
+
+        // Calculate how much to scroll to center the cursor
+        // cursorCoords.top is relative to viewport, we need to find cursor's
+        // position within the scroll container
+        const containerRect = scrollContainer.getBoundingClientRect()
+        const cursorRelativeToContainer = cursorCoords.top - containerRect.top
+        const containerMiddle = containerRect.height / 2
+
+        // Amount to scroll: positive means scroll down
+        const scrollAmount = cursorRelativeToContainer - containerMiddle
+
         // Use requestAnimationFrame to avoid layout thrashing
         requestAnimationFrame(() => {
-          view.dispatch({
-            effects: EditorView.scrollIntoView(pos, { y: 'center' })
+          scrollContainer.scrollBy({
+            top: scrollAmount,
+            behavior: 'smooth'
           })
         })
       }
