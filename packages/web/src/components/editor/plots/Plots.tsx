@@ -2211,6 +2211,61 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     return () => container.removeEventListener('copy', handleCopy)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // CROSS-BLOCK SELECTION FOCUS
+  // After drag-to-select completes, focus the container so Delete/Backspace
+  // keydown events reach handleContainerKeyDown -> handleCrossBlockDelete.
+  // Without this, the container has no focus after a drag and key events
+  // go to the document body instead.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const handleMouseUp = () => {
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return
+
+      // Check if the selection is within this container
+      const range = selection.getRangeAt(0)
+      if (!container.contains(range.commonAncestorContainer)) return
+
+      // Check if selection spans multiple blocks (cross-block selection)
+      const allBlockEls = container.querySelectorAll('[data-block-id]')
+      let crossBlockCount = 0
+      for (const el of allBlockEls) {
+        const seedEl = el.querySelector('[data-seed-editor]')
+        if (seedEl && (range.intersectsNode(seedEl) || selection.containsNode(seedEl, true))) {
+          crossBlockCount++
+          if (crossBlockCount >= 2) break
+        }
+      }
+
+      const isCrossBlockSelection = crossBlockCount >= 2
+
+      // If a seed is active but this is NOT a cross-block selection, skip
+      // (CodeMirror handles single-block selections itself)
+      if (activeBlockUuid !== null && !isCrossBlockSelection) return
+
+      // For cross-block selections, deactivate the active seed so the container
+      // can handle Delete/Backspace events
+      if (activeBlockUuid !== null && isCrossBlockSelection) {
+        setActiveBlockUuid(null)
+      }
+
+      // Focus the container so it can receive keyboard events
+      // Use requestAnimationFrame to avoid interfering with the selection
+      requestAnimationFrame(() => {
+        container.focus({ preventScroll: true })
+      })
+    }
+
+    // Use document-level listener to catch mouseup even if it ends outside the container
+    document.addEventListener('mouseup', handleMouseUp)
+    return () => document.removeEventListener('mouseup', handleMouseUp)
+  }, [activeBlockUuid])
+
   if (rootBlocks.length === 0) {
     return (
       <div className="outliner-editor max-w-3xl">
