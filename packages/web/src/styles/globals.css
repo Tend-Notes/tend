@@ -83,6 +83,16 @@ body {
   outline-offset: 2px;
 }
 
+/* Suppress focus outline on editor containers - focus is managed internally */
+.outliner-editor:focus-visible,
+.outliner-editor:focus,
+.seed-dormant:focus-visible,
+.seed-dormant:focus,
+[data-seed-editor]:focus-visible,
+[data-seed-editor]:focus {
+  outline: none;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Button Press Effect
    Universal tactile feedback for all clickable elements.
@@ -1029,6 +1039,67 @@ code {
 /* Page content - crossfade animation on page navigation */
 .page-content {
   animation: page-enter var(--duration-normal) var(--ease-out);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Scroll Title
+   A smaller, faded title that appears when the main page title scrolls out
+   of view. Provides persistent context about which page is being edited.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.scroll-title {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  /* Match page-content horizontal positioning */
+  padding: 0 8px;
+  background: var(--base00);
+  pointer-events: none;
+  /* Hidden by default - collapsed height */
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out),
+    max-height var(--duration-normal) var(--ease-out),
+    padding var(--duration-normal) var(--ease-out);
+}
+
+.scroll-title--visible {
+  opacity: 1;
+  max-height: 48px; /* Enough for text + padding */
+  padding: 8px 8px 16px 8px;
+  transform: translateY(0);
+}
+
+.scroll-title-text {
+  /* Smaller than the main title (text-xl = 1.25rem) */
+  font-size: 0.875rem;
+  font-weight: 600;
+  /* Reduced prominence - use muted text color */
+  color: var(--base04);
+  /* Truncate long titles */
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Desktop: center the scroll title to match page content max-width */
+@media (min-width: 768px) {
+  .scroll-title {
+    padding: 0 24px;
+    /* Match md:max-w-2xl md:mx-auto from page-content */
+    max-width: 42rem; /* 2xl = 42rem */
+    margin: 0 auto;
+  }
+
+  .scroll-title--visible {
+    padding: 12px 24px 20px 24px;
+  }
 }
 
 @keyframes page-enter {

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useUIStore } from '../../stores/uiStore'
@@ -89,8 +89,42 @@ export function MainContent() {
   const [showCalendar, setShowCalendar] = useState(false)
   const isMobile = useIsMobile()
   const openSearch = useUIStore((state) => state.openSearch)
-
   const openCommandPalette = useUIStore((state) => state.openCommandPalette)
+
+  // Scroll title visibility state
+  const [showScrollTitle, setShowScrollTitle] = useState(false)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+
+  // Track title visibility with IntersectionObserver
+  useEffect(() => {
+    const titleEl = titleRef.current
+    const scrollContainer = scrollContainerRef.current
+    if (!titleEl || !scrollContainer) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Title is hidden when it's not intersecting (scrolled out of view)
+        const isVisible = entries[0]?.isIntersecting ?? true
+        setShowScrollTitle(!isVisible)
+      },
+      {
+        root: scrollContainer,
+        // Trigger when title is fully out of view (threshold 0)
+        threshold: 0,
+        // Small negative margin so title disappears just before it hits the top
+        rootMargin: '-8px 0px 0px 0px',
+      }
+    )
+
+    observer.observe(titleEl)
+    return () => observer.disconnect()
+  }, [currentPage?.name])
+
+  // Reset scroll title when page changes
+  const handlePageChange = useCallback(() => {
+    setShowScrollTitle(false)
+  }, [])
 
   // Mobile toolbar - indent/outdent always visible, extras in expandable drawer
   const indentItem = {
@@ -248,12 +282,21 @@ export function MainContent() {
   }
 
   return (
-    <main className="flex-1 flex flex-col overflow-hidden">
+    <main className="flex-1 flex flex-col overflow-hidden relative">
       {/* Editor area with backlinks */}
-      <div className="flex-1 overflow-y-auto">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+        {/* Scroll title - appears when main title scrolls out of view */}
+        {/* Must be inside scroll container for position: sticky to work */}
+        <div
+          className={`scroll-title ${showScrollTitle ? 'scroll-title--visible' : ''}`}
+          aria-hidden={!showScrollTitle}
+        >
+          <span className="scroll-title-text">{currentPage.title}</span>
+        </div>
         {/* Key changes with page name to trigger crossfade animation */}
         {/* Mobile-first: minimal padding on mobile, constrained width on md+ */}
-        <div key={currentPage.name} className="page-content px-2 py-3 pb-24 md:max-w-2xl md:mx-auto md:px-6 md:py-12 md:pb-12">
+        {/* pb-[50vh] provides bottom padding so typewriter scroll can center the last line */}
+        <div key={currentPage.name} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:py-12" onAnimationEnd={handlePageChange}>
           {/* Page title with save status */}
           <div className="flex items-center gap-3 mb-8">
             <div className="relative flex items-center gap-2">
@@ -269,7 +312,7 @@ export function MainContent() {
                   </svg>
                 </button>
               )}
-              <h1 className="text-xl font-semibold text-base-06">{currentPage.title}</h1>
+              <h1 ref={titleRef} className="text-xl font-semibold text-base-06">{currentPage.title}</h1>
               {/* Heatmap calendar popover */}
               {showCalendar && currentPage.isJournal && (
                 <HeatmapCalendar
