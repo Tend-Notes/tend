@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-// Welcome overlay shown on first demo session load
+// Welcome overlay shown on first demo session load (once per browser session)
 
 import { useState, useEffect } from 'react'
 
