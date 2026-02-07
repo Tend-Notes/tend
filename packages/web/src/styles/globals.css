@@ -83,6 +83,16 @@ body {
   outline-offset: 2px;
 }
 
+/* Suppress focus outline on editor containers - focus is managed internally */
+.outliner-editor:focus-visible,
+.outliner-editor:focus,
+.seed-dormant:focus-visible,
+.seed-dormant:focus,
+[data-seed-editor]:focus-visible,
+[data-seed-editor]:focus {
+  outline: none;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
    Button Press Effect
    Universal tactile feedback for all clickable elements.

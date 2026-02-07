@@ -243,19 +243,45 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
     [tokens, handleLinkNavigate, getTagColors, navigateToPage]
   )
 
-  // Handle click: determine caret offset and call onActivate
-  const handleClick = useCallback((e: React.MouseEvent) => {
-    // If the click was on a wikilink or tag, those handle navigation themselves
-    // and call stopPropagation. If we get here, it's a normal text click.
-    const target = e.target as HTMLElement
-    if (target.closest('.wiki-link') || target.closest('.tag-pill')) {
-      // Navigation links handle their own behavior - do NOT activate
+  // Track drag state to distinguish click vs drag-to-select
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null)
+  const isDraggingRef = useRef(false)
+
+  // Handle mousedown: record position but allow native behavior
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY }
+    isDraggingRef.current = false
+  }, [])
+
+  // Handle mousemove: detect if user is dragging
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!mouseDownPosRef.current) return
+    const dx = e.clientX - mouseDownPosRef.current.x
+    const dy = e.clientY - mouseDownPosRef.current.y
+    // Consider it a drag if moved more than 5 pixels
+    if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      isDraggingRef.current = true
+    }
+  }, [])
+
+  // Handle mouseup: activate block only if this was a click (not a drag)
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    const wasDragging = isDraggingRef.current
+    mouseDownPosRef.current = null
+    isDraggingRef.current = false
+
+    // If user was dragging to select, don't activate - let selection persist
+    if (wasDragging) {
       return
     }
 
-    // If there's an active text selection (e.g., the user just finished a
-    // backward drag-select across dormant blocks), do NOT activate. Activating
-    // would destroy the dormant HTML and thus the native selection highlight.
+    // If the click was on a wikilink or tag, those handle navigation themselves
+    const target = e.target as HTMLElement
+    if (target.closest('.wiki-link') || target.closest('.tag-pill')) {
+      return
+    }
+
+    // If there's an active text selection, don't activate
     const sel = window.getSelection()
     if (sel && !sel.isCollapsed) {
       return
@@ -273,13 +299,6 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
     }
   }, [tokens, onActivate])
 
-  // Prevent browser's default mousedown behavior (text selection/focus)
-  // This ensures the click handler can properly activate the block
-  // and hand focus to CodeMirror without interference
-  const handleMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault()
-  }
-
   // For code blocks in dormant mode, render as plain text (no formatting)
   if (isCodeBlock) {
     return (
@@ -287,7 +306,8 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
         data-seed-editor
         className="block-content outline-none min-h-[1.5em] seed-dormant code-content"
         onMouseDown={handleMouseDown}
-        onClick={handleClick}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
       >
         {content}
       </div>
@@ -299,7 +319,8 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
       data-seed-editor
       className="block-content outline-none min-h-[1.5em] seed-dormant"
       onMouseDown={handleMouseDown}
-      onClick={handleClick}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
     >
       {renderedNodes}
     </div>
