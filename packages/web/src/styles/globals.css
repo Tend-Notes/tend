@@ -1059,15 +1059,15 @@ code {
 
 .scroll-title--visible {
   opacity: 1;
-  max-height: 40px; /* Enough for text + padding */
-  padding: 8px 8px;
+  max-height: 48px; /* Enough for text + padding */
+  padding: 8px 8px 16px 8px;
   transform: translateY(0);
 }
 
 .scroll-title-text {
   /* Smaller than the main title (text-xl = 1.25rem) */
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 600;
   /* Reduced prominence - use muted text color */
   color: var(--base04);
   /* Truncate long titles */
@@ -1088,7 +1088,7 @@ code {
   }
 
   .scroll-title--visible {
-    padding: 12px 24px;
+    padding: 12px 24px 20px 24px;
   }
 }
 
