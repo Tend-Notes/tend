@@ -718,20 +718,25 @@ const ActiveSeed = forwardRef<SeedHandle, {
       const view = update.view
       const pos = view.state.selection.main.head
 
-      // Get cursor coordinates
+      // Get cursor coordinates (screen/client coordinates)
       const cursorCoords = view.coordsAtPos(pos)
       if (!cursorCoords) return
 
-      // Check if cursor is below the middle of the viewport
-      const viewportMiddle = window.innerHeight / 2
+      // Find the scroll container (overflow-y-auto ancestor)
+      const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
+      if (!scrollContainer) return
 
-      // If cursor is below the middle of the viewport, scroll to center it
-      if (cursorCoords.top > viewportMiddle) {
+      // Get the scroll container's bounding rect
+      const containerRect = scrollContainer.getBoundingClientRect()
+      const containerMiddle = containerRect.top + containerRect.height / 2
+
+      // If cursor is below the middle of the scroll container, scroll to center it
+      if (cursorCoords.top > containerMiddle) {
         // Use requestAnimationFrame to avoid layout thrashing
         requestAnimationFrame(() => {
-          view.dispatch({
-            effects: EditorView.scrollIntoView(pos, { y: 'center' })
-          })
+          // Calculate how much to scroll: move cursor to center
+          const scrollOffset = cursorCoords.top - containerMiddle
+          scrollContainer.scrollBy({ top: scrollOffset, behavior: 'smooth' })
         })
       }
     })
