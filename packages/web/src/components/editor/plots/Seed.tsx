@@ -412,6 +412,9 @@ const ActiveSeed = forwardRef<SeedHandle, {
   const isCodeBlockRef = useRef(isCodeBlock)
   isCodeBlockRef.current = isCodeBlock
 
+  // Track last cursor Y for typewriter scroll optimization
+  const lastCursorYRef = useRef<number | null>(null)
+
   // Ref for drag-out deactivation
   const mouseDownInsideRef = useRef(false)
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null)
@@ -725,93 +728,37 @@ const ActiveSeed = forwardRef<SeedHandle, {
   // Disabled on mobile/touch devices where iOS handles scroll-to-focus natively
   const createTypewriterListener = useCallback(() => {
     return EditorView.updateListener.of((update) => {
-      console.log('[Typewriter] Listener fired', {
-        docChanged: update.docChanged,
-        selectionChanged: update.state.selection.main.head !== update.startState.selection.main.head,
-        focusChanged: update.focusChanged,
-      })
-
       // Skip on mobile - iOS scroll-to-focus conflicts with our scrolling
       const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 768
-      if (isMobile) {
-        console.log('[Typewriter] Skipping - mobile detected', {
-          ontouchstart: 'ontouchstart' in window,
-          maxTouchPoints: navigator.maxTouchPoints,
-          innerWidth: window.innerWidth,
-        })
-        return
-      }
-
-      // Only trigger on doc changes (typing) - not just cursor movement
-      // This gives true "typewriter" behavior: scroll when adding content, not when navigating
-      if (!update.docChanged) {
-        console.log('[Typewriter] Skipping - no doc change')
-        return
-      }
+      if (isMobile) return
 
       const view = update.view
       const pos = view.state.selection.main.head
 
       // Get cursor coordinates relative to viewport
       const cursorCoords = view.coordsAtPos(pos)
-      if (!cursorCoords) {
-        console.log('[Typewriter] Skipping - no cursor coords for pos', pos)
-        return
-      }
+      if (!cursorCoords) return
 
-      // Check if cursor is below the middle of the viewport
-      const viewportMiddle = window.innerHeight / 2
-
-      console.log('[Typewriter] Cursor check', {
-        cursorTop: cursorCoords.top,
-        viewportMiddle,
-        viewportHeight: window.innerHeight,
-        isBelowMiddle: cursorCoords.top > viewportMiddle,
-      })
+      // Skip if cursor Y hasn't moved (e.g., typing on the same line)
+      const lastY = lastCursorYRef.current
+      if (lastY !== null && Math.abs(cursorCoords.top - lastY) < 1) return
+      lastCursorYRef.current = cursorCoords.top
 
       // If cursor is below the middle of the viewport, scroll to center it
       // CodeMirror's scroller is set to overflow: visible, so we need to scroll
       // the parent scroll container instead of using EditorView.scrollIntoView
-      if (cursorCoords.top > viewportMiddle) {
-        // Find the scroll container - it's the ancestor with overflow-y: auto
-        const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
-        if (!scrollContainer) {
-          console.log('[Typewriter] ERROR - no scroll container found!', {
-            viewDom: view.dom,
-            parent: view.dom.parentElement,
-            grandparent: view.dom.parentElement?.parentElement,
-          })
-          return
-        }
+      const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
+      if (!scrollContainer) return
 
-        // Calculate how much to scroll to center the cursor
-        // cursorCoords.top is relative to viewport, we need to find cursor's
-        // position within the scroll container
-        const containerRect = scrollContainer.getBoundingClientRect()
-        const cursorRelativeToContainer = cursorCoords.top - containerRect.top
-        const containerMiddle = containerRect.height / 2
+      const containerRect = scrollContainer.getBoundingClientRect()
+      const cursorRelativeToContainer = cursorCoords.top - containerRect.top
+      const containerMiddle = containerRect.height / 2
 
-        // Amount to scroll: positive means scroll down
-        const scrollAmount = cursorRelativeToContainer - containerMiddle
-
-        console.log('[Typewriter] SCROLLING', {
-          containerRect: { top: containerRect.top, height: containerRect.height },
-          cursorRelativeToContainer,
-          containerMiddle,
-          scrollAmount,
-          scrollContainer: scrollContainer.className,
-        })
-
-        // Use requestAnimationFrame to avoid layout thrashing
+      const scrollAmount = cursorRelativeToContainer - containerMiddle
+      if (scrollAmount !== 0) {
         requestAnimationFrame(() => {
-          scrollContainer.scrollBy({
-            top: scrollAmount,
-            behavior: 'smooth'
-          })
-          console.log('[Typewriter] scrollBy called with', scrollAmount)
+          scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
         })
-      } else {
-        console.log('[Typewriter] No scroll needed - cursor above middle')
       }
     })
   }, [])
@@ -869,8 +816,6 @@ const ActiveSeed = forwardRef<SeedHandle, {
   useEffect(() => {
     if (!containerRef.current) return
 
-    console.log('[Typewriter] Editor initializing - registering typewriter listener')
-
     // For code blocks, skip normal formatting extensions and use code highlighting
     const contentExtensions = isCodeBlock
       ? codeHighlighting
@@ -902,8 +847,6 @@ const ActiveSeed = forwardRef<SeedHandle, {
     })
 
     viewRef.current = view
-
-    console.log('[Typewriter] Editor created for block', block.uuid)
 
     return () => {
       view.destroy()
