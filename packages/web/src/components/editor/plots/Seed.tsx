@@ -412,6 +412,9 @@ const ActiveSeed = forwardRef<SeedHandle, {
   const isCodeBlockRef = useRef(isCodeBlock)
   isCodeBlockRef.current = isCodeBlock
 
+  // Track last cursor Y for typewriter scroll optimization
+  const lastCursorYRef = useRef<number | null>(null)
+
   // Ref for drag-out deactivation
   const mouseDownInsideRef = useRef(false)
   const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null)
@@ -729,26 +732,32 @@ const ActiveSeed = forwardRef<SeedHandle, {
       const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0 || window.innerWidth < 768
       if (isMobile) return
 
-      // Only trigger on selection changes (cursor movement or typing)
-      if (!update.selectionSet && !update.docChanged) return
-
       const view = update.view
       const pos = view.state.selection.main.head
 
-      // Get cursor coordinates
+      // Get cursor coordinates relative to viewport
       const cursorCoords = view.coordsAtPos(pos)
       if (!cursorCoords) return
 
-      // Check if cursor is below the middle of the viewport
-      const viewportMiddle = window.innerHeight / 2
+      // Skip if cursor Y hasn't moved (e.g., typing on the same line)
+      const lastY = lastCursorYRef.current
+      if (lastY !== null && Math.abs(cursorCoords.top - lastY) < 1) return
+      lastCursorYRef.current = cursorCoords.top
 
       // If cursor is below the middle of the viewport, scroll to center it
-      if (cursorCoords.top > viewportMiddle) {
-        // Use requestAnimationFrame to avoid layout thrashing
+      // CodeMirror's scroller is set to overflow: visible, so we need to scroll
+      // the parent scroll container instead of using EditorView.scrollIntoView
+      const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
+      if (!scrollContainer) return
+
+      const containerRect = scrollContainer.getBoundingClientRect()
+      const cursorRelativeToContainer = cursorCoords.top - containerRect.top
+      const containerMiddle = containerRect.height / 2
+
+      const scrollAmount = cursorRelativeToContainer - containerMiddle
+      if (scrollAmount !== 0) {
         requestAnimationFrame(() => {
-          view.dispatch({
-            effects: EditorView.scrollIntoView(pos, { y: 'center' })
-          })
+          scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
         })
       }
     })
@@ -843,7 +852,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
       view.destroy()
       viewRef.current = null
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, []) // eslint-disable-line react-hooks-deps
 
   // Focus and position cursor when ActiveSeed mounts (transitioning from dormant to active).
   // The initialCursorPosition prop tells us where to place the cursor (from the click offset).
