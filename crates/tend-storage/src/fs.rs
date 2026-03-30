@@ -16,6 +16,51 @@ use tracing::{debug, info};
 
 use crate::error::StorageError;
 
+/// Characters that are unsafe in filenames across platforms (particularly Windows).
+/// These are percent-encoded when constructing filesystem paths.
+const UNSAFE_FILENAME_CHARS: &[char] = &['%', ':', '<', '>', '"', '|', '?', '*', '\\'];
+
+/// Encode a page/sheet name for use as a filename.
+/// Percent-encodes characters that are unsafe on some platforms.
+pub fn encode_filename(name: &str) -> String {
+    let mut result = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch == '%' {
+            result.push_str("%25");
+        } else if UNSAFE_FILENAME_CHARS.contains(&ch) || ch.is_control() {
+            let mut buf = [0u8; 4];
+            for byte in ch.encode_utf8(&mut buf).bytes() {
+                result.push_str(&format!("%{:02X}", byte));
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+/// Decode a filename back to the original page/sheet name.
+/// Reverses the percent-encoding applied by `encode_filename`.
+pub fn decode_filename(encoded: &str) -> String {
+    let mut result = String::with_capacity(encoded.len());
+    let bytes = encoded.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(hex_str) = std::str::from_utf8(&bytes[i + 1..i + 3]) {
+                if let Ok(byte_val) = u8::from_str_radix(hex_str, 16) {
+                    result.push(byte_val as char);
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+    result
+}
+
 /// Validates that a name is safe for use in file paths.
 /// Rejects path traversal attempts, absolute paths, and null bytes.
 pub fn validate_safe_name(name: &str) -> Result<(), StorageError> {
@@ -31,9 +76,10 @@ pub fn validate_safe_name(name: &str) -> Result<(), StorageError> {
     if name.contains('\0') {
         return Err(StorageError::InvalidPath("Name cannot contain null bytes".into()));
     }
-    // Also reject Windows-style absolute paths like C:\
-    if name.len() >= 2 && name.chars().nth(1) == Some(':') {
-        return Err(StorageError::InvalidPath("Name cannot be an absolute path".into()));
+    if name.chars().any(|c| c.is_control()) {
+        return Err(StorageError::InvalidPath(
+            "Name cannot contain control characters".into(),
+        ));
     }
     Ok(())
 }
@@ -75,7 +121,7 @@ impl FileManager {
 
     /// Get path to a page file
     pub fn page_path(&self, name: &str) -> PathBuf {
-        self.root.join("pages").join(format!("{}.md", name))
+        self.root.join("pages").join(format!("{}.md", encode_filename(name)))
     }
 
     /// Get path to a journal file
@@ -103,8 +149,9 @@ impl FileManager {
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "md") {
-                if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                    match self.read_page(name).await {
+                if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
+                    let name = decode_filename(raw_name);
+                    match self.read_page(&name).await {
                         Ok(page) => pages.push(PageMeta::from(&page)),
                         Err(e) => {
                             debug!("Failed to read page {}: {}", name, e);
@@ -153,9 +200,17 @@ impl FileManager {
         validate_safe_name(name)?;
         let path = self.page_path(name);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(name.to_string()));
-        }
+        // Backwards compat: try encoded path first, fall back to raw (pre-encoding) path
+        let path = if !path.exists() {
+            let raw_path = self.root.join("pages").join(format!("{}.md", name));
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(name.to_string()));
+            }
+        } else {
+            path
+        };
 
         let content = tokio::fs::read_to_string(&path).await?;
         let mut page = parse_markdown(&content, name)
@@ -272,9 +327,17 @@ impl FileManager {
         validate_safe_name(name)?;
         let path = self.page_path(name);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(name.to_string()));
-        }
+        // Backwards compat: try encoded path first, fall back to raw path
+        let path = if !path.exists() {
+            let raw_path = self.root.join("pages").join(format!("{}.md", name));
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(name.to_string()));
+            }
+        } else {
+            path
+        };
 
         // Acquire read lock
         let _guard = self.write_lock.read().await;
@@ -297,7 +360,11 @@ impl FileManager {
         if validate_safe_name(name).is_err() {
             return false;
         }
-        self.page_path(name).exists()
+        if self.page_path(name).exists() {
+            return true;
+        }
+        // Backwards compat: check raw path
+        self.root.join("pages").join(format!("{}.md", name)).exists()
     }
 
     /// Check if a journal exists
@@ -320,9 +387,23 @@ impl FileManager {
         let dir = self.root.join(&content_type.directory);
         if content_type.save_by_date {
             if let Some(d) = date {
+                dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", encode_filename(name)))
+            } else {
+                let today = chrono::Local::now().date_naive();
+                dir.join(today.format("%Y-%m-%d").to_string()).join(format!("{}.md", encode_filename(name)))
+            }
+        } else {
+            dir.join(format!("{}.md", encode_filename(name)))
+        }
+    }
+
+    /// Raw (unencoded) sheet path for backwards compatibility with pre-encoding files
+    fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
+        let dir = self.root.join(&content_type.directory);
+        if content_type.save_by_date {
+            if let Some(d) = date {
                 dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", name))
             } else {
-                // Default to today if save_by_date but no date provided
                 let today = chrono::Local::now().date_naive();
                 dir.join(today.format("%Y-%m-%d").to_string()).join(format!("{}.md", name))
             }
@@ -377,8 +458,9 @@ impl FileManager {
                     while let Some(entry) = entries.next_entry().await? {
                         let path = entry.path();
                         if path.extension().map_or(false, |e| e == "md") {
-                            if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                                match self.read_sheet(content_type, name, date).await {
+                            if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
+                                let name = decode_filename(raw_name);
+                                match self.read_sheet(content_type, &name, date).await {
                                     Ok(page) => sheets.push(PageMeta::from(&page)),
                                     Err(e) => {
                                         debug!("Failed to read sheet {}/{}: {}", content_type.id, name, e);
@@ -395,8 +477,9 @@ impl FileManager {
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
                 if path.extension().map_or(false, |e| e == "md") {
-                    if let Some(name) = path.file_stem().and_then(|s| s.to_str()) {
-                        match self.read_sheet(content_type, name, None).await {
+                    if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
+                        let name = decode_filename(raw_name);
+                        match self.read_sheet(content_type, &name, None).await {
                             Ok(page) => sheets.push(PageMeta::from(&page)),
                             Err(e) => {
                                 debug!("Failed to read sheet {}/{}: {}", content_type.id, name, e);
@@ -419,9 +502,17 @@ impl FileManager {
         validate_safe_name(&content_type.directory)?;
         let path = self.sheet_path(content_type, name, date);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
-        }
+        // Backwards compat: try encoded path first, fall back to raw path
+        let path = if !path.exists() {
+            let raw_path = self.raw_sheet_path(content_type, name, date);
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
+            }
+        } else {
+            path
+        };
 
         let content = tokio::fs::read_to_string(&path).await?;
         let mut page = parse_markdown(&content, name)
@@ -514,9 +605,17 @@ impl FileManager {
         validate_safe_name(&content_type.directory)?;
         let path = self.sheet_path(content_type, name, date);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
-        }
+        // Backwards compat: try encoded path first, fall back to raw path
+        let path = if !path.exists() {
+            let raw_path = self.raw_sheet_path(content_type, name, date);
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
+            }
+        } else {
+            path
+        };
 
         // Acquire read lock
         let _guard = self.write_lock.read().await;
@@ -551,7 +650,11 @@ impl FileManager {
         if validate_safe_name(name).is_err() || validate_safe_name(&content_type.directory).is_err() {
             return false;
         }
-        self.sheet_path(content_type, name, date).exists()
+        if self.sheet_path(content_type, name, date).exists() {
+            return true;
+        }
+        // Backwards compat: check raw path
+        self.raw_sheet_path(content_type, name, date).exists()
     }
 }
 
@@ -646,10 +749,12 @@ mod tests {
 
     #[test]
     fn test_validate_safe_name() {
-        // Valid names
+        // Valid names (including characters that get encoded for filesystem)
         assert!(validate_safe_name("My Page").is_ok());
         assert!(validate_safe_name("nested/page").is_ok());
         assert!(validate_safe_name("Meeting Notes 2026").is_ok());
+        assert!(validate_safe_name("1:1 Jamie Parker").is_ok());
+        assert!(validate_safe_name("Q&A: Session Notes").is_ok());
 
         // Invalid: path traversal
         assert!(validate_safe_name("../secret").is_err());
@@ -659,13 +764,40 @@ mod tests {
         // Invalid: absolute paths
         assert!(validate_safe_name("/etc/passwd").is_err());
         assert!(validate_safe_name("\\Windows\\System32").is_err());
-        assert!(validate_safe_name("C:\\secret").is_err());
 
         // Invalid: null bytes
         assert!(validate_safe_name("page\0name").is_err());
 
         // Invalid: empty
         assert!(validate_safe_name("").is_err());
+    }
+
+    #[test]
+    fn test_encode_decode_filename() {
+        // No encoding needed
+        assert_eq!(encode_filename("My Page"), "My Page");
+        assert_eq!(encode_filename("Meeting Notes 2026"), "Meeting Notes 2026");
+
+        // Colon encoding
+        assert_eq!(encode_filename("1:1 Jamie Parker"), "1%3A1 Jamie Parker");
+        assert_eq!(decode_filename("1%3A1 Jamie Parker"), "1:1 Jamie Parker");
+
+        // Multiple special chars
+        assert_eq!(encode_filename("Q&A: \"Test\""), "Q&A%3A %22Test%22");
+
+        // Percent itself is encoded first
+        assert_eq!(encode_filename("100% Done"), "100%25 Done");
+        assert_eq!(decode_filename("100%25 Done"), "100% Done");
+
+        // Round-trip preserves original
+        for name in ["1:1 Jamie Parker", "file?.md", "a|b*c", "100% Done"] {
+            assert_eq!(decode_filename(&encode_filename(name)), name);
+        }
+
+        // No-op for safe names
+        for name in ["My Page", "nested/page", "simple"] {
+            assert_eq!(encode_filename(name), name);
+        }
     }
 
     #[tokio::test]
