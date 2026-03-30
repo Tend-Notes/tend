@@ -49,6 +49,8 @@ COPY crates/tend-core/Cargo.toml ./crates/tend-core/
 COPY crates/tend-storage/Cargo.toml ./crates/tend-storage/
 COPY crates/tend-search/Cargo.toml ./crates/tend-search/
 COPY crates/tend-git/Cargo.toml ./crates/tend-git/
+COPY crates/tend-blocks/Cargo.toml ./crates/tend-blocks/
+COPY crates/tend-links/Cargo.toml ./crates/tend-links/
 COPY crates/tend-server/Cargo.toml ./crates/tend-server/
 
 # Create dummy source files for dependency caching
@@ -56,6 +58,8 @@ RUN mkdir -p crates/tend-core/src && echo "pub fn dummy() {}" > crates/tend-core
     mkdir -p crates/tend-storage/src && echo "pub fn dummy() {}" > crates/tend-storage/src/lib.rs && \
     mkdir -p crates/tend-search/src && echo "pub fn dummy() {}" > crates/tend-search/src/lib.rs && \
     mkdir -p crates/tend-git/src && echo "pub fn dummy() {}" > crates/tend-git/src/lib.rs && \
+    mkdir -p crates/tend-blocks/src && echo "pub fn dummy() {}" > crates/tend-blocks/src/lib.rs && \
+    mkdir -p crates/tend-links/src && echo "pub fn dummy() {}" > crates/tend-links/src/lib.rs && \
     mkdir -p crates/tend-server/src && echo "fn main() {}" > crates/tend-server/src/main.rs
 
 # Build dependencies only (cached layer)
@@ -70,6 +74,8 @@ RUN touch crates/tend-core/src/lib.rs && \
     touch crates/tend-storage/src/lib.rs && \
     touch crates/tend-search/src/lib.rs && \
     touch crates/tend-git/src/lib.rs && \
+    touch crates/tend-blocks/src/lib.rs && \
+    touch crates/tend-links/src/lib.rs && \
     touch crates/tend-server/src/main.rs
 
 # Build the actual application
