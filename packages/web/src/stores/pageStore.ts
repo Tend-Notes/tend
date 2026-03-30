@@ -20,6 +20,7 @@ interface PageState {
 
   // Loading states
   isLoading: boolean
+  initialized: boolean
   error: string | null
 
   // Draft state
@@ -261,6 +262,7 @@ export const usePageStore = create<PageState>()(
     currentPage: null,
     currentPageName: null,
     isLoading: false,
+    initialized: false,
     error: null,
     pendingDraftRecovery: null,
     pendingConflict: null,
@@ -478,18 +480,24 @@ export const usePageStore = create<PageState>()(
     },
 
     initializeFromUrl: async () => {
-      const { type, name } = parseUrlPath(window.location.pathname)
-      if (type && name) {
-        if (type === 'journal') {
-          await get().navigateToJournal(name, false)
+      try {
+        const { type, name } = parseUrlPath(window.location.pathname)
+        if (type && name) {
+          if (type === 'journal') {
+            await get().navigateToJournal(name, false)
+          } else {
+            // Both 'page' and 'content-type' use navigateToPage
+            // navigateToPage will detect content type paths and route appropriately
+            await get().navigateToPage(name, false)
+          }
         } else {
-          // Both 'page' and 'content-type' use navigateToPage
-          // navigateToPage will detect content type paths and route appropriately
-          await get().navigateToPage(name, false)
+          // Default to today's journal
+          await get().loadTodaysJournal()
         }
-      } else {
-        // Default to today's journal
-        await get().loadTodaysJournal()
+      } finally {
+        set((state) => {
+          state.initialized = true
+        })
       }
     },
 
@@ -916,6 +924,7 @@ export const usePageStore = create<PageState>()(
         state.currentPage = null
         state.currentPageName = null
         state.isLoading = false
+        state.initialized = false
         state.error = null
         state.pendingDraftRecovery = null
         state.pendingConflict = null

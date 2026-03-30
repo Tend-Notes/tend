@@ -17,6 +17,7 @@ use tracing::{debug, info};
 
 use crate::encryption::{decrypt, encrypt, EncryptionError};
 use crate::error::StorageError;
+use crate::fs::{decode_filename, encode_filename, validate_safe_name};
 
 /// File extension for encrypted files
 const ENCRYPTED_EXT: &str = "md.age";
@@ -92,7 +93,7 @@ impl EncryptedFileManager {
     fn page_path(&self, name: &str) -> PathBuf {
         self.root
             .join("pages")
-            .join(format!("{}.{}", name, ENCRYPTED_EXT))
+            .join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
     }
 
     /// Get path to an encrypted journal file
@@ -123,8 +124,9 @@ impl EncryptedFileManager {
             // Check for .md.age extension
             if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
                 if name.ends_with(&format!(".{}", ENCRYPTED_EXT)) {
-                    let page_name = name.strip_suffix(&format!(".{}", ENCRYPTED_EXT)).unwrap();
-                    match self.read_page(page_name).await {
+                    let raw_name = name.strip_suffix(&format!(".{}", ENCRYPTED_EXT)).unwrap();
+                    let page_name = decode_filename(raw_name);
+                    match self.read_page(&page_name).await {
                         Ok(page) => pages.push(PageMeta::from(&page)),
                         Err(e) => {
                             debug!("Failed to read encrypted page {}: {}", page_name, e);
@@ -170,11 +172,20 @@ impl EncryptedFileManager {
 
     /// Read and decrypt a page by name
     pub async fn read_page(&self, name: &str) -> Result<Page, StorageError> {
+        validate_safe_name(name)?;
         let path = self.page_path(name);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(name.to_string()));
-        }
+        // Backwards compat: try encoded path first, fall back to raw path
+        let path = if !path.exists() {
+            let raw_path = self.root.join("pages").join(format!("{}.{}", name, ENCRYPTED_EXT));
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(name.to_string()));
+            }
+        } else {
+            path
+        };
 
         let encrypted = tokio::fs::read(&path).await?;
         let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
@@ -243,6 +254,9 @@ impl EncryptedFileManager {
 
     /// Encrypt and write a page
     pub async fn write_page(&self, page: &Page) -> Result<(), StorageError> {
+        if !page.is_journal {
+            validate_safe_name(&page.name)?;
+        }
         let path = if page.is_journal {
             self.journal_path(page.journal_date.unwrap_or_else(|| {
                 chrono::Local::now().date_naive()
@@ -294,11 +308,20 @@ impl EncryptedFileManager {
 
     /// Delete an encrypted page
     pub async fn delete_page(&self, name: &str) -> Result<(), StorageError> {
+        validate_safe_name(name)?;
         let path = self.page_path(name);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(name.to_string()));
-        }
+        // Backwards compat: try encoded path first, fall back to raw path
+        let path = if !path.exists() {
+            let raw_path = self.root.join("pages").join(format!("{}.{}", name, ENCRYPTED_EXT));
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(name.to_string()));
+            }
+        } else {
+            path
+        };
 
         let _guard = self.write_lock.read().await;
 
@@ -316,7 +339,14 @@ impl EncryptedFileManager {
 
     /// Check if an encrypted page exists
     pub async fn page_exists(&self, name: &str) -> bool {
-        self.page_path(name).exists()
+        if validate_safe_name(name).is_err() {
+            return false;
+        }
+        if self.page_path(name).exists() {
+            return true;
+        }
+        // Backwards compat: check raw path
+        self.root.join("pages").join(format!("{}.{}", name, ENCRYPTED_EXT)).exists()
     }
 
     /// Check if an encrypted journal exists
@@ -334,6 +364,18 @@ impl EncryptedFileManager {
 
     /// Get path to an encrypted sheet file for a content type
     fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
+        let dir = self.root.join(&content_type.directory);
+        if content_type.save_by_date {
+            let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
+            dir.join(d.format("%Y-%m-%d").to_string())
+                .join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
+        } else {
+            dir.join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
+        }
+    }
+
+    /// Raw (unencoded) sheet path for backwards compatibility
+    fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
         if content_type.save_by_date {
             let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
@@ -390,8 +432,9 @@ impl EncryptedFileManager {
                         let path = entry.path();
                         if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
                             if filename.ends_with(&ext_suffix) {
-                                let name = filename.strip_suffix(&ext_suffix).unwrap();
-                                match self.read_sheet(content_type, name, date).await {
+                                let raw_name = filename.strip_suffix(&ext_suffix).unwrap();
+                                let name = decode_filename(raw_name);
+                                match self.read_sheet(content_type, &name, date).await {
                                     Ok(page) => sheets.push(PageMeta::from(&page)),
                                     Err(e) => {
                                         debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
@@ -408,8 +451,9 @@ impl EncryptedFileManager {
                 let path = entry.path();
                 if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
                     if filename.ends_with(&ext_suffix) {
-                        let name = filename.strip_suffix(&ext_suffix).unwrap();
-                        match self.read_sheet(content_type, name, None).await {
+                        let raw_name = filename.strip_suffix(&ext_suffix).unwrap();
+                        let name = decode_filename(raw_name);
+                        match self.read_sheet(content_type, &name, None).await {
                             Ok(page) => sheets.push(PageMeta::from(&page)),
                             Err(e) => {
                                 debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
@@ -426,11 +470,21 @@ impl EncryptedFileManager {
 
     /// Read and decrypt a sheet
     pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
+        validate_safe_name(name)?;
+        validate_safe_name(&content_type.directory)?;
         let path = self.sheet_path(content_type, name, date);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
-        }
+        // Backwards compat: try encoded path first, fall back to raw path
+        let path = if !path.exists() {
+            let raw_path = self.raw_sheet_path(content_type, name, date);
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
+            }
+        } else {
+            path
+        };
 
         let encrypted = tokio::fs::read(&path).await?;
         let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
@@ -494,6 +548,8 @@ impl EncryptedFileManager {
             &page.name
         };
 
+        validate_safe_name(sheet_name)?;
+        validate_safe_name(&content_type.directory)?;
         self.ensure_content_type_dir(content_type, date).await?;
         let path = self.sheet_path(content_type, sheet_name, date);
         self.write_file(&path, page).await
@@ -518,11 +574,21 @@ impl EncryptedFileManager {
             return Ok(());
         }
 
+        validate_safe_name(name)?;
+        validate_safe_name(&content_type.directory)?;
         let path = self.sheet_path(content_type, name, date);
 
-        if !path.exists() {
-            return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
-        }
+        // Backwards compat: try encoded path first, fall back to raw path
+        let path = if !path.exists() {
+            let raw_path = self.raw_sheet_path(content_type, name, date);
+            if raw_path.exists() {
+                raw_path
+            } else {
+                return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
+            }
+        } else {
+            path
+        };
 
         let _guard = self.write_lock.read().await;
 
@@ -552,7 +618,14 @@ impl EncryptedFileManager {
             return false;
         }
 
-        self.sheet_path(content_type, name, date).exists()
+        if validate_safe_name(name).is_err() || validate_safe_name(&content_type.directory).is_err() {
+            return false;
+        }
+        if self.sheet_path(content_type, name, date).exists() {
+            return true;
+        }
+        // Backwards compat: check raw path
+        self.raw_sheet_path(content_type, name, date).exists()
     }
 }
 
