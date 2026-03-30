@@ -84,7 +84,7 @@ function useIsMobile() {
 }
 
 export function MainContent() {
-  const { currentPage, isLoading, error, editingTemplate, editingImportError } = usePageStore()
+  const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore()
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
   const isMobile = useIsMobile()
@@ -215,7 +215,7 @@ export function MainContent() {
     setShowCalendar(false)
   }, [currentPage?.name])
 
-  if (isLoading) {
+  if (isLoading || !initialized) {
     return (
       <main className="flex-1 flex items-center justify-center">
         <div className="text-base-03 text-sm">Loading...</div>
