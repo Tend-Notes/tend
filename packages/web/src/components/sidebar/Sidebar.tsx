@@ -482,7 +482,16 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
     >
       {/* Collapsed state: just show toggle button */}
       {!sidebarOpen ? (
-        <div className="flex flex-col items-center py-3">
+        <div className="flex flex-col items-center py-3 gap-2">
+          <button
+            onClick={() => loadTodaysJournal()}
+            className="p-1 text-base-03 hover:text-base-05 transition-colors"
+            title="Today's journal (Alt+Shift+J)"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" />
+            </svg>
+          </button>
           <button
             onClick={toggleSidebar}
             className="p-1 text-base-03 hover:text-base-05 transition-colors"
