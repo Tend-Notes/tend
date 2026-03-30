@@ -2,6 +2,11 @@
 
 All notable changes to Tend are documented in this file.
 
+## [0.1.1] - 2026-03-30
+
+### Added
+- Home icon in collapsed sidebar for quick navigation to today's journal
+
 ## [0.1.0] - 2026-03-30
 
 ### Fixed
