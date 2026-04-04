@@ -8,6 +8,7 @@ import { ImportErrorEditor } from '../editor/ImportErrorEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
+import { SelectionPill } from '../editor/SelectionPill'
 
 export function MainContent() {
   const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore()
@@ -183,6 +184,7 @@ export function MainContent() {
         </div>
       </div>
 
+      <SelectionPill />
     </main>
   )
 }
