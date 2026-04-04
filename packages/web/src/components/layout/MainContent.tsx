@@ -2,94 +2,17 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
-import { useUIStore } from '../../stores/uiStore'
 import { OutlinerEditor } from '../editor/OutlinerEditor'
 import { TemplateEditor } from '../editor/TemplateEditor'
 import { ImportErrorEditor } from '../editor/ImportErrorEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
-import { MobileToolbar } from '../ui/MobileToolbar'
-
-// Find the currently focused editor element
-function findActiveEditor(): HTMLElement | null {
-  const focusedEditor = document.querySelector('[data-seed-editor]:focus-within') ||
-    document.activeElement?.closest('[data-seed-editor]')
-
-  if (focusedEditor) {
-    return focusedEditor as HTMLElement
-  }
-
-  // Fall back to last focused block
-  const lastFocusedUuid = useUIStore.getState().lastFocusedBlockUuid
-  if (lastFocusedUuid) {
-    const blockEl = document.querySelector(`[data-block-id="${lastFocusedUuid}"]`)
-    return blockEl?.querySelector('[data-seed-editor]') as HTMLElement | null
-  }
-
-  return null
-}
-
-// Apply formatting to the currently focused editor
-function applyFormatting(delimiter: string) {
-  const editor = findActiveEditor()
-  if (!editor) return
-
-  const event = new CustomEvent('seed-format', {
-    detail: { delimiter },
-    bubbles: false,
-  })
-  editor.dispatchEvent(event)
-}
-
-// Dispatch boundary event for tab/shift-tab
-function dispatchBoundaryEvent(eventType: 'tab' | 'shift-tab') {
-  const editor = findActiveEditor()
-  if (!editor) return
-
-  const event = new CustomEvent('seed-boundary', {
-    detail: { type: eventType },
-    bubbles: false,
-  })
-  editor.dispatchEvent(event)
-}
-
-// Check if device is mobile/touch (also respects force-mobile CSS class for dev testing)
-function checkIsMobile() {
-  if (typeof window === 'undefined') return false
-  const isForcedMobile = document.documentElement.classList.contains('force-mobile')
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-  const isNarrowScreen = window.innerWidth < 768
-  return isForcedMobile || isTouchDevice || isNarrowScreen
-}
-
-function useIsMobile() {
-  const [isMobile, setIsMobile] = useState(checkIsMobile)
-
-  useEffect(() => {
-    const check = () => setIsMobile(checkIsMobile())
-    window.addEventListener('resize', check)
-
-    // Watch for force-mobile class changes (dev toggle)
-    const observer = new MutationObserver(check)
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-
-    return () => {
-      window.removeEventListener('resize', check)
-      observer.disconnect()
-    }
-  }, [])
-
-  return isMobile
-}
 
 export function MainContent() {
   const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore()
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
-  const isMobile = useIsMobile()
-  const openSearch = useUIStore((state) => state.openSearch)
-  const openCommandPalette = useUIStore((state) => state.openCommandPalette)
 
   // Scroll title visibility state
   const [showScrollTitle, setShowScrollTitle] = useState(false)
@@ -125,80 +48,6 @@ export function MainContent() {
   const handlePageChange = useCallback(() => {
     setShowScrollTitle(false)
   }, [])
-
-  // Mobile toolbar - indent/outdent always visible, extras in expandable drawer
-  const indentItem = {
-    id: 'indent',
-    label: 'Indent',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13 5l7 7-7 7M5 5v14" />
-      </svg>
-    ),
-    onClick: () => dispatchBoundaryEvent('tab'),
-  }
-
-  const outdentItem = {
-    id: 'outdent',
-    label: 'Outdent',
-    icon: (
-      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14V5" />
-      </svg>
-    ),
-    onClick: () => dispatchBoundaryEvent('shift-tab'),
-  }
-
-  const extraToolbarItems = [
-    {
-      id: 'bold',
-      label: 'Bold',
-      icon: <span className="font-bold">B</span>,
-      onClick: () => applyFormatting('**'),
-    },
-    {
-      id: 'italic',
-      label: 'Italic',
-      icon: <span className="italic">I</span>,
-      onClick: () => applyFormatting('*'),
-    },
-    {
-      id: 'highlight',
-      label: 'Highlight',
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-        </svg>
-      ),
-      onClick: () => applyFormatting('=='),
-    },
-    {
-      id: 'strikethrough',
-      label: 'Strikethrough',
-      icon: <span className="line-through">S</span>,
-      onClick: () => applyFormatting('~~'),
-    },
-    {
-      id: 'search',
-      label: 'Search',
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-      ),
-      onClick: openSearch,
-    },
-    {
-      id: 'palette',
-      label: 'Command Palette',
-      icon: (
-        <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h7" />
-        </svg>
-      ),
-      onClick: openCommandPalette,
-    },
-  ]
 
   // Check git status when page changes
   useEffect(() => {
@@ -334,14 +183,6 @@ export function MainContent() {
         </div>
       </div>
 
-      {/* Mobile toolbar - vertical strip on right edge */}
-      {isMobile && (
-        <MobileToolbar
-          indentItem={indentItem}
-          outdentItem={outdentItem}
-          extraItems={extraToolbarItems}
-        />
-      )}
     </main>
   )
 }
