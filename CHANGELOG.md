@@ -4,6 +4,8 @@ All notable changes to Tend are documented in this file.
 
 ## [0.1.1] - 2026-03-30
 
+Note: Version was incorrectly labeled 0.1.1. The actual version is v0.1.20260330-203511.
+
 ### Added
 - Home icon in collapsed sidebar for quick navigation to today's journal
 

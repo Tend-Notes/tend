@@ -23,8 +23,11 @@ export function SelectionPill() {
     }
 
     // Only show within editor blocks
-    const anchor = sel.anchorNode?.parentElement
-    if (!anchor?.closest('[data-seed-editor]')) {
+    const anchorEl = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement
+    const focusEl = sel.focusNode instanceof Element ? sel.focusNode : sel.focusNode?.parentElement
+    const anchorEditor = anchorEl?.closest('[data-seed-editor]')
+    const focusEditor = focusEl?.closest('[data-seed-editor]')
+    if (!anchorEditor || anchorEditor !== focusEditor) {
       setVisible(false)
       return
     }
@@ -36,7 +39,8 @@ export function SelectionPill() {
       return
     }
 
-    const pillWidth = pillRef.current?.offsetWidth ?? 200
+    // Use actual pill width after first render, estimate before
+    const pillWidth = pillRef.current?.offsetWidth || 180
     let left = rect.left + rect.width / 2 - pillWidth / 2
     left = Math.max(8, Math.min(left, window.innerWidth - pillWidth - 8))
     const top = rect.top - 48
@@ -67,7 +71,8 @@ export function SelectionPill() {
   const format = useCallback((delimiter: string) => {
     const sel = window.getSelection()
     if (!sel || sel.rangeCount === 0) return
-    const editor = sel.anchorNode?.parentElement?.closest('[data-seed-editor]')
+    const anchorEl = sel.anchorNode instanceof Element ? sel.anchorNode : sel.anchorNode?.parentElement
+    const editor = anchorEl?.closest('[data-seed-editor]')
     if (!editor) return
 
     const event = new CustomEvent('seed-format', {
@@ -83,22 +88,24 @@ export function SelectionPill() {
     <div
       ref={pillRef}
       className="selection-pill"
+      role="toolbar"
+      aria-label="Text formatting"
       style={{
         position: 'fixed',
         top: position.top,
         left: position.left,
       }}
     >
-      <button onPointerDown={(e) => { e.preventDefault(); format('**') }} title="Bold">
+      <button onPointerDown={(e) => { e.preventDefault(); format('**') }} aria-label="Bold">
         <strong>B</strong>
       </button>
-      <button onPointerDown={(e) => { e.preventDefault(); format('*') }} title="Italic">
+      <button onPointerDown={(e) => { e.preventDefault(); format('*') }} aria-label="Italic">
         <em>I</em>
       </button>
-      <button onPointerDown={(e) => { e.preventDefault(); format('~~') }} title="Strikethrough">
+      <button onPointerDown={(e) => { e.preventDefault(); format('~~') }} aria-label="Strikethrough">
         <s>S</s>
       </button>
-      <button onPointerDown={(e) => { e.preventDefault(); format('==') }} title="Highlight">
+      <button onPointerDown={(e) => { e.preventDefault(); format('==') }} aria-label="Highlight">
         H
       </button>
     </div>

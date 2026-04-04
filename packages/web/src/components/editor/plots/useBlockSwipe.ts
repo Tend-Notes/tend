@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { useRef, useCallback } from 'react'
 
-const SWIPE_THRESHOLD = 36 // px horizontal to trigger
+const SWIPE_THRESHOLD = 48 // px horizontal to trigger
 const VERTICAL_LIMIT = 20  // px vertical movement cancels swipe
 
 interface SwipeHandlers {
