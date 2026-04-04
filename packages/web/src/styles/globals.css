@@ -1159,735 +1159,137 @@ code {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
-   Mobile Toolbar
-   Touch-friendly formatting and navigation controls for phones and tablets.
-   ───────────────────────────────────────────────────────────────────────────── */
-
-.mobile-toolbar {
-  position: fixed !important;
-  bottom: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  z-index: 9999 !important;
-  background-color: var(--base01);
-  border-top: 1px solid var(--base02);
-  padding-bottom: env(safe-area-inset-bottom, 0);
-}
-
-.mobile-toolbar-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-  color: var(--base05);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  transition: background-color var(--duration-fast) var(--ease-out),
-              color var(--duration-fast) var(--ease-out);
-  -webkit-tap-highlight-color: transparent;
-  touch-action: manipulation;
-}
-
-.mobile-toolbar-btn:hover,
-.mobile-toolbar-btn:active {
-  background-color: var(--base02);
-}
-
-.mobile-toolbar-btn:active {
-  color: var(--base0D);
-}
-
-/* Safe area padding for devices with notches/home indicators */
-.safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0);
-}
-
-/* Prevent body scroll when toolbar is active on mobile */
-@media (max-width: 767px) {
-  body.has-mobile-toolbar {
-    padding-bottom: 60px; /* Space for toolbar */
-  }
-}
-
-/* Tablet-specific adjustments */
-@media (min-width: 768px) and (max-width: 1024px) and (pointer: coarse) {
-  .mobile-toolbar-btn {
-    width: 48px;
-    height: 48px;
-  }
-}
-
-/* Hide mobile toolbar on desktop with mouse */
-@media (min-width: 768px) and (pointer: fine) {
-  .mobile-toolbar {
-    display: none;
-  }
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
    Mobile Responsive Styles
-   Comprehensive mobile-first design for phones and tablets.
    ───────────────────────────────────────────────────────────────────────────── */
 
-/* Phone screens (< 768px) */
+/* Phone screens */
 @media (max-width: 767px) {
-  /*
-   * Mobile typography best practices (2025):
-   * - Body text: 20px for comfortable reading on mobile
-   * - Touch targets: 44x44px minimum
-   * - Line height: 1.5x font size
-   * - Adequate spacing between elements
-   * Reference: Apple HIG, Material Design, WCAG 2.1
-   */
-
-  /* Viewport containment - lock app shell to viewport, prevent any horizontal overflow */
-  html, body, #root {
-    height: 100dvh;
-    width: 100%;
-    max-width: 100vw;
-    overflow-x: hidden;
-    overflow-y: hidden;
-  }
-
+  /* Typography: 16px body, tighter line height */
   html {
-    font-size: 18px;
+    font-size: 16px;
   }
 
   body {
-    font-size: 18px;
-    line-height: 1.6;
+    font-size: 16px;
+    line-height: 1.5;
     -webkit-text-size-adjust: 100%;
-    /* Prevent Safari from auto-zooming */
-    touch-action: manipulation;
   }
 
-  /* Page title - prominent, clear hierarchy */
-  .page-title,
-  h1 {
-    font-size: 32px;
-    font-weight: 600;
-    margin-bottom: 16px;
-  }
+  /* Headings */
+  .page-title, h1 { font-size: 22px; }
+  h2 { font-size: 18px; }
+  h3 { font-size: 16px; font-weight: 600; }
 
-  h2 {
-    font-size: 26px;
-  }
-
-  h3 {
-    font-size: 22px;
-  }
-
-  /*
-   * CodeMirror editor - match body text size
-   * Must use !important to override CodeMirror defaults
-   */
-  .cm-editor {
-    font-size: 18px !important;
-  }
-
-  .cm-content {
-    font-size: 18px !important;
-    line-height: 1.6 !important;
-  }
-
+  /* CodeMirror -- match body text */
+  .cm-editor,
+  .cm-content,
   .cm-line {
-    font-size: 18px !important;
-    line-height: 1.6 !important;
+    font-size: 16px !important;
+    line-height: 1.5 !important;
   }
 
-  /* Prevent iOS auto-zoom on focus */
+  /* Prevent iOS auto-zoom on input focus (must be >= 16px) */
   input, textarea, select, .cm-content {
-    font-size: 16px !important; /* iOS minimum to prevent zoom */
+    font-size: 16px !important;
   }
 
-  /* Page content - extra left padding for pull tab (44px + gap) */
+  /* Content area -- 16px side margins, no max-width constraint */
   .page-content {
-    padding: 16px 24px 80px 52px !important;
+    padding: 12px 16px 50vh 16px !important;
     max-width: 100% !important;
     margin: 0 !important;
   }
 
-  /* Bullets - larger touch target, vertically centered with text */
-  .bullet {
-    width: 7px;
-    height: 7px;
-    padding: 20px;
-    margin: -20px;
-    margin-top: -10px; /* Align with lowercase letter center (18px font, 1.6 line-height) */
-    background-clip: content-box;
-  }
-
-  .bullet--collapsed {
-    border-width: 2px;
-    background-clip: content-box;
-  }
-
-  /* Block layout - more vertical space */
+  /* Block spacing */
   .block {
-    gap: 10px;
-    padding: 6px 0;
-    min-height: 48px;
-    align-items: flex-start; /* Align bullet to top of content */
+    gap: 8px;
+    padding: 3px 0;
   }
 
-  .block-content {
-    min-height: 1.5em;
-    font-size: 18px;
-  }
-
-  /* Indentation - slightly more visible hierarchy */
+  /* Indentation -- tighter on phone */
   .block-children {
     margin-left: 16px;
-    padding-left: 10px;
+    padding-left: 8px;
   }
 
-  /* Task badges - pill shape, readable */
-  .task-status {
-    font-size: 14px;
-    font-weight: 600;
-    padding: 4px 12px;
-    border-radius: 12px;
+  /* Scroll title -- full width */
+  .scroll-title {
+    padding: 0 16px;
   }
-
-  /* Tags - flat horizontal pill shape */
-  .tag-pill {
-    font-size: 14px;
-    padding: 0 8px;
-    border-radius: 4px;
-    line-height: 1.4;
-  }
-
-  /* Headers - don't overflow # into gutter on mobile (no space for it) */
-  .block-container--header .cm-line {
-    text-indent: 0 !important;
-  }
-
-  /* Headers flush left but with small margin so # doesn't touch edge */
-  .block-container--header {
-    margin-left: 8px !important;
-  }
-
-  .block-children .block-container--header {
-    margin-left: calc(-16px - 10px + 8px) !important; /* Compensate for mobile block-children spacing */
-  }
-
-  /* Sidebar items - comfortable touch targets (44px minimum per Apple HIG) */
-  .sidebar-item {
-    padding: 12px 16px;
-    min-height: 44px;
-    font-size: 18px;
-  }
-
-  /* Sidebar overlay - full screen on mobile */
-  .sidebar-mobile-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    background-color: var(--sidebar-bg);
-  }
-
-  /* Activity log - readable but compact */
-  .activity-log {
-    font-size: 15px;
-    padding: 8px 16px;
-  }
-
-  /* Full-width dialogs */
-  .search-panel {
-    width: 100%;
-    max-width: none;
-    border-radius: 0;
-  }
-
-  .command-palette {
-    width: calc(100% - 24px);
-    max-width: none;
-    margin: 12px;
-    border-radius: 12px;
-  }
-
-  /* Wikilinks - larger tap area */
-  .cm-wikilink {
-    padding: 4px 2px;
-  }
-
-  /* Buttons - ensure minimum touch target */
-  button, [role="button"] {
-    min-height: 44px;
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-
-  /* Input fields - prevent iOS zoom (must be 16px+) */
-  input, textarea, select {
-    font-size: 20px;
-  }
-
-  /* ─────────────────────────────────────────────────────────────────────────────
-     Sidebar Mobile Overrides
-     ───────────────────────────────────────────────────────────────────────────── */
-
-  /* Sidebar section headers */
-  .sidebar [class*="text-xs"] {
-    font-size: 13px !important;
-  }
-
-  /* Sidebar list items - ensure 44px touch targets */
-  .sidebar button,
-  .sidebar a,
-  .sidebar [role="button"] {
-    min-height: 44px;
-    padding-top: 12px !important;
-    padding-bottom: 12px !important;
-    font-size: 18px;
-  }
-
-  /* Sidebar navigation tabs - 44px touch targets */
-  .sidebar nav > div > button {
-    padding: 12px 10px !important;
-    font-size: 16px !important;
-    min-height: 44px;
-  }
-
-  /* Settings option buttons (appearance, tasks, etc.) */
-  .sidebar [class*="py-1"]:not(.tag-pill):not(.task-status) {
-    padding-top: 8px !important;
-    padding-bottom: 8px !important;
-  }
-
-  /* Garden list items */
-  .sidebar [class*="py-1.5"] {
-    padding-top: 12px !important;
-    padding-bottom: 12px !important;
-  }
-
-  /* Small toggle buttons in settings */
-  .sidebar [class*="px-2"][class*="py-1"] {
-    padding: 10px 14px !important;
-    font-size: 14px !important;
+  .scroll-title--visible {
+    padding: 8px 16px 12px 16px;
   }
 }
 
-/* Tablet screens (768px - 1024px) */
-@media (min-width: 768px) and (max-width: 1024px) {
-  html {
-    font-size: 17px;
-  }
-
-  body {
-    font-size: 17px;
-    line-height: 1.55;
-  }
-
-  /* Page title */
-  .page-title,
-  h1 {
-    font-size: 26px;
-  }
-
-  /* CodeMirror */
-  .cm-editor,
-  .cm-content,
-  .cm-line {
-    font-size: 17px !important;
-    line-height: 1.55 !important;
-  }
-
-  /* Page content - balanced padding */
-  .page-content {
-    padding: 24px 32px 60px 32px !important;
-    max-width: 800px !important;
-    margin: 0 auto !important;
-  }
-
-  /* Bullets - touch-friendly on tablet */
-  .bullet {
-    width: 7px;
-    height: 7px;
-    padding: 18px;
-    margin: -18px;
-    background-clip: content-box;
-  }
-
-  .bullet--collapsed {
-    background-clip: content-box;
-  }
-
-  /* Block layout */
-  .block {
-    gap: 12px;
-    padding: 5px 0;
-    min-height: 44px;
-  }
-
-  .block-content {
-    font-size: 17px;
-  }
-
-  /* Block children */
-  .block-children {
-    margin-left: 20px;
-    padding-left: 12px;
-  }
-
-  /* Tags and tasks */
-  .tag-pill {
-    font-size: 14px;
-    padding: 3px 10px;
-  }
-
-  .task-status {
-    font-size: 14px;
-    padding: 4px 10px;
-  }
-
-  /* Inputs */
-  input, textarea, select {
-    font-size: 17px;
-  }
-}
-
-/* Touch device optimizations (any screen size with touch) */
+/* Touch devices -- expand targets regardless of screen size */
 @media (pointer: coarse) {
-  /* Larger touch targets for all interactive elements */
-  button,
-  [role="button"],
-  .clickable {
-    min-height: 44px;
+  /* Bullet touch target via pseudo-element */
+  .bullet {
+    position: relative;
+  }
+  .bullet::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
     min-width: 44px;
+    min-height: 44px;
   }
 
-  /* Task status badges - ensure tap area */
-  .task-status {
-    min-height: 32px;
-    display: inline-flex;
-    align-items: center;
-  }
-
-  /* Tag pills - remove any flex that adds height */
-  .tag-pill {
-    display: inline-block;
-  }
-
-  /* Remove hover effects that don't work well on touch */
+  /* Replace hover with active feedback */
   .bullet:hover {
     transform: none;
   }
-
-  /* Add active state feedback instead */
   .bullet:active {
     background-color: var(--base0D);
     transform: scale(1.3);
   }
-
   .bullet--collapsed:active {
     border-color: var(--base0D);
     transform: scale(1.3);
   }
 
-  /* Prevent text selection on UI elements */
-  button,
-  [role="button"],
-  .sidebar nav,
-  .mobile-toolbar {
+  /* Prevent text selection on UI chrome */
+  button, [role="button"] {
     -webkit-user-select: none;
     user-select: none;
   }
 
   /* Disable double-tap zoom on interactive elements */
-  button,
-  [role="button"],
-  .bullet,
-  .mobile-toolbar-btn {
+  button, [role="button"], .bullet {
     touch-action: manipulation;
   }
-
-  /* Sidebar items need adequate touch targets */
-  .sidebar-item,
-  .sidebar nav button,
-  .sidebar nav a {
-    min-height: 44px;
-    padding-top: 10px;
-    padding-bottom: 10px;
-  }
 }
 
-/* Landscape phone orientation */
-@media (max-width: 896px) and (max-height: 500px) and (orientation: landscape) {
-  /* Reduce vertical spacing in landscape */
-  .page-content {
-    padding-top: 8px;
-    padding-bottom: 70px;
-  }
-
-  .block {
-    padding: 3px 0;
-    min-height: 40px;
-  }
-
-  /* Compact toolbar in landscape - still meets 44px minimum */
-  .mobile-toolbar {
-    padding: 2px 0;
-  }
-
-  .mobile-toolbar-btn {
-    width: 44px;
-    height: 44px;
-  }
+/* Selection context pill -- touch formatting */
+.selection-pill {
+  z-index: 50;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--base01);
+  border: 1px solid var(--base02);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   iOS-specific Optimizations
-   ───────────────────────────────────────────────────────────────────────────── */
-
-/* Suppress iOS form accessory bar (Done/Cancel bar) */
-@supports (-webkit-touch-callout: none) {
-  /* CodeMirror editor - hide iOS form controls */
-  .cm-content {
-    /* Tell iOS this is not a standard form input */
-    -webkit-user-modify: read-write-plaintext-only;
-  }
-
-  /* Prevent iOS text selection handles from interfering */
-  .cm-editor {
-    -webkit-touch-callout: none;
-  }
-
-  /* Adjust for iOS safe areas */
-  .mobile-toolbar {
-    padding-bottom: max(env(safe-area-inset-bottom), 8px);
-  }
-
-  /* Account for keyboard viewport changes on iOS */
-  body.has-mobile-toolbar {
-    /* iOS Safari viewport height fix */
-    min-height: -webkit-fill-available;
-  }
-}
-
-/* iOS Safari specific - using media query for webkit */
-@media screen and (-webkit-min-device-pixel-ratio: 0) {
-  /* Ensure the viewport doesn't jump when keyboard appears */
-  html {
-    height: -webkit-fill-available;
-  }
-
-  body {
-    min-height: -webkit-fill-available;
-  }
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
-   DEV: Forced Viewport Modes
-   Use command palette "DEV: Switch to mobile/tablet/desktop UI" to test
-   responsive styles without resizing the browser window.
-   ───────────────────────────────────────────────────────────────────────────── */
-
-/* Force mobile styles regardless of viewport */
-html.force-mobile {
-  font-size: 20px !important;
-}
-
-html.force-mobile body {
-  font-size: 20px !important;
-  line-height: 1.6 !important;
-}
-
-html.force-mobile .page-title,
-html.force-mobile h1 {
-  font-size: 32px !important;
-}
-
-html.force-mobile h2 {
-  font-size: 26px !important;
-}
-
-html.force-mobile h3 {
-  font-size: 22px !important;
-}
-
-html.force-mobile .cm-editor,
-html.force-mobile .cm-content,
-html.force-mobile .cm-line {
-  font-size: 20px !important;
-  line-height: 1.6 !important;
-}
-
-html.force-mobile .page-content {
-  padding: 16px 24px 80px 52px !important;
-  max-width: 100% !important;
-}
-
-html.force-mobile .block {
-  gap: 10px !important;
-  padding: 6px 0 !important;
-  min-height: 48px !important;
-  align-items: flex-start !important;
-}
-
-html.force-mobile .tag-pill {
-  font-size: 14px !important;
-  padding: 0 8px !important;
-  border-radius: 4px !important;
-  line-height: 1.4 !important;
-  display: inline-block !important;
-}
-
-/* Headers - no gutter overflow on mobile */
-html.force-mobile .block-container--header .cm-line {
-  text-indent: 0 !important;
-}
-
-html.force-mobile .block-container--header {
-  margin-left: 8px !important;
-}
-
-html.force-mobile .block-children .block-container--header {
-  margin-left: calc(-16px - 10px + 8px) !important;
-}
-
-html.force-mobile .task-status {
-  font-size: 14px !important;
-  padding: 4px 12px !important;
-}
-
-html.force-mobile .block-children {
-  margin-left: 16px !important;
-  padding-left: 10px !important;
-}
-
-html.force-mobile::after {
-  content: "MOBILE";
-  position: fixed;
-  top: 4px;
-  right: 4px;
-  background: var(--base08);
-  color: var(--base00);
-  font-size: 10px;
-  font-weight: bold;
-  padding: 2px 6px;
+.selection-pill button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  border: none;
   border-radius: 4px;
-  z-index: 9999;
-  pointer-events: none;
+  background: transparent;
+  color: var(--base05);
+  font-size: 14px;
+  cursor: pointer;
+  min-height: auto;
 }
 
-/* Force tablet styles regardless of viewport */
-html.force-tablet {
-  font-size: 17px !important;
-}
-
-html.force-tablet body {
-  font-size: 17px !important;
-  line-height: 1.55 !important;
-}
-
-html.force-tablet .page-title,
-html.force-tablet h1 {
-  font-size: 26px !important;
-}
-
-html.force-tablet .cm-editor,
-html.force-tablet .cm-content,
-html.force-tablet .cm-line {
-  font-size: 17px !important;
-  line-height: 1.55 !important;
-}
-
-html.force-tablet .page-content {
-  padding: 24px 32px 60px 32px !important;
-  max-width: 800px !important;
-  margin: 0 auto !important;
-}
-
-html.force-tablet .block {
-  gap: 12px !important;
-  padding: 5px 0 !important;
-  min-height: 44px !important;
-}
-
-html.force-tablet .tag-pill {
-  font-size: 14px !important;
-  padding: 3px 10px !important;
-}
-
-html.force-tablet .block-children {
-  margin-left: 20px !important;
-  padding-left: 12px !important;
-}
-
-html.force-tablet::after {
-  content: "TABLET";
-  position: fixed;
-  top: 4px;
-  right: 4px;
-  background: var(--base0A);
-  color: var(--base00);
-  font-size: 10px;
-  font-weight: bold;
-  padding: 2px 6px;
-  border-radius: 4px;
-  z-index: 9999;
-  pointer-events: none;
-}
-
-/* Force desktop styles regardless of viewport */
-html.force-desktop {
-  font-size: 16px !important;
-}
-
-html.force-desktop body {
-  font-size: 16px !important;
-  line-height: 1.5 !important;
-}
-
-html.force-desktop .page-title,
-html.force-desktop h1 {
-  font-size: 24px !important;
-}
-
-html.force-desktop .cm-editor,
-html.force-desktop .cm-content,
-html.force-desktop .cm-line {
-  font-size: 16px !important;
-  line-height: 1.5 !important;
-}
-
-html.force-desktop .page-content {
-  padding: 32px 48px !important;
-  max-width: 720px !important;
-  margin: 0 auto !important;
-}
-
-html.force-desktop .block {
-  gap: 12px !important;
-  padding: 2px 0 !important;
-  min-height: auto !important;
-}
-
-html.force-desktop .tag-pill {
-  font-size: 13px !important;
-  padding: 2px 8px !important;
-}
-
-html.force-desktop .block-children {
-  margin-left: 24px !important;
-  padding-left: 12px !important;
-}
-
-html.force-desktop::after {
-  content: "DESKTOP";
-  position: fixed;
-  top: 4px;
-  right: 4px;
-  background: var(--base0B);
-  color: var(--base00);
-  font-size: 10px;
-  font-weight: bold;
-  padding: 2px 6px;
-  border-radius: 4px;
-  z-index: 9999;
-  pointer-events: none;
+.selection-pill button:active {
+  background: var(--base02);
+  color: var(--base0D);
 }
