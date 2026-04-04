@@ -1158,3 +1158,106 @@ code {
   /* Animation resets are handled in JS */
 }
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   Mobile Responsive Styles
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Phone screens */
+@media (max-width: 767px) {
+  /* Typography: 16px body, tighter line height */
+  html {
+    font-size: 16px;
+  }
+
+  body {
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  /* Headings */
+  .page-title, h1 { font-size: 22px; }
+  h2 { font-size: 18px; }
+  h3 { font-size: 16px; font-weight: 600; }
+
+  /* CodeMirror -- match body text */
+  .cm-editor,
+  .cm-content,
+  .cm-line {
+    font-size: 16px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* Prevent iOS auto-zoom on input focus (must be >= 16px) */
+  input, textarea, select, .cm-content {
+    font-size: 16px !important;
+  }
+
+  /* Content area -- 16px side margins, no max-width constraint */
+  .page-content {
+    padding: 12px 16px 50vh 16px !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+  }
+
+  /* Block spacing */
+  .block {
+    gap: 8px;
+    padding: 3px 0;
+  }
+
+  /* Indentation -- tighter on phone */
+  .block-children {
+    margin-left: 16px;
+    padding-left: 8px;
+  }
+
+  /* Scroll title -- full width */
+  .scroll-title {
+    padding: 0 16px;
+  }
+  .scroll-title--visible {
+    padding: 8px 16px 12px 16px;
+  }
+}
+
+/* Touch devices -- expand targets regardless of screen size */
+@media (pointer: coarse) {
+  /* Bullet touch target via pseudo-element */
+  .bullet {
+    position: relative;
+  }
+  .bullet::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  /* Replace hover with active feedback */
+  .bullet:hover {
+    transform: none;
+  }
+  .bullet:active {
+    background-color: var(--base0D);
+    transform: scale(1.3);
+  }
+  .bullet--collapsed:active {
+    border-color: var(--base0D);
+    transform: scale(1.3);
+  }
+
+  /* Prevent text selection on UI chrome */
+  button, [role="button"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Disable double-tap zoom on interactive elements */
+  button, [role="button"], .bullet {
+    touch-action: manipulation;
+  }
+}
