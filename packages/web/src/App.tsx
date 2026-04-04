@@ -247,6 +247,18 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode, navigateToJournal])
 
+  // Three-finger tap opens command palette (touch devices)
+  useEffect(() => {
+    const handleTouch = (e: TouchEvent) => {
+      if (e.touches.length === 3) {
+        e.preventDefault()
+        openCommandPalette()
+      }
+    }
+    window.addEventListener('touchstart', handleTouch, { passive: false })
+    return () => window.removeEventListener('touchstart', handleTouch)
+  }, [openCommandPalette])
+
   // Demo expiry modal
   if (isDemoMode && demoExpired) {
     return (
