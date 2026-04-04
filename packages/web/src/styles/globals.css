@@ -1164,6 +1164,12 @@ code {
 
 /* Phone screens */
 @media (max-width: 767px) {
+  /* Safe area insets for notch/island devices (PWA home screen) */
+  #root > div {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
   /* Typography: 16px body, tighter line height */
   html {
     font-size: 16px;
