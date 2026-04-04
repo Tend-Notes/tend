@@ -33,9 +33,7 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
       - name: Build and push to Cachix
-        run: |
-          nix build .#default -o result
-          cachix push tend ./result
+        run: cachix watch-exec tend -- nix build .#default
 
       - name: Run tests
         run: nix flake check
