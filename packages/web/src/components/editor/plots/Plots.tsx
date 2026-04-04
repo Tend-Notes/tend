@@ -16,6 +16,7 @@ import { useToastStore } from '../../../stores/toastStore'
 import { Seed, SeedBoundaryEvent } from './Seed'
 import { parseContent, mapRenderedOffsetToSource } from '../contentRenderer'
 import { useBlockFlip } from './useBlockFlip'
+import { useBlockSwipe } from './useBlockSwipe'
 import { useGardenInfo } from '../../../hooks/useGardenInfo'
 import { BlockContextMenu } from '../../ui/BlockContextMenu'
 import { TaskMetadata } from '../TaskMetadata'
@@ -113,6 +114,28 @@ function detectCodeFences(flatOrder: string[], blocks: Record<string, Block>): M
   // (incomplete fence should render normally)
 
   return result
+}
+
+function BlockSwipeWrapper({
+  children,
+  onIndent,
+  onOutdent,
+}: {
+  children: React.ReactNode
+  onIndent: () => void
+  onOutdent: () => void
+}) {
+  const swipe = useBlockSwipe(onIndent, onOutdent)
+  return (
+    <div
+      onTouchStart={swipe.onTouchStart}
+      onTouchMove={swipe.onTouchMove}
+      onTouchEnd={swipe.onTouchEnd}
+      style={{ touchAction: 'pan-y' }}
+    >
+      {children}
+    </div>
+  )
 }
 
 export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
@@ -1464,72 +1487,77 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
           focusBlock(block.uuid, 'end')
         }}
       >
-        <div className="block flex items-start py-0.5">
-          {/* Bullet - hidden for headers, code blocks, and block references */}
-          {!hideBullet && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                if (hasChildren) handleToggleCollapse(block.uuid)
-              }}
-              onContextMenu={(e) => handleBulletContextMenu(e, block.uuid)}
-              className={`bullet mt-[0.55rem] ${
-                hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
-              }`}
-            />
-          )}
-
-          {/* Seed - editable content */}
-          <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''} ${isTask ? 'task-block-container' : ''}`}>
-            <Seed
-              block={block}
-              isSelected={isSelected}
-              onChange={(content) => handleBlockChange(block.uuid, content)}
-              onBoundaryEvent={(event) => handleBoundaryEvent(block.uuid, event)}
-              onFocus={() => {
-                // Update selection state when CodeMirror gets focus
-                // This happens AFTER CodeMirror handles the click, not during
-                setSelectedUuid(block.uuid)
-                setFocusedBlock(block.uuid)
-                clearSelection()
-              }}
-              readonly={readonly}
-              isCodeBlock={isCodeBlock}
-              codeLanguage={codeLanguage}
-              isActive={block.uuid === activeBlockUuid}
-              onActivate={(cursorOffset) => {
-                setActiveBlockUuid(block.uuid)
-                setSelectedUuid(block.uuid)
-                setFocusedBlock(block.uuid)
-                setLastFocusedBlockUuid(block.uuid)
-                clearSelection()
-                // Store cursor offset for initialCursorPosition on next render
-                pendingCursorPositionRef.current = cursorOffset
-              }}
-              onDeactivate={(info) => {
-                if (info) {
-                  pendingSelectionAnchorRef.current = info
-                }
-                setActiveBlockUuid(null)
-              }}
-              initialCursorPosition={
-                block.uuid === activeBlockUuid
-                  ? pendingCursorPositionRef.current
-                  : undefined
-              }
-            />
-            {/* Task metadata - shown below task content */}
-            {isTask && !readonly && (
-              <TaskMetadata
-                blockUuid={block.uuid}
-                properties={block.properties}
-                onPropertyChange={(key, value) => handleBlockPropertyChange(block.uuid, key, value)}
-                isCompleted={isTaskCompleted}
-                taskContent={block.content}
+        <BlockSwipeWrapper
+          onIndent={() => handleIndent(block.uuid)}
+          onOutdent={() => handleOutdent(block.uuid)}
+        >
+          <div className="block flex items-start py-0.5">
+            {/* Bullet - hidden for headers, code blocks, and block references */}
+            {!hideBullet && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (hasChildren) handleToggleCollapse(block.uuid)
+                }}
+                onContextMenu={(e) => handleBulletContextMenu(e, block.uuid)}
+                className={`bullet mt-[0.55rem] ${
+                  hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
+                }`}
               />
             )}
+
+            {/* Seed - editable content */}
+            <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''} ${isTask ? 'task-block-container' : ''}`}>
+              <Seed
+                block={block}
+                isSelected={isSelected}
+                onChange={(content) => handleBlockChange(block.uuid, content)}
+                onBoundaryEvent={(event) => handleBoundaryEvent(block.uuid, event)}
+                onFocus={() => {
+                  // Update selection state when CodeMirror gets focus
+                  // This happens AFTER CodeMirror handles the click, not during
+                  setSelectedUuid(block.uuid)
+                  setFocusedBlock(block.uuid)
+                  clearSelection()
+                }}
+                readonly={readonly}
+                isCodeBlock={isCodeBlock}
+                codeLanguage={codeLanguage}
+                isActive={block.uuid === activeBlockUuid}
+                onActivate={(cursorOffset) => {
+                  setActiveBlockUuid(block.uuid)
+                  setSelectedUuid(block.uuid)
+                  setFocusedBlock(block.uuid)
+                  setLastFocusedBlockUuid(block.uuid)
+                  clearSelection()
+                  // Store cursor offset for initialCursorPosition on next render
+                  pendingCursorPositionRef.current = cursorOffset
+                }}
+                onDeactivate={(info) => {
+                  if (info) {
+                    pendingSelectionAnchorRef.current = info
+                  }
+                  setActiveBlockUuid(null)
+                }}
+                initialCursorPosition={
+                  block.uuid === activeBlockUuid
+                    ? pendingCursorPositionRef.current
+                    : undefined
+                }
+              />
+              {/* Task metadata - shown below task content */}
+              {isTask && !readonly && (
+                <TaskMetadata
+                  blockUuid={block.uuid}
+                  properties={block.properties}
+                  onPropertyChange={(key, value) => handleBlockPropertyChange(block.uuid, key, value)}
+                  isCompleted={isTaskCompleted}
+                  taskContent={block.content}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        </BlockSwipeWrapper>
 
         {/* Children */}
         {!block.collapsed && blockChildren.length > 0 && (
