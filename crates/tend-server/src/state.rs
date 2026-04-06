@@ -1243,7 +1243,7 @@ impl AppState {
 
     /// Get or create user state for the given username
     pub async fn get_user_state(&self, username: &str) -> anyhow::Result<Arc<UserState>> {
-        // Check cache first
+        // Check cache first (read lock)
         {
             let states = self.user_states.read().await;
             if let Some(state) = states.get(username) {
@@ -1251,7 +1251,13 @@ impl AppState {
             }
         }
 
-        // Create new user state
+        // Not cached -- take write lock and check again to prevent double-init race
+        let mut states = self.user_states.write().await;
+        if let Some(state) = states.get(username) {
+            return Ok(Arc::clone(state));
+        }
+
+        // Create new user state while holding write lock
         let user_state = UserState::new(
             username.to_string(),
             &self.config,
@@ -1263,10 +1269,7 @@ impl AppState {
         user_state.start_backup_task().await;
 
         // Cache it
-        {
-            let mut states = self.user_states.write().await;
-            states.insert(username.to_string(), Arc::clone(&user_state));
-        }
+        states.insert(username.to_string(), Arc::clone(&user_state));
 
         Ok(user_state)
     }
