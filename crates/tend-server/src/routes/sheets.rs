@@ -348,20 +348,8 @@ pub async fn create_sheet(
 
     garden.file_manager.write_sheet(&content_type, &page, date).await?;
 
-    // Index the new sheet (if search is enabled)
-    if let Some(search_index) = &garden.search_index {
-        let mut index = search_index.write().await;
-        index.index_page(&page)?;
-        index.commit()?;
-    }
-
-    // Update block index (if available - not for encrypted gardens)
-    if let Some(block_index) = &garden.block_index {
-        let mut index = block_index.lock().await;
-        if let Err(e) = index.update_page(&page) {
-            tracing::warn!("Failed to update block index for sheet {}: {}", page.name, e);
-        }
-    }
+    // Update all indices (search, link, block, tag, todo)
+    update_all_indices_with_content_type(&garden, &page, "sheet", &content_type, date).await;
 
     Ok(Json(CreateSheetResponse {
         page,

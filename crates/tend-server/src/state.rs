@@ -556,7 +556,7 @@ impl GardenState {
     }
 
     /// Rebuild the link index from all pages and journals
-    pub async fn rebuild_link_index(&self) -> anyhow::Result<()> {
+    pub async fn rebuild_link_index(&self, content_types: &[ContentType]) -> anyhow::Result<()> {
         info!(
             "Rebuilding link index for {} garden: {}",
             if self.encrypted { "encrypted" } else { "plain" },
@@ -566,20 +566,24 @@ impl GardenState {
         // Collect all pages with their blocks
         let mut pages_iter: Vec<(String, Vec<tend_core::Block>)> = Vec::new();
 
-        // Collect regular pages
-        let pages = self.file_manager.list_pages().await?;
-        for page_meta in pages {
-            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
-                let blocks: Vec<_> = page.blocks.values().cloned().collect();
-                pages_iter.push((page.name, blocks));
-            }
-        }
+        // Collect all content types (pages, journals, and custom sheets)
+        for ct in content_types {
+            let sheets = self.file_manager.list_sheets(ct).await?;
+            for sheet_meta in &sheets {
+                let page = if ct.id == "journal" {
+                    if let Some(date) = sheet_meta.journal_date {
+                        self.file_manager.read_journal(date).await.ok()
+                    } else {
+                        None
+                    }
+                } else if ct.id == "page" {
+                    self.file_manager.read_page(&sheet_meta.name).await.ok()
+                } else {
+                    let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.save_by_date);
+                    self.file_manager.read_sheet(ct, bare_name, sheet_meta.journal_date).await.ok()
+                };
 
-        // Collect journals
-        let journals = self.file_manager.list_journals().await?;
-        for journal_meta in journals {
-            if let Some(date) = journal_meta.journal_date {
-                if let Ok(page) = self.file_manager.read_journal(date).await {
+                if let Some(page) = page {
                     let blocks: Vec<_> = page.blocks.values().cloned().collect();
                     pages_iter.push((page.name, blocks));
                 }

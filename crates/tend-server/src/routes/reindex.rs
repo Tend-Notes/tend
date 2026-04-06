@@ -65,6 +65,8 @@ pub async fn reindex(
         (pages.len(), journals.len())
     };
 
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
+
     info!(
         "Reindexing all indices for user {} ({} pages, {} journals)",
         user.username, pages_count, journals_count
@@ -74,7 +76,7 @@ pub async fn reindex(
     {
         let garden = user_state.garden.read().await;
         garden
-            .rebuild_link_index()
+            .rebuild_link_index(&content_types)
             .await
             .map_err(|e| AppError::Internal(format!("Failed to rebuild link index: {}", e)))?;
     }
@@ -133,7 +135,6 @@ pub async fn reindex(
     }
 
     // 5. Rebuild todo index (requires read lock and content types)
-    let content_types = load_user_content_types(&user.username).unwrap_or_default();
     {
         let garden = user_state.garden.read().await;
         garden
@@ -314,7 +315,7 @@ pub async fn stabilize(
         // Rebuild link index
         {
             let garden = user_state.garden.read().await;
-            if let Err(e) = garden.rebuild_link_index().await {
+            if let Err(e) = garden.rebuild_link_index(&content_types).await {
                 tracing::warn!("Failed to rebuild link index after stabilize: {}", e);
             }
         }
