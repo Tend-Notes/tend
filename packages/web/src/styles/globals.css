@@ -652,7 +652,7 @@ code {
 
 /* Header blocks: text aligns with bullets, ### overflows into gutter.
    Use > .block to target only the immediate block, not nested children */
-.block-container--header > .block {
+.block-container--header .block {
   gap: 0;
 }
 
@@ -669,7 +669,7 @@ code {
 
 /* H1 - page title size (matches text-xl = 1.25rem, or 20px)
    Use > .block to target only the immediate block, not nested children */
-.block-container--header-1 > .block .block-content {
+.block-container--header-1 .block .block-content {
   font-size: 1.25rem;
   font-weight: 600;
   color: var(--base06);
@@ -677,7 +677,7 @@ code {
 }
 
 /* H2 - slightly smaller */
-.block-container--header-2 > .block .block-content {
+.block-container--header-2 .block .block-content {
   font-size: 1.125rem;
   font-weight: 600;
   color: var(--base06);
@@ -685,7 +685,7 @@ code {
 }
 
 /* H3 - smaller still */
-.block-container--header-3 > .block .block-content {
+.block-container--header-3 .block .block-content {
   font-size: 1rem;
   font-weight: 600;
   color: var(--base06);
@@ -693,9 +693,9 @@ code {
 }
 
 /* H4-H6 - same as body size but bold */
-.block-container--header-4 > .block .block-content,
-.block-container--header-5 > .block .block-content,
-.block-container--header-6 > .block .block-content {
+.block-container--header-4 .block .block-content,
+.block-container--header-5 .block .block-content,
+.block-container--header-6 .block .block-content {
   font-size: 1rem;
   font-weight: 600;
   color: var(--base06);
@@ -705,22 +705,22 @@ code {
 /* Header text alignment: text starts at normal position (18px from .block padding),
    # markup overflows into gutter via negative text-indent only.
    Use > .block to target only the immediate block, not nested children */
-.block-container--header-1 > .block .cm-line {
+.block-container--header-1 .block .cm-line {
   text-indent: -1.2em;
 }
-.block-container--header-2 > .block .cm-line {
+.block-container--header-2 .block .cm-line {
   text-indent: -1.8em;
 }
-.block-container--header-3 > .block .cm-line {
+.block-container--header-3 .block .cm-line {
   text-indent: -2.4em;
 }
-.block-container--header-4 > .block .cm-line {
+.block-container--header-4 .block .cm-line {
   text-indent: -3.0em;
 }
-.block-container--header-5 > .block .cm-line {
+.block-container--header-5 .block .cm-line {
   text-indent: -3.6em;
 }
-.block-container--header-6 > .block .cm-line {
+.block-container--header-6 .block .cm-line {
   text-indent: -4.2em;
 }
 
