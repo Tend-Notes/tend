@@ -38,7 +38,7 @@
         # Build the frontend using pnpm with fixed-output deps
         frontend = pkgs.stdenv.mkDerivation (finalAttrs: {
           pname = "tend-frontend";
-          version = "0.3.0";
+          version = "0.4.0";
           src = ./.;
 
           nativeBuildInputs = with pkgs; [
@@ -71,7 +71,7 @@
         # Build the Rust backend
         backend = pkgs.rustPlatform.buildRustPackage {
           pname = "tend-server";
-          version = "0.3.0";
+          version = "0.4.0";
           # Exclude .cargo to avoid mold linker config (only available in dev shell)
           src = pkgs.lib.cleanSourceWith {
             src = ./.;
@@ -98,7 +98,7 @@
         # Combined package with static files
         tend = pkgs.stdenv.mkDerivation {
           pname = "tend";
-          version = "0.3.0";
+          version = "0.4.0";
 
           dontUnpack = true;
           dontBuild = true;

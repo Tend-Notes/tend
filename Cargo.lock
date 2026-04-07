@@ -4207,7 +4207,7 @@ dependencies = [
 
 [[package]]
 name = "tend-blocks"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -4219,7 +4219,7 @@ dependencies = [
 
 [[package]]
 name = "tend-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "comrak",
@@ -4233,7 +4233,7 @@ dependencies = [
 
 [[package]]
 name = "tend-git"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "gix",
@@ -4248,7 +4248,7 @@ dependencies = [
 
 [[package]]
 name = "tend-links"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4263,7 +4263,7 @@ dependencies = [
 
 [[package]]
 name = "tend-search"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "tantivy",
@@ -4274,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "tend-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -4311,7 +4311,7 @@ dependencies = [
 
 [[package]]
 name = "tend-storage"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "age",
  "anyhow",
