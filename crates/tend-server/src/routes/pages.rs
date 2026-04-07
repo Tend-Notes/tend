@@ -14,6 +14,7 @@ use crate::error::AppError;
 use crate::state::AppState;
 use crate::ws::{BroadcastEvent, WsEvent};
 
+use super::gardens::load_user_content_types;
 use super::helpers::{apply_block_updates, remove_from_all_indices, update_all_indices};
 use tend_core::ContentType;
 
@@ -286,46 +287,19 @@ pub async fn get_backlinks(
             .insert(result.block_uuid.to_string());
     }
 
-    // Scan pages and load only those whose hash matches a source
-    let pages = garden.file_manager.list_pages().await?;
-    for page_meta in pages {
-        let page_hash = hash_page_name(&page_meta.name);
-        if !source_hashes.contains(&page_hash) {
-            continue;
-        }
+    // Scan ALL content types for source pages
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
 
-        if let Ok(page) = garden.file_manager.read_page(&page_meta.name).await {
-            let block_uuids = source_blocks.get(&page_hash);
-            for block in page.blocks.values() {
-                // Only include blocks that are in our backlink results
-                if let Some(uuids) = block_uuids {
-                    let block_uuid_str = block.uuid.to_string();
-                    if uuids.contains(&block_uuid_str) {
-                        backlinks.push(BacklinkRef {
-                            page_name: page.name.clone(),
-                            page_title: page.title.clone(),
-                            block_uuid: block_uuid_str,
-                            block_content: block.content.clone(),
-                            is_journal: false,
-                            journal_date: None,
-                        });
-                    }
-                }
+    for ct in &content_types {
+        let sheets = garden.file_manager.list_sheets(ct).await?;
+        for sheet_meta in &sheets {
+            let page_hash = hash_page_name(&sheet_meta.name);
+            if !source_hashes.contains(&page_hash) {
+                continue;
             }
-        }
-    }
 
-    // Also scan journals
-    let journals = garden.file_manager.list_journals().await?;
-    for journal_meta in journals {
-        let journal_hash = hash_page_name(&journal_meta.name);
-        if !source_hashes.contains(&journal_hash) {
-            continue;
-        }
-
-        if let Some(date) = journal_meta.journal_date {
-            if let Ok(page) = garden.file_manager.read_journal(date).await {
-                let block_uuids = source_blocks.get(&journal_hash);
+            if let Some(page) = garden.load_sheet_from_meta(ct, sheet_meta).await {
+                let block_uuids = source_blocks.get(&page_hash);
                 for block in page.blocks.values() {
                     if let Some(uuids) = block_uuids {
                         let block_uuid_str = block.uuid.to_string();
@@ -335,8 +309,8 @@ pub async fn get_backlinks(
                                 page_title: page.title.clone(),
                                 block_uuid: block_uuid_str,
                                 block_content: block.content.clone(),
-                                is_journal: true,
-                                journal_date: Some(date.format("%Y-%m-%d").to_string()),
+                                is_journal: page.is_journal,
+                                journal_date: page.journal_date.map(|d| d.format("%Y-%m-%d").to_string()),
                             });
                         }
                     }
