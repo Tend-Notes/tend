@@ -23,10 +23,8 @@ use crate::state::AppState;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReindexResponse {
-    /// Number of pages processed
-    pub pages_indexed: usize,
-    /// Number of journals processed
-    pub journals_indexed: usize,
+    /// Total number of sheets processed (all content types)
+    pub sheets_indexed: usize,
     /// Number of link index entries after rebuild
     pub link_entries: usize,
     /// Number of blocks in the block index after rebuild (if available)
@@ -57,19 +55,21 @@ pub async fn reindex(
 ) -> Result<Json<ReindexResponse>, AppError> {
     let user_state = state.get_user_state(&user.username).await?;
 
-    // Count pages and journals for the response
-    let (pages_count, journals_count) = {
-        let garden = user_state.garden.read().await;
-        let pages = garden.file_manager.list_pages().await?;
-        let journals = garden.file_manager.list_journals().await?;
-        (pages.len(), journals.len())
-    };
-
     let content_types = load_user_content_types(&user.username).unwrap_or_default();
 
+    // Count all sheets across content types
+    let sheets_count = {
+        let garden = user_state.garden.read().await;
+        let mut count = 0usize;
+        for ct in &content_types {
+            count += garden.file_manager.list_sheets(ct).await?.len();
+        }
+        count
+    };
+
     info!(
-        "Reindexing all indices for user {} ({} pages, {} journals)",
-        user.username, pages_count, journals_count
+        "Reindexing all indices for user {} ({} sheets)",
+        user.username, sheets_count
     );
 
     // 1. Rebuild link index (requires read lock)
@@ -152,17 +152,15 @@ pub async fn reindex(
         (link_index.len(), tag_index.len(), todo_index.len())
     };
 
-    let total = pages_count + journals_count;
     let message = format!(
-        "Rebuilt all indices for {} pages and {} journals ({} total)",
-        pages_count, journals_count, total
+        "Rebuilt all indices for {} sheets",
+        sheets_count
     );
 
     info!("{}", message);
 
     Ok(Json(ReindexResponse {
-        pages_indexed: pages_count,
-        journals_indexed: journals_count,
+        sheets_indexed: sheets_count,
         link_entries,
         block_count,
         search_docs: search_doc_count,
