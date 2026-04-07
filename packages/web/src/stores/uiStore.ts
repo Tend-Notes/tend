@@ -26,6 +26,7 @@ interface UIState {
   commandPaletteOpen: boolean
   /** Content type to create when command palette opens (for slash command integration) */
   pendingContentType: ContentType | null
+  pendingLinkContentType: ContentType | null
   /** Callback to invoke when a sheet is created (e.g., to insert a link) */
   onSheetCreated: ((link: string) => void) | null
 
@@ -56,6 +57,7 @@ interface UIState {
   setTheme: (theme: string) => void
   openCommandPalette: () => void
   openCommandPaletteForContentType: (contentType: ContentType, onCreated?: (link: string) => void) => void
+  openCommandPaletteForLinking: (contentType: ContentType, onCreated?: (link: string) => void) => void
   closeCommandPalette: () => void
   clearPendingContentType: () => void
   setTodoFilter: (filter: TodoFilterMode | null) => void
@@ -112,10 +114,13 @@ export const useUIStore = create<UIState>()(
       pendingContentType: null,
       onSheetCreated: null as ((link: string) => void) | null,
       openCommandPalette: () => set({ commandPaletteOpen: true }),
+      pendingLinkContentType: null as ContentType | null,
       openCommandPaletteForContentType: (contentType, onCreated) =>
         set({ commandPaletteOpen: true, pendingContentType: contentType, onSheetCreated: onCreated || null }),
-      closeCommandPalette: () => set({ commandPaletteOpen: false, pendingContentType: null, onSheetCreated: null }),
-      clearPendingContentType: () => set({ pendingContentType: null }),
+      openCommandPaletteForLinking: (contentType, onCreated) =>
+        set({ commandPaletteOpen: true, pendingLinkContentType: contentType, onSheetCreated: onCreated || null }),
+      closeCommandPalette: () => set({ commandPaletteOpen: false, pendingContentType: null, pendingLinkContentType: null, onSheetCreated: null }),
+      clearPendingContentType: () => set({ pendingContentType: null, pendingLinkContentType: null }),
 
       // Todos filter
       todoFilter: null as TodoFilterMode | null,
@@ -141,6 +146,7 @@ export const useUIStore = create<UIState>()(
         searchOpen: false,
         commandPaletteOpen: false,
         pendingContentType: null,
+        pendingLinkContentType: null,
         onSheetCreated: null,
         todoFilter: null,
         importDialogOpen: false,
@@ -159,6 +165,7 @@ export const useUIStore = create<UIState>()(
         theme: 'one-dark',
         commandPaletteOpen: false,
         pendingContentType: null,
+        pendingLinkContentType: null,
         onSheetCreated: null,
         todoFilter: null,
         importDialogOpen: false,
