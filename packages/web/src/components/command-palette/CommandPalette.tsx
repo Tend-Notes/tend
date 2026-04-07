@@ -8,6 +8,7 @@ import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useToastStore } from '../../stores/toastStore'
 import * as api from '../../lib/api'
 import { formatDateYMD } from '../../lib/dateUtils'
+import type { PageMeta } from '../../types'
 
 interface CommandPaletteProps {
   open: boolean
@@ -76,6 +77,10 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [commitMessage, setCommitMessage] = useState('')
   const [showCommitInput, setShowCommitInput] = useState(false)
   const [creatingSheet, setCreatingSheet] = useState<ContentType | null>(null)
+  const [linkingSheet, setLinkingSheet] = useState<{
+    contentType: ContentType
+    sheets: PageMeta[]
+  } | null>(null)
   const [sheetName, setSheetName] = useState('')
   const [useToday, setUseToday] = useState(true)
   const [sheetDate, setSheetDate] = useState('')
@@ -100,6 +105,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setCommitMessage('')
       setShowCommitInput(false)
       setCreatingSheet(null)
+      setLinkingSheet(null)
       setSheetName('')
       setUseToday(true)
       setSheetDate('')
@@ -145,6 +151,17 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     } catch {
       // If we can't load sheets, just continue without collision detection
       setExistingSheets([])
+    }
+  }, [])
+
+  const handleStartLinkSheet = useCallback(async (ct: ContentType) => {
+    try {
+      const sheets = await api.sheets.list(ct.id)
+      setLinkingSheet({ contentType: ct, sheets })
+      setSearch('')
+    } catch {
+      setLinkingSheet({ contentType: ct, sheets: [] })
+      setSearch('')
     }
   }, [])
 
@@ -364,7 +381,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
       {/* Dialog */}
       <div className="relative z-10 w-full max-w-lg mx-4 bg-base-01 rounded-lg shadow-2xl border border-base-02 overflow-hidden">
-        {!creatingSheet && (
+        {!creatingSheet && !linkingSheet && (
           <Command.Input
             value={search}
             onValueChange={setSearch}
@@ -373,7 +390,93 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           />
         )}
 
-        {creatingSheet ? (
+        {linkingSheet ? (
+          // Link to existing sheet UI
+          (() => {
+            const query = search.toLowerCase().trim()
+            const filtered = linkingSheet.sheets
+              .filter(s => s.title.toLowerCase().includes(query) || s.name.toLowerCase().includes(query))
+              .slice(0, 15)
+            const newSheetPath = linkingSheet.contentType.saveByDate
+              ? `${linkingSheet.contentType.directory}/${new Date().toISOString().slice(0, 10)}/${search.trim()}`
+              : `${linkingSheet.contentType.directory}/${search.trim()}`
+            return (
+              <>
+                <Command.Input
+                  value={search}
+                  onValueChange={setSearch}
+                  placeholder={`Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
+                  className="w-full px-4 py-3 bg-transparent border-b border-base-02 text-base-05 placeholder:text-base-04 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') setLinkingSheet(null)
+                  }}
+                />
+                <Command.List className="max-h-80 overflow-y-auto p-2">
+                  {filtered.length === 0 && !search.trim() && (
+                    <Command.Empty className="py-6 text-center text-sm text-base-04">
+                      No {linkingSheet.contentType.name.toLowerCase()}s found. Type to create new.
+                    </Command.Empty>
+                  )}
+                  {filtered.length > 0 && (
+                    <Command.Group heading="Existing" className="mb-2">
+                      {filtered.map((sheet) => {
+                        const linkPath = sheet.name.startsWith(linkingSheet.contentType.directory + '/')
+                          ? sheet.name
+                          : `${linkingSheet.contentType.directory}/${sheet.name}`
+                        return (
+                          <Command.Item
+                            key={sheet.name}
+                            value={sheet.name}
+                            onSelect={() => {
+                              const wikiLink = `[[${linkPath}]]`
+                              onOpenChange(false)
+                              setLinkingSheet(null)
+                              setTimeout(() => {
+                                if (onSheetCreated) {
+                                  onSheetCreated(wikiLink)
+                                } else if (insertTextAtCursor) {
+                                  insertTextAtCursor(wikiLink + ' ')
+                                }
+                              }, 0)
+                            }}
+                            className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
+                          >
+                            <span>{sheet.title}</span>
+                            {sheet.journalDate && (
+                              <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
+                            )}
+                          </Command.Item>
+                        )
+                      })}
+                    </Command.Group>
+                  )}
+                  {search.trim() && (
+                    <Command.Group heading="Create new" className="mb-2">
+                      <Command.Item
+                        value={`create-${search}`}
+                        onSelect={() => {
+                          const wikiLink = `[[${newSheetPath}]]`
+                          onOpenChange(false)
+                          setLinkingSheet(null)
+                          setTimeout(() => {
+                            if (onSheetCreated) {
+                              onSheetCreated(wikiLink)
+                            } else if (insertTextAtCursor) {
+                              insertTextAtCursor(wikiLink + ' ')
+                            }
+                          }, 0)
+                        }}
+                        className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
+                      >
+                        <span>Create "{search.trim()}" ({linkingSheet.contentType.name})</span>
+                      </Command.Item>
+                    </Command.Group>
+                  )}
+                </Command.List>
+              </>
+            )
+          })()
+        ) : creatingSheet ? (
           // Modal sheet creation form - hides all other command palette content
           <div className="p-4 space-y-4">
             <div className="text-sm font-medium text-base-05">
@@ -500,6 +603,16 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   Create new page...
                 </CommandItem>
               )}
+              {/* Custom content type link commands */}
+              {customContentTypes.map((ct) => (
+                <CommandItem
+                  key={`link-${ct.id}`}
+                  onSelect={() => handleStartLinkSheet(ct)}
+                  value={`link to ${ct.name.toLowerCase()}`}
+                >
+                  Link to {ct.name}...
+                </CommandItem>
+              ))}
               {/* Custom content type create commands */}
               {customContentTypes.map((ct) => (
                 <CommandItem
