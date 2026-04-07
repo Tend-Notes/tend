@@ -470,6 +470,15 @@ impl EncryptedFileManager {
 
     /// Read and decrypt a sheet
     pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
+        // Handle built-in types by delegating to existing methods
+        if content_type.id == "page" {
+            return self.read_page(name).await;
+        }
+        if content_type.id == "journal" {
+            let journal_date = NaiveDate::parse_from_str(name, "%Y-%m-%d")
+                .map_err(|_| StorageError::NotFound(format!("Invalid journal date: {}", name)))?;
+            return self.read_journal(journal_date).await;
+        }
         validate_safe_name(name)?;
         validate_safe_name(&content_type.directory)?;
         let path = self.sheet_path(content_type, name, date);
