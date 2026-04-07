@@ -2310,14 +2310,6 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     return () => document.removeEventListener('mouseup', handleMouseUp)
   }, [activeBlockUuid])
 
-  if (rootBlocks.length === 0) {
-    return (
-      <div className="outliner-editor max-w-3xl">
-        <div className="text-base-03 text-sm">Loading...</div>
-      </div>
-    )
-  }
-
   // Check if page is in free text mode (bullets hidden, no indentation)
   const isFreeTextMode = page.properties?.freeText === 'true'
 
@@ -2336,6 +2328,14 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       containerRef.current?.focus()
     }
   }, [])
+
+  if (rootBlocks.length === 0) {
+    return (
+      <div className="outliner-editor max-w-3xl">
+        <div className="text-base-03 text-sm">Loading...</div>
+      </div>
+    )
+  }
 
   return (
     <>
