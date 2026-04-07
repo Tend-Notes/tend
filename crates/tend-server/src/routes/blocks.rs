@@ -214,8 +214,9 @@ pub async fn rebuild(
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
     garden
-        .rebuild_block_index()
+        .rebuild_block_index(&content_types)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 

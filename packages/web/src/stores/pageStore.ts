@@ -673,22 +673,14 @@ export const usePageStore = create<PageState>()(
 
           const apiBlocks = blocks.map(api.blockToApiFormat)
           let updatedPage: Page
-          if (contentType === 'journal' && journalDate) {
-            updatedPage = await api.journals.update(journalDate, apiBlocks, version)
-          } else if (contentType === 'page') {
-            updatedPage = await api.pages.update(pageName, apiBlocks, version)
+          const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
+          if (contentTypeObj) {
+            const sheetName = extractSheetName(contentTypeObj, pageName)
+            const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
+            updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
           } else {
-            // Custom content type - use sheets API
-            // Extract proper sheet name and date from full page name
-            const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
-            if (contentTypeObj) {
-              const sheetName = extractSheetName(contentTypeObj, pageName)
-              const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
-              updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
-            } else {
-              // Fallback: use journalDate if available, otherwise undefined
-              updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
-            }
+            // Fallback for unknown content type
+            updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version)
           }
           // Server save succeeded - clear the draft and pending save data
           pendingSaveData = null
@@ -782,11 +774,13 @@ export const usePageStore = create<PageState>()(
       try {
         const apiBlocks = localConflict.localBlocks.map(api.blockToApiFormat)
         let updatedPage: Page
-        if (localPage.isJournal && localPage.journalDate) {
-          // Don't send version - force overwrite
-          updatedPage = await api.journals.update(localPage.journalDate, apiBlocks)
+        const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === localPage.contentType)
+        if (contentTypeObj) {
+          const sheetName = extractSheetName(contentTypeObj, localPage.name)
+          const sheetDate = extractDateFromPageName(contentTypeObj, localPage.name)
+          updatedPage = await api.sheets.update(localPage.contentType, sheetName, apiBlocks, undefined, sheetDate)
         } else {
-          updatedPage = await api.pages.update(localPage.name, apiBlocks)
+          updatedPage = await api.sheets.update(localPage.contentType, localPage.name, apiBlocks)
         }
         // Update local state with new version
         // Record save timestamp to ignore file watcher events
@@ -852,7 +846,7 @@ export const usePageStore = create<PageState>()(
 
       // If there's pending save data, save it immediately
       if (pendingSaveData) {
-        const { pageName, blocks, contentType, journalDate } = pendingSaveData
+        const { pageName, blocks, contentType } = pendingSaveData
         pendingSaveData = null
 
         try {
@@ -861,22 +855,14 @@ export const usePageStore = create<PageState>()(
 
           const apiBlocks = blocks.map(api.blockToApiFormat)
           let updatedPage: Page
-          if (contentType === 'journal' && journalDate) {
-            updatedPage = await api.journals.update(journalDate, apiBlocks, version)
-          } else if (contentType === 'page') {
-            updatedPage = await api.pages.update(pageName, apiBlocks, version)
+          const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
+          if (contentTypeObj) {
+            const sheetName = extractSheetName(contentTypeObj, pageName)
+            const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
+            updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
           } else {
-            // Custom content type - use sheets API
-            // Extract proper sheet name and date from full page name
-            const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
-            if (contentTypeObj) {
-              const sheetName = extractSheetName(contentTypeObj, pageName)
-              const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
-              updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
-            } else {
-              // Fallback: use journalDate if available, otherwise undefined
-              updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, journalDate || undefined)
-            }
+            // Fallback for unknown content type
+            updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version)
           }
 
           // Record save timestamp to ignore file watcher events for our own save

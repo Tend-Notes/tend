@@ -9,6 +9,7 @@ use axum::Json;
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::indices::TagInfo;
+use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 
 /// List all tags used across the garden
@@ -26,8 +27,8 @@ pub async fn list_tags(
     let needs_rebuild = !garden.is_tag_index_populated().await;
 
     if needs_rebuild {
-        // Rebuild the tag index from all pages and journals
-        if let Err(e) = garden.rebuild_tag_index().await {
+        let content_types = load_user_content_types(&user.username).unwrap_or_default();
+        if let Err(e) = garden.rebuild_tag_index(&content_types).await {
             tracing::warn!("Failed to rebuild tag index: {}", e);
             // Fall back to empty response rather than failing
             return Ok(Json(vec![]));

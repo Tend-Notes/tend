@@ -9,6 +9,7 @@ use serde::Serialize;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
+use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 
 /// Response for link index status
@@ -52,10 +53,11 @@ pub async fn rebuild(
     user: AuthenticatedUser,
 ) -> Result<Json<RebuildResponse>, AppError> {
     let user_state = state.get_user_state(&user.username).await?;
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
     let garden = user_state.garden.read().await;
 
     garden
-        .rebuild_link_index()
+        .rebuild_link_index(&content_types)
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 

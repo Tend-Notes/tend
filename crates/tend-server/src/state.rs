@@ -366,7 +366,8 @@ impl GardenState {
         // If block index exists but is empty, populate it from existing pages
         if needs_block_index_rebuild {
             info!("Populating empty block index from existing pages");
-            if let Err(e) = state.rebuild_block_index().await {
+            let builtin_types = tend_core::ContentType::defaults();
+            if let Err(e) = state.rebuild_block_index(&builtin_types).await {
                 tracing::warn!("Failed to populate block index: {}", e);
             }
         }
@@ -424,7 +425,7 @@ impl GardenState {
 
     /// Build the search index (full re-index)
     /// This should typically be called from a background task
-    pub async fn build_index(&mut self) -> anyhow::Result<()> {
+    pub async fn build_index(&mut self, content_types: &[ContentType]) -> anyhow::Result<()> {
         if !self.search_config.enabled {
             return Err(anyhow::anyhow!("Search is disabled for this garden"));
         }
@@ -447,27 +448,16 @@ impl GardenState {
         let search_index = SearchIndex::open(&index_path)?;
         let search_index = Arc::new(RwLock::new(search_index));
 
-        // Index all pages
+        // Index all content types
         {
             let mut index = search_index.write().await;
 
-            // Index pages
-            let pages = self.file_manager.list_pages().await?;
-            for page_meta in pages {
-                if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
-                    if let Err(e) = index.index_page(&page) {
-                        tracing::warn!("Failed to index page {}: {}", page_meta.name, e);
-                    }
-                }
-            }
-
-            // Index journals
-            let journals = self.file_manager.list_journals().await?;
-            for journal_meta in journals {
-                if let Some(date) = journal_meta.journal_date {
-                    if let Ok(page) = self.file_manager.read_journal(date).await {
+            for ct in content_types {
+                let sheets = self.file_manager.list_sheets(ct).await?;
+                for meta in &sheets {
+                    if let Some(page) = self.load_sheet_from_meta(ct, meta).await {
                         if let Err(e) = index.index_page(&page) {
-                            tracing::warn!("Failed to index journal {}: {}", journal_meta.name, e);
+                            tracing::warn!("Failed to index {} in search: {}", page.name, e);
                         }
                     }
                 }
@@ -493,23 +483,18 @@ impl GardenState {
     /// `IndexWriter`), this method clears and repopulates the existing index.
     /// This avoids the Tantivy lock conflict that occurs when a writer is already
     /// held by the running server.
-    pub async fn rebuild_search_index(&self) -> anyhow::Result<()> {
-        if !self.search_config.enabled {
-            return Err(anyhow::anyhow!("Search is disabled for this garden"));
-        }
+    pub async fn rebuild_search_index(&self, content_types: &[ContentType]) -> anyhow::Result<()> {
+        let Some(search_index) = &self.search_index else {
+            return Ok(());
+        };
 
-        let search_index = self.search_index.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("Search index not initialized")
-        })?;
-
-        // Update status to building
         {
             let mut status = self.index_status.write().await;
             *status = IndexStatus::Building;
         }
 
         info!(
-            "Rebuilding search index in place for {} garden: {}",
+            "Rebuilding search index for {} garden: {}",
             if self.encrypted { "encrypted" } else { "plain" },
             self.data_dir.display()
         );
@@ -519,30 +504,19 @@ impl GardenState {
         // Clear all existing documents
         index.clear()?;
 
-        // Re-index all pages
-        let pages = self.file_manager.list_pages().await?;
-        for page_meta in pages {
-            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
-                if let Err(e) = index.index_page(&page) {
-                    tracing::warn!("Failed to index page {}: {}", page_meta.name, e);
-                }
-            }
-        }
-
-        // Re-index all journals
-        let journals = self.file_manager.list_journals().await?;
-        for journal_meta in journals {
-            if let Some(date) = journal_meta.journal_date {
-                if let Ok(page) = self.file_manager.read_journal(date).await {
+        for ct in content_types {
+            let sheets = self.file_manager.list_sheets(ct).await?;
+            for meta in &sheets {
+                if let Some(page) = self.load_sheet_from_meta(ct, meta).await {
                     if let Err(e) = index.index_page(&page) {
-                        tracing::warn!("Failed to index journal {}: {}", journal_meta.name, e);
+                        tracing::warn!("Failed to index {} in search: {}", page.name, e);
                     }
                 }
             }
         }
 
         index.commit()?;
-        info!("Search index rebuilt with {} documents", index.num_docs());
+        info!("Search index rebuilt");
 
         drop(index);
 
@@ -555,38 +529,44 @@ impl GardenState {
         Ok(())
     }
 
-    /// Rebuild the link index from all pages and journals
-    pub async fn rebuild_link_index(&self) -> anyhow::Result<()> {
+    /// Load a page/sheet from its metadata, regardless of content type.
+    /// Centralizes the journal/page/custom branching in one place.
+    pub async fn load_sheet_from_meta(
+        &self,
+        ct: &ContentType,
+        meta: &PageMeta,
+    ) -> Option<Page> {
+        if ct.id == "journal" {
+            let date = meta.journal_date?;
+            self.file_manager.read_journal(date).await.ok()
+        } else if ct.id == "page" {
+            self.file_manager.read_page(&meta.name).await.ok()
+        } else {
+            let bare_name = strip_directory_prefix(&meta.name, &ct.directory, ct.save_by_date);
+            self.file_manager.read_sheet(ct, bare_name, meta.journal_date).await.ok()
+        }
+    }
+
+    /// Rebuild the link index from all pages, journals, and custom sheets
+    pub async fn rebuild_link_index(&self, content_types: &[ContentType]) -> anyhow::Result<()> {
         info!(
             "Rebuilding link index for {} garden: {}",
             if self.encrypted { "encrypted" } else { "plain" },
             self.data_dir.display()
         );
 
-        // Collect all pages with their blocks
         let mut pages_iter: Vec<(String, Vec<tend_core::Block>)> = Vec::new();
 
-        // Collect regular pages
-        let pages = self.file_manager.list_pages().await?;
-        for page_meta in pages {
-            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
-                let blocks: Vec<_> = page.blocks.values().cloned().collect();
-                pages_iter.push((page.name, blocks));
-            }
-        }
-
-        // Collect journals
-        let journals = self.file_manager.list_journals().await?;
-        for journal_meta in journals {
-            if let Some(date) = journal_meta.journal_date {
-                if let Ok(page) = self.file_manager.read_journal(date).await {
+        for ct in content_types {
+            let sheets = self.file_manager.list_sheets(ct).await?;
+            for meta in &sheets {
+                if let Some(page) = self.load_sheet_from_meta(ct, meta).await {
                     let blocks: Vec<_> = page.blocks.values().cloned().collect();
                     pages_iter.push((page.name, blocks));
                 }
             }
         }
 
-        // Rebuild the index
         let mut link_index = self.link_index.write().await;
         link_index
             .rebuild_all(pages_iter.into_iter())
@@ -594,12 +574,11 @@ impl GardenState {
             .map_err(|e| anyhow::anyhow!("Failed to rebuild link index: {}", e))?;
 
         info!("Link index rebuilt with {} entries", link_index.len());
-
         Ok(())
     }
 
-    /// Rebuild the block index from all pages and journals
-    pub async fn rebuild_block_index(&self) -> anyhow::Result<()> {
+    /// Rebuild the block index from all pages, journals, and custom sheets
+    pub async fn rebuild_block_index(&self, content_types: &[ContentType]) -> anyhow::Result<()> {
         let Some(block_index) = &self.block_index else {
             return Err(anyhow::anyhow!("Block index not available (encrypted garden)"));
         };
@@ -609,40 +588,26 @@ impl GardenState {
             self.data_dir.display()
         );
 
-        // Collect all pages
-        let mut all_pages: Vec<tend_core::Page> = Vec::new();
+        let mut all_pages: Vec<Page> = Vec::new();
 
-        // Collect regular pages
-        let pages = self.file_manager.list_pages().await?;
-        for page_meta in pages {
-            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
-                all_pages.push(page);
-            }
-        }
-
-        // Collect journals
-        let journals = self.file_manager.list_journals().await?;
-        for journal_meta in journals {
-            if let Some(date) = journal_meta.journal_date {
-                if let Ok(page) = self.file_manager.read_journal(date).await {
+        for ct in content_types {
+            let sheets = self.file_manager.list_sheets(ct).await?;
+            for meta in &sheets {
+                if let Some(page) = self.load_sheet_from_meta(ct, meta).await {
                     all_pages.push(page);
                 }
             }
         }
 
-        // Rebuild the index
         let mut index = block_index.lock().await;
-        index
-            .rebuild(all_pages.into_iter())
-            .map_err(|e| anyhow::anyhow!("Failed to rebuild block index: {}", e))?;
+        index.rebuild(all_pages.into_iter())?;
 
         info!("Block index rebuilt with {} blocks", index.len().unwrap_or(0));
-
         Ok(())
     }
 
-    /// Rebuild the tag index from all pages and journals
-    pub async fn rebuild_tag_index(&self) -> anyhow::Result<()> {
+    /// Rebuild the tag index from all pages, journals, and custom sheets
+    pub async fn rebuild_tag_index(&self, content_types: &[ContentType]) -> anyhow::Result<()> {
         info!(
             "Rebuilding tag index for {} garden: {}",
             if self.encrypted { "encrypted" } else { "plain" },
@@ -652,26 +617,16 @@ impl GardenState {
         let mut tag_index = self.tag_index.write().await;
         tag_index.clear();
 
-        // Index regular pages
-        let pages = self.file_manager.list_pages().await?;
-        for page_meta in pages {
-            if let Ok(page) = self.file_manager.read_page(&page_meta.name).await {
-                tag_index.index_page(&page);
-            }
-        }
-
-        // Index journals
-        let journals = self.file_manager.list_journals().await?;
-        for journal_meta in journals {
-            if let Some(date) = journal_meta.journal_date {
-                if let Ok(page) = self.file_manager.read_journal(date).await {
+        for ct in content_types {
+            let sheets = self.file_manager.list_sheets(ct).await?;
+            for meta in &sheets {
+                if let Some(page) = self.load_sheet_from_meta(ct, meta).await {
                     tag_index.index_page(&page);
                 }
             }
         }
 
-        info!("Tag index rebuilt with {} unique tags", tag_index.len());
-
+        info!("Tag index rebuilt with {} tags", tag_index.len());
         Ok(())
     }
 
@@ -1239,7 +1194,7 @@ impl AppState {
 
     /// Get or create user state for the given username
     pub async fn get_user_state(&self, username: &str) -> anyhow::Result<Arc<UserState>> {
-        // Check cache first
+        // Check cache first (read lock)
         {
             let states = self.user_states.read().await;
             if let Some(state) = states.get(username) {
@@ -1247,7 +1202,13 @@ impl AppState {
             }
         }
 
-        // Create new user state
+        // Not cached -- take write lock and check again to prevent double-init race
+        let mut states = self.user_states.write().await;
+        if let Some(state) = states.get(username) {
+            return Ok(Arc::clone(state));
+        }
+
+        // Create new user state while holding write lock
         let user_state = UserState::new(
             username.to_string(),
             &self.config,
@@ -1259,10 +1220,7 @@ impl AppState {
         user_state.start_backup_task().await;
 
         // Cache it
-        {
-            let mut states = self.user_states.write().await;
-            states.insert(username.to_string(), Arc::clone(&user_state));
-        }
+        states.insert(username.to_string(), Arc::clone(&user_state));
 
         Ok(user_state)
     }
