@@ -414,6 +414,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
 
   // Track last cursor Y for typewriter scroll optimization
   const lastCursorYRef = useRef<number | null>(null)
+  const scrollingRef = useRef(false)
 
   // Ref for drag-out deactivation
   const mouseDownInsideRef = useRef(false)
@@ -749,11 +750,13 @@ const ActiveSeed = forwardRef<SeedHandle, {
       const cursorRelativeToContainer = cursorCoords.top - containerRect.top
       const containerMiddle = containerRect.height / 2
 
+      // Only scroll when cursor is past the middle, with a dead zone to prevent jiggle
+      // Lock out further scrolls until the smooth animation completes
       const scrollAmount = cursorRelativeToContainer - containerMiddle
-      if (scrollAmount !== 0) {
-        requestAnimationFrame(() => {
-          scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
-        })
+      if (scrollAmount > 10 && !scrollingRef.current) {
+        scrollingRef.current = true
+        scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
+        setTimeout(() => { scrollingRef.current = false }, 300)
       }
     })
   }, [])
