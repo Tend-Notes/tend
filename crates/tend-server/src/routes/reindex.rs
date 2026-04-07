@@ -86,7 +86,7 @@ pub async fn reindex(
         let garden = user_state.garden.read().await;
         if garden.search_config.enabled {
             garden
-                .rebuild_search_index()
+                .rebuild_search_index(&content_types)
                 .await
                 .map_err(|e| AppError::Internal(format!("Failed to rebuild search index: {}", e)))?;
 
@@ -109,7 +109,7 @@ pub async fn reindex(
     // 3. Rebuild block index (requires read lock)
     let block_count = {
         let garden = user_state.garden.read().await;
-        match garden.rebuild_block_index().await {
+        match garden.rebuild_block_index(&content_types).await {
             Ok(()) => {
                 if let Some(block_index) = &garden.block_index {
                     Some(block_index.lock().await.len().unwrap_or(0))
@@ -129,7 +129,7 @@ pub async fn reindex(
     {
         let garden = user_state.garden.read().await;
         garden
-            .rebuild_tag_index()
+            .rebuild_tag_index(&content_types)
             .await
             .map_err(|e| AppError::Internal(format!("Failed to rebuild tag index: {}", e)))?;
     }
@@ -324,7 +324,7 @@ pub async fn stabilize(
         {
             let garden = user_state.garden.read().await;
             if garden.search_config.enabled {
-                if let Err(e) = garden.rebuild_search_index().await {
+                if let Err(e) = garden.rebuild_search_index(&content_types).await {
                     tracing::warn!("Failed to rebuild search index after stabilize: {}", e);
                 }
             }
@@ -333,7 +333,7 @@ pub async fn stabilize(
         // Rebuild block index
         {
             let garden = user_state.garden.read().await;
-            if let Err(e) = garden.rebuild_block_index().await {
+            if let Err(e) = garden.rebuild_block_index(&content_types).await {
                 tracing::warn!("Block index rebuild after stabilize skipped: {}", e);
             }
         }
@@ -341,7 +341,7 @@ pub async fn stabilize(
         // Rebuild tag index
         {
             let garden = user_state.garden.read().await;
-            if let Err(e) = garden.rebuild_tag_index().await {
+            if let Err(e) = garden.rebuild_tag_index(&content_types).await {
                 tracing::warn!("Failed to rebuild tag index after stabilize: {}", e);
             }
         }

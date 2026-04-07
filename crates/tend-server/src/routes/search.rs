@@ -10,6 +10,7 @@ use tend_search::SearchResult;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
+use crate::routes::gardens::load_user_content_types;
 use crate::state::{AppState, IndexStatus};
 
 #[derive(Debug, Deserialize)]
@@ -114,16 +115,17 @@ pub async fn rebuild(
 
     // Rebuild the index - use in-place rebuild if a writer already exists,
     // otherwise create a new index from scratch
+    let content_types = load_user_content_types(&user.username).unwrap_or_default();
     {
         let garden = user_state.garden.read().await;
         if garden.search_index.is_some() {
-            garden.rebuild_search_index().await.map_err(|e| {
+            garden.rebuild_search_index(&content_types).await.map_err(|e| {
                 AppError::Internal(format!("Failed to rebuild index: {}", e))
             })?;
         } else {
             drop(garden);
             let mut garden = user_state.garden.write().await;
-            garden.build_index().await.map_err(|e| {
+            garden.build_index(&content_types).await.map_err(|e| {
                 AppError::Internal(format!("Failed to build index: {}", e))
             })?;
         }
