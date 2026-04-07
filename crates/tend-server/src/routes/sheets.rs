@@ -371,23 +371,26 @@ pub async fn update_sheet(
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
-    // Build full page name for block index storage
-    let full_page_name = build_sheet_page_name(&content_type, &path.name, date);
-
     // Read existing sheet or create new
     let mut page = garden
         .file_manager
         .read_sheet(&content_type, &path.name, date)
         .await
         .unwrap_or_else(|_| {
-            let mut p = Page::new_sheet(&full_page_name, &content_type.id, date);
+            // For custom content types, use the full directory path as page name
+            let page_name = if content_type.id != "page" && content_type.id != "journal" {
+                build_sheet_page_name(&content_type, &path.name, date)
+            } else {
+                path.name.clone()
+            };
+            let mut p = Page::new_sheet(&page_name, &content_type.id, date);
             p.title = path.name.clone();
             p
         });
 
-    // Ensure page.name uses the full path format for block index
-    if !page.name.contains('/') {
-        page.name = full_page_name;
+    // For custom content types, ensure page.name uses the full path format for block index
+    if content_type.id != "page" && content_type.id != "journal" && !page.name.contains('/') {
+        page.name = build_sheet_page_name(&content_type, &path.name, date);
     }
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
