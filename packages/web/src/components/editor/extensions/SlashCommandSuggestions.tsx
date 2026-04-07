@@ -24,6 +24,7 @@ interface CommandItem {
   description: string
   action: () => string // Returns the text to insert
   isContentType?: boolean
+  isLinkMode?: boolean
   contentTypeId?: string
 }
 
@@ -32,7 +33,7 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
   const popupRef = useRef<HTMLDivElement>(null)
   const taskStatusSet = useSettingsStore((s) => s.taskStatusSet)
   const contentTypes = useSettingsStore((s) => s.contentTypes)
-  const { openCommandPaletteForContentType } = useUIStore()
+  const { openCommandPaletteForContentType, openCommandPaletteForLinking } = useUIStore()
 
   // Custom content types (excluding built-in page and journal)
   const customContentTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')
@@ -52,13 +53,22 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
       })
     }
 
-    // Content type creation commands
+    // Content type commands
     for (const ct of customContentTypes) {
+      items.push({
+        id: `link-${ct.id}`,
+        label: `Link to ${ct.name}`,
+        description: `Search existing or create new ${ct.name.toLowerCase()}`,
+        action: () => '',
+        isContentType: true,
+        isLinkMode: true,
+        contentTypeId: ct.id,
+      })
       items.push({
         id: `new-${ct.id}`,
         label: `New ${ct.name}`,
         description: `Create a new ${ct.name.toLowerCase()} and insert link`,
-        action: () => '', // Handled specially
+        action: () => '',
         isContentType: true,
         contentTypeId: ct.id,
       })
@@ -145,13 +155,13 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
   // Handle selection
   const handleSelect = useCallback((cmd: CommandItem) => {
     if (cmd.isContentType && cmd.contentTypeId) {
-      // For content type commands, open command palette with the content type
       const ct = contentTypes.find(c => c.id === cmd.contentTypeId)
       if (ct) {
         // Remove the slash command text first
         cancelSlashCommand(view, state)
-        // Open command palette to create the sheet, with callback to insert link
-        openCommandPaletteForContentType(ct, (link) => {
+        // Open command palette in link or create mode
+        const openFn = cmd.isLinkMode ? openCommandPaletteForLinking : openCommandPaletteForContentType
+        openFn(ct, (link) => {
           // Insert the link at cursor position and restore focus
           const pos = view.state.selection.main.head
           view.dispatch({
@@ -167,7 +177,7 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
       const result = cmd.action()
       completeSlashCommand(view, state, result)
     }
-  }, [view, state, contentTypes, openCommandPaletteForContentType])
+  }, [view, state, contentTypes, openCommandPaletteForContentType, openCommandPaletteForLinking])
 
   // Keyboard navigation
   useEffect(() => {

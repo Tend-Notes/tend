@@ -90,7 +90,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
   const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty } = usePageStore()
-  const { toggleSidebar, openSearch, pendingContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
+  const { toggleSidebar, openSearch, pendingContentType, pendingLinkContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
   const { contentTypes } = useSettingsStore()
 
   // Custom content types (excluding built-in page and journal)
@@ -164,6 +164,15 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setSearch('')
     }
   }, [])
+
+  // If opened with a pending link content type (from slash command), start linking
+  useEffect(() => {
+    if (open && pendingLinkContentType) {
+      const ct = pendingLinkContentType
+      clearPendingContentType()
+      handleStartLinkSheet(ct)
+    }
+  }, [open, pendingLinkContentType, clearPendingContentType, handleStartLinkSheet])
 
   // Insert wikilink for the sheet (lazy creation happens when link is clicked)
   const handleCreateSheet = useCallback(() => {
@@ -403,6 +412,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             return (
               <>
                 <Command.Input
+                  autoFocus
                   value={search}
                   onValueChange={setSearch}
                   placeholder={`Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
