@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: MIT WITH Commons-Clause
+name: Security Scan
+
+on:
+  push:
+    branches: [trunk]
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - 'docs/**/*.md'
+  pull_request:
+    branches: [trunk]
+
+jobs:
+  rust-audit:
+    name: Rust dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  clippy:
+    name: Rust clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Install build deps
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - run: cargo clippy --all-targets -- -D warnings
+
+  js-audit:
+    name: JS dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - run: pnpm install --frozen-lockfile
+        working-directory: packages/web
+      - run: pnpm audit --audit-level moderate
+        working-directory: packages/web
+        continue-on-error: true  # Don't block on advisory-only findings
+
+  semgrep:
+    name: Semgrep SAST
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep --config auto --error --quiet
+          --exclude='node_modules' --exclude='target' --exclude='*.lock'
+          crates/ packages/web/src/
