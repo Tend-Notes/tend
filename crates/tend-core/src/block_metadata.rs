@@ -157,13 +157,13 @@ fn parse_metadata_line(line: &str) -> Option<BlockMetadata> {
 pub fn serialize_footer(metadata: &[BlockMetadata]) -> String {
     let mut output = String::new();
 
-    output.push_str("\n");
+    output.push('\n');
     output.push_str(FOOTER_START);
-    output.push_str("\n");
+    output.push('\n');
     output.push_str(FOOTER_WARNING);
     output.push_str("\n\n");
     output.push_str(FOOTER_HEADER);
-    output.push_str("\n");
+    output.push('\n');
 
     for meta in metadata {
         output.push_str(&meta.uuid.to_string());
