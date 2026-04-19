@@ -313,9 +313,9 @@ pub async fn list_gardens(
 
 /// Expand ~ to home directory in paths
 fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with("~/") {
+    if let Some(rest) = path.strip_prefix("~/") {
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(&path[2..]);
+            return PathBuf::from(home).join(rest);
         }
     } else if path == "~" {
         if let Ok(home) = std::env::var("HOME") {
@@ -504,7 +504,7 @@ pub async fn restore_garden(
 /// Validate that a path is safe to delete as a garden directory.
 /// Uses both whitelist (must be in allowed locations) AND blacklist (must not be system paths).
 /// Returns an error message if unsafe, None if safe.
-fn validate_garden_path_for_deletion(path: &PathBuf) -> Option<String> {
+fn validate_garden_path_for_deletion(path: &std::path::Path) -> Option<String> {
     let path_str = path.to_string_lossy();
 
     // === BLOCKLIST CHECKS (what we must NEVER delete) ===
@@ -529,7 +529,7 @@ fn validate_garden_path_for_deletion(path: &PathBuf) -> Option<String> {
         Ok(p) => p,
         Err(_) => {
             // If we can't canonicalize (path doesn't exist), use the original
-            path.clone()
+            path.to_path_buf()
         }
     };
 
@@ -573,7 +573,7 @@ fn validate_garden_path_for_deletion(path: &PathBuf) -> Option<String> {
     }
 
     // Protect /root itself
-    if canonical == PathBuf::from("/root") {
+    if canonical == std::path::Path::new("/root") {
         return Some("Cannot delete root home directory".to_string());
     }
 

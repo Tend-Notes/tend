@@ -578,10 +578,8 @@ async fn find_logseq_root(temp_path: &Path) -> anyhow::Result<PathBuf> {
     let mut entries = fs::read_dir(temp_path).await?;
     while let Some(entry) = entries.next_entry().await? {
         let path = entry.path();
-        if path.is_dir() {
-            if path.join("pages").exists() || path.join("journals").exists() {
-                return Ok(path);
-            }
+        if path.is_dir() && (path.join("pages").exists() || path.join("journals").exists()) {
+            return Ok(path);
         }
     }
 
