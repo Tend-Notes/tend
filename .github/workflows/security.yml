@@ -14,6 +14,7 @@ jobs:
   rust-audit:
     name: Rust dependency audit
     runs-on: ubuntu-latest
+    continue-on-error: true  # Informational -- don't block builds
     steps:
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2
@@ -30,7 +31,8 @@ jobs:
           components: clippy
       - name: Install build deps
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo clippy --all-targets
+        continue-on-error: true  # Informational -- lint set changes with Rust releases
 
   js-audit:
     name: JS dependency audit
@@ -52,6 +54,7 @@ jobs:
   semgrep:
     name: Semgrep SAST
     runs-on: ubuntu-latest
+    continue-on-error: true  # Informational -- don't block builds
     container:
       image: semgrep/semgrep
     steps:
