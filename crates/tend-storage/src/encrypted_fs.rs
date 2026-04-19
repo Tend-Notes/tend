@@ -136,7 +136,7 @@ impl EncryptedFileManager {
             }
         }
 
-        pages.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        pages.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
         Ok(pages)
     }
 
@@ -166,7 +166,7 @@ impl EncryptedFileManager {
             }
         }
 
-        journals.sort_by(|a, b| b.journal_date.cmp(&a.journal_date));
+        journals.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
         Ok(journals)
     }
 
@@ -464,7 +464,7 @@ impl EncryptedFileManager {
             }
         }
 
-        sheets.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
         Ok(sheets)
     }
 
@@ -549,7 +549,7 @@ impl EncryptedFileManager {
             let without_dir = &page.name[content_type.directory.len() + 1..];
             if content_type.save_by_date && without_dir.contains('/') {
                 // Format: YYYY-MM-DD/name - extract name after date
-                without_dir.splitn(2, '/').nth(1).unwrap_or(without_dir)
+                without_dir.split_once('/').map_or(without_dir, |(_, rest)| rest)
             } else {
                 without_dir
             }

@@ -120,7 +120,7 @@ impl SimpleFileWatcher {
                     handle.spawn(async move {
                         for path in event.paths {
                             // Skip non-.md files
-                            if path.extension().map_or(true, |e| e != "md") {
+                            if path.extension().is_none_or(|e| e != "md") {
                                 continue;
                             }
 

@@ -148,7 +148,7 @@ impl FileManager {
         let mut entries = tokio::fs::read_dir(&pages_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "md") {
+            if path.extension().is_some_and(|e| e == "md") {
                 if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
                     let name = decode_filename(raw_name);
                     match self.read_page(&name).await {
@@ -162,7 +162,7 @@ impl FileManager {
         }
 
         // Sort by modified time, newest first
-        pages.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        pages.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
 
         Ok(pages)
     }
@@ -190,7 +190,7 @@ impl FileManager {
         }
 
         // Sort by date, newest first
-        journals.sort_by(|a, b| b.journal_date.cmp(&a.journal_date));
+        journals.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
 
         Ok(journals)
     }
@@ -457,7 +457,7 @@ impl FileManager {
                     let mut entries = tokio::fs::read_dir(&date_path).await?;
                     while let Some(entry) = entries.next_entry().await? {
                         let path = entry.path();
-                        if path.extension().map_or(false, |e| e == "md") {
+                        if path.extension().is_some_and(|e| e == "md") {
                             if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
                                 let name = decode_filename(raw_name);
                                 match self.read_sheet(content_type, &name, date).await {
@@ -476,7 +476,7 @@ impl FileManager {
             let mut entries = tokio::fs::read_dir(&base_dir).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "md") {
+                if path.extension().is_some_and(|e| e == "md") {
                     if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
                         let name = decode_filename(raw_name);
                         match self.read_sheet(content_type, &name, None).await {
@@ -491,7 +491,7 @@ impl FileManager {
         }
 
         // Sort by modified time, newest first
-        sheets.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
 
         Ok(sheets)
     }
@@ -573,7 +573,7 @@ impl FileManager {
             let without_dir = &page.name[content_type.directory.len() + 1..];
             if content_type.save_by_date && without_dir.contains('/') {
                 // Format: YYYY-MM-DD/name - extract name after date
-                without_dir.splitn(2, '/').nth(1).unwrap_or(without_dir)
+                without_dir.split_once('/').map_or(without_dir, |(_, rest)| rest)
             } else {
                 without_dir
             }
