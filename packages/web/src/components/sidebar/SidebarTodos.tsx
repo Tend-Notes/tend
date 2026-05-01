@@ -2,7 +2,8 @@
 // Sidebar todos panel - aggregates all tasks across pages
 
 import { useState, useEffect, useMemo, type ReactNode } from 'react'
-import { todos as todosApi, type TaskItem } from '../../lib/api'
+import { type TaskItem } from '../../lib/api'
+import { useTaskStore } from '../../stores/taskStore'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { useUIStore, type TodoFilterMode } from '../../stores/uiStore'
@@ -93,9 +94,9 @@ function renderContentWithWikilinks(
 }
 
 export function SidebarTodos({ onBack }: SidebarTodosProps) {
-  const [tasks, setTasks] = useState<TaskItem[]>([])
-  const [hasFetched, setHasFetched] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const tasks = useTaskStore((s) => s.tasks)
+  const loading = useTaskStore((s) => s.loading)
+  const error = useTaskStore((s) => s.error)
   const [sort, setSort] = useState<SortMode>('status')
 
   // Read initial filter from uiStore (set by sidebar navigation task counts)
@@ -116,35 +117,8 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
     }
   }, [todoFilter, setTodoFilter])
 
-  const { navigateToPage, navigateToJournal, currentPage, setPendingScrollTarget } = usePageStore()
+  const { navigateToPage, navigateToJournal, setPendingScrollTarget } = usePageStore()
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
-
-  // Track current page version to trigger re-fetch on save
-  const pageVersion = currentPage?.version
-
-  // Fetch tasks from backend
-  useEffect(() => {
-    let cancelled = false
-
-    async function fetchTasks() {
-      try {
-        setError(null)
-        const data = await todosApi.list()
-        if (!cancelled) {
-          setTasks(data.tasks)
-          setHasFetched(true)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load tasks')
-          setHasFetched(true)
-        }
-      }
-    }
-
-    fetchTasks()
-    return () => { cancelled = true }
-  }, [pageVersion]) // Re-fetch when page version changes (after save)
 
   // Filter tasks
   const filteredTasks = useMemo(() => {
@@ -385,7 +359,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
 
       {/* Task list */}
       <div className="flex-1 overflow-y-auto p-3">
-        {!hasFetched ? (
+        {loading ? (
           null
         ) : error ? (
           <div className="text-center text-base-08 text-sm py-8">{error}</div>
