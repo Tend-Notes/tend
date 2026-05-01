@@ -359,7 +359,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
 
       {/* Task list */}
       <div className="flex-1 overflow-y-auto p-3">
-        {loading ? (
+        {loading && tasks.length === 0 ? (
           null
         ) : error ? (
           <div className="text-center text-base-08 text-sm py-8">{error}</div>
