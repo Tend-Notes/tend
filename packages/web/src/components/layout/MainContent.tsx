@@ -9,9 +9,11 @@ import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
 import { SelectionPill } from '../editor/SelectionPill'
+import { TaskManagerPage } from '../tasks/TaskManagerPage'
 
 export function MainContent() {
   const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore()
+  const viewingTasks = usePageStore((s) => s.viewingTasks)
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
 
@@ -99,6 +101,10 @@ export function MainContent() {
         <div className="text-base-03 text-sm">Select a page to begin</div>
       </main>
     )
+  }
+
+  if (viewingTasks) {
+    return <TaskManagerPage />
   }
 
   // Render template editor when editing a template
