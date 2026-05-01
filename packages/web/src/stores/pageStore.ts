@@ -1355,6 +1355,29 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.viewingTasks = false
       })
+      // Symmetric undo of openTaskManager's pushState. popstate handler
+      // re-syncs viewingTasks from history state; setting the flag false
+      // first ensures the browser back navigates to the prior URL.
+      if (window.history.state?.viewingTasks) {
+        window.history.back()
+      } else {
+        // Deep-linked /tasks with no prior entry — push the current page's URL
+        // so back/refresh stays consistent.
+        const cp = get().currentPage
+        const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+        if (cp) {
+          const url = cp.isJournal && cp.journalDate
+            ? `${base}/journal/${cp.journalDate}`
+            : `${base}/page/${encodeURIComponent(cp.name)}`
+          const historyState = cp.isJournal
+            ? { type: 'journal', name: cp.journalDate }
+            : { type: 'page', name: cp.name }
+          window.history.pushState(historyState, '', url)
+        } else {
+          // No currentPage — navigate to today's journal.
+          get().navigateToJournal(formatDateYMD(new Date()))
+        }
+      }
     },
   }))
 )
