@@ -80,11 +80,16 @@ async fn main() -> anyhow::Result<()> {
         info!("CORS: same-origin only (no cross-origin requests allowed)");
         CorsLayer::new()
     } else if config.cors.allowed_origins.len() == 1 && config.cors.allowed_origins[0] == "*" {
-        // Wildcard = allow all origins (least restrictive, for development/trusted proxies)
-        info!("CORS: allowing all origins (permissive mode)");
-        CorsLayer::permissive()
+        // Wildcard allowed only via TEND_DEV_ALLOW_INSECURE=true (validated in Config::validate).
+        // Explicitly disable credentials so a wildcard origin cannot be combined with them.
+        info!("CORS: permissive (dev-insecure) — all origins, credentials disabled");
+        CorsLayer::new()
+            .allow_origin(tower_http::cors::Any)
+            .allow_methods(tower_http::cors::Any)
+            .allow_headers(tower_http::cors::Any)
+            .allow_credentials(false)
     } else {
-        // Specific origins listed
+        // Specific origins listed — credentials are safe with an explicit allowlist.
         use axum::http::HeaderValue;
         let origins: Vec<HeaderValue> = config
             .cors
@@ -92,11 +97,12 @@ async fn main() -> anyhow::Result<()> {
             .iter()
             .filter_map(|o| o.parse().ok())
             .collect();
-        info!("CORS: allowing specific origins: {:?}", config.cors.allowed_origins);
+        info!("CORS: explicit origins: {:?}", config.cors.allowed_origins);
         CorsLayer::new()
             .allow_origin(origins)
             .allow_methods(tower_http::cors::Any)
             .allow_headers(tower_http::cors::Any)
+            .allow_credentials(true)
     };
 
     // Build rate limiting layer if enabled

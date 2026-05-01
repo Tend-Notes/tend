@@ -412,6 +412,23 @@ impl Config {
             );
         }
 
+        let is_wildcard_cors = self.cors.allowed_origins.len() == 1
+            && self.cors.allowed_origins[0] == "*";
+        if is_wildcard_cors && !dev_insecure {
+            return Err(
+                "Refusing to start: TEND_CORS_ORIGINS=* is not allowed without the dev-insecure\n\
+                 escape hatch because a wildcard CORS origin combined with credentials is a\n\
+                 security risk.\n\
+                 Options:\n\
+                   1. Set TEND_CORS_ORIGINS= (empty) for same-origin only — the default.\n\
+                   2. Set TEND_CORS_ORIGINS=https://app.example.com,https://other.example.com\n\
+                      to allow explicit origins.\n\
+                   3. Set TEND_DEV_ALLOW_INSECURE=true to permit wildcard CORS for local\n\
+                      development only — never use this in production."
+                    .to_string(),
+            );
+        }
+
         Ok(())
     }
 
@@ -466,9 +483,9 @@ impl Config {
         } else if self.cors.allowed_origins.len() == 1
             && self.cors.allowed_origins[0] == "*"
         {
-            warn!("  CORS:        * (permissive — all origins accepted)");
+            warn!("  CORS:        permissive (dev-insecure) — all origins, credentials disabled");
         } else {
-            info!("  CORS:        {:?}", self.cors.allowed_origins);
+            info!("  CORS:        explicit: {:?}", self.cors.allowed_origins);
         }
 
         // Rate limiting
@@ -624,6 +641,38 @@ mod tests {
         config.auth.required = true;
         config.auth.verify_url = Some("http://localhost:9091/api/verify".to_string());
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_wildcard_cors_without_dev_insecure() {
+        let mut config = base_config();
+        config.cors.allowed_origins = vec!["*".to_string()];
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        let result = config.validate();
+        assert!(result.is_err(), "expected error for TEND_CORS_ORIGINS=* without dev-insecure");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("TEND_DEV_ALLOW_INSECURE"),
+            "error should mention TEND_DEV_ALLOW_INSECURE"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_wildcard_cors_with_dev_insecure() {
+        let mut config = base_config();
+        config.cors.allowed_origins = vec!["*".to_string()];
+        std::env::set_var("TEND_DEV_ALLOW_INSECURE", "true");
+        let result = config.validate();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        assert!(result.is_ok(), "wildcard CORS should be accepted when TEND_DEV_ALLOW_INSECURE=true");
+    }
+
+    #[test]
+    fn validate_accepts_explicit_cors_origin() {
+        let mut config = base_config();
+        config.cors.allowed_origins = vec!["https://example.com".to_string()];
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        assert!(config.validate().is_ok(), "explicit origin should be accepted");
     }
 
     #[test]
