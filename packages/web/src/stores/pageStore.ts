@@ -57,6 +57,9 @@ interface PageState {
     hasUnsavedChanges: boolean
   } | null
 
+  // Task manager viewing state
+  viewingTasks: boolean
+
   // Pending cursor position from template creation
   // This is consumed by the editor when it mounts to position the cursor
   pendingCursorPosition: CursorPosition | null
@@ -106,6 +109,9 @@ interface PageState {
   saveImportError: (contentType: string, date?: string) => Promise<void>
   discardImportError: () => Promise<void>
   closeImportErrorEditor: () => void
+  // Task manager actions
+  openTaskManager: () => Promise<void>
+  closeTaskManager: () => void
 }
 
 // Helper to build URL path for content
@@ -268,6 +274,7 @@ export const usePageStore = create<PageState>()(
     pendingConflict: null,
     editingTemplate: null,
     editingImportError: null,
+    viewingTasks: false,
     pendingCursorPosition: null,
     pendingScrollTarget: null,
 
@@ -290,6 +297,7 @@ export const usePageStore = create<PageState>()(
         state.isLoading = true
         state.error = null
         state.pendingDraftRecovery = null
+        state.viewingTasks = false
       })
 
       // Reset sync status when navigating to a new page
@@ -428,6 +436,7 @@ export const usePageStore = create<PageState>()(
         state.isLoading = true
         state.error = null
         state.pendingDraftRecovery = null
+        state.viewingTasks = false
       })
 
       // Reset sync status when navigating to a new page
@@ -481,6 +490,13 @@ export const usePageStore = create<PageState>()(
 
     initializeFromUrl: async () => {
       try {
+        const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+        if (window.location.pathname === `${base}/tasks`) {
+          set((state) => {
+            state.viewingTasks = true
+          })
+          return
+        }
         const { type, name } = parseUrlPath(window.location.pathname)
         if (type && name) {
           if (type === 'journal') {
@@ -917,6 +933,7 @@ export const usePageStore = create<PageState>()(
         state.editingTemplate = null
         state.editingImportError = null
         state.pendingCursorPosition = null
+        state.viewingTasks = false
       })
     },
 
@@ -1321,6 +1338,46 @@ export const usePageStore = create<PageState>()(
       set((state) => {
         state.editingImportError = null
       })
+    },
+
+    openTaskManager: async () => {
+      await get().flushPendingSave()
+      set((state) => {
+        state.viewingTasks = true
+        state.editingTemplate = null
+        state.editingImportError = null
+      })
+      const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+      window.history.pushState({ viewingTasks: true }, '', `${base}/tasks`)
+    },
+
+    closeTaskManager: () => {
+      set((state) => {
+        state.viewingTasks = false
+      })
+      // Symmetric undo of openTaskManager's pushState. popstate handler
+      // re-syncs viewingTasks from history state; setting the flag false
+      // first ensures the browser back navigates to the prior URL.
+      if (window.history.state?.viewingTasks) {
+        window.history.back()
+      } else {
+        // Deep-linked /tasks with no prior entry — push the current page's URL
+        // so back/refresh stays consistent.
+        const cp = get().currentPage
+        const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+        if (cp) {
+          const url = cp.isJournal && cp.journalDate
+            ? `${base}/journal/${cp.journalDate}`
+            : `${base}/page/${encodeURIComponent(cp.name)}`
+          const historyState = cp.isJournal
+            ? { type: 'journal', name: cp.journalDate }
+            : { type: 'page', name: cp.name }
+          window.history.pushState(historyState, '', url)
+        } else {
+          // No currentPage — navigate to today's journal.
+          get().navigateToJournal(formatDateYMD(new Date()))
+        }
+      }
     },
   }))
 )

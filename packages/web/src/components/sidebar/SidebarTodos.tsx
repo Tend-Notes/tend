@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Sidebar todos panel - aggregates all tasks across pages
 
-import { useState, useEffect, useMemo, type ReactNode } from 'react'
-import { todos as todosApi, type TaskItem } from '../../lib/api'
+import { useState, useEffect, useMemo } from 'react'
+import { type TaskItem } from '../../lib/api'
+import { useTaskStore } from '../../stores/taskStore'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { useUIStore, type TodoFilterMode } from '../../stores/uiStore'
 import { formatShortDate, formatDateYMD, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils'
 import { getPriorityDisplay } from '../ui/PriorityPickerPopover'
+import { renderContentWithWikilinks } from '../../lib/renderTaskContent'
 
 interface SidebarTodosProps {
   onBack: () => void
@@ -34,68 +36,11 @@ function isCompletedStatus(status: string): boolean {
   return status === 'DONE' || status === 'NEVER'
 }
 
-// Regex to find wikilinks in content: [[target]]
-const WIKILINK_REGEX = /\[\[([^\]]+)\]\]/g
-
-// Render task content with wikilinks as clickable links
-function renderContentWithWikilinks(
-  content: string,
-  navigateToPage: (name: string) => void,
-  navigateToJournal: (date: string) => void
-): ReactNode {
-  const parts: ReactNode[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  WIKILINK_REGEX.lastIndex = 0
-  while ((match = WIKILINK_REGEX.exec(content)) !== null) {
-    // Add text before the wikilink
-    if (match.index > lastIndex) {
-      parts.push(content.slice(lastIndex, match.index))
-    }
-
-    const target = match[1]
-    // Display name: strip prefix directories, show only the final segment
-    const lastSlash = target.lastIndexOf('/')
-    const displayName = lastSlash >= 0 ? target.slice(lastSlash + 1) : target
-
-    parts.push(
-      <a
-        key={match.index}
-        className="wiki-link"
-        href="#"
-        onClick={(e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          if (target.startsWith('journals/')) {
-            navigateToJournal(target.slice('journals/'.length))
-          } else {
-            navigateToPage(target)
-          }
-        }}
-      >
-        {displayName}
-      </a>
-    )
-
-    lastIndex = match.index + match[0].length
-  }
-
-  // Add remaining text after last wikilink
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex))
-  }
-
-  // If no wikilinks found, return original content
-  if (parts.length === 0) return content
-
-  return <>{parts}</>
-}
 
 export function SidebarTodos({ onBack }: SidebarTodosProps) {
-  const [tasks, setTasks] = useState<TaskItem[]>([])
-  const [hasFetched, setHasFetched] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const tasks = useTaskStore((s) => s.tasks)
+  const loading = useTaskStore((s) => s.loading)
+  const error = useTaskStore((s) => s.error)
   const [sort, setSort] = useState<SortMode>('status')
 
   // Read initial filter from uiStore (set by sidebar navigation task counts)
@@ -116,35 +61,8 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
     }
   }, [todoFilter, setTodoFilter])
 
-  const { navigateToPage, navigateToJournal, currentPage, setPendingScrollTarget } = usePageStore()
+  const { navigateToPage, navigateToJournal, setPendingScrollTarget } = usePageStore()
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
-
-  // Track current page version to trigger re-fetch on save
-  const pageVersion = currentPage?.version
-
-  // Fetch tasks from backend
-  useEffect(() => {
-    let cancelled = false
-
-    async function fetchTasks() {
-      try {
-        setError(null)
-        const data = await todosApi.list()
-        if (!cancelled) {
-          setTasks(data.tasks)
-          setHasFetched(true)
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Failed to load tasks')
-          setHasFetched(true)
-        }
-      }
-    }
-
-    fetchTasks()
-    return () => { cancelled = true }
-  }, [pageVersion]) // Re-fetch when page version changes (after save)
 
   // Filter tasks
   const filteredTasks = useMemo(() => {
@@ -260,7 +178,16 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
           </svg>
         </button>
         <span className="text-sm font-medium text-base-05">Tasks</span>
-        <div className="w-4" />
+        <button
+          onClick={() => usePageStore.getState().openTaskManager()}
+          className="rounded p-1 text-base-04 hover:bg-base-01 hover:text-base-06"
+          aria-label="Expand task manager to full view"
+          title="Expand task manager (Alt+Shift+T)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          </svg>
+        </button>
       </div>
 
       {/* Filter and sort controls */}
@@ -385,7 +312,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
 
       {/* Task list */}
       <div className="flex-1 overflow-y-auto p-3">
-        {!hasFetched ? (
+        {loading && tasks.length === 0 ? (
           null
         ) : error ? (
           <div className="text-center text-base-08 text-sm py-8">{error}</div>

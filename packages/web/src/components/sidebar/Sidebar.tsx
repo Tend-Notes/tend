@@ -5,8 +5,9 @@ import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { useTagStore } from '../../stores/tagStore'
-import { todos as todosApi, isDemoMode, type TaskItem } from '../../lib/api'
+import { isDemoMode } from '../../lib/api'
 import { formatDateYMD } from '../../lib/dateUtils'
+import { useTaskStore, selectBadgeCount } from '../../stores/taskStore'
 import { SidebarOptions } from './SidebarOptions'
 import { SidebarTags } from './SidebarTags'
 import { SidebarTodos } from './SidebarTodos'
@@ -27,6 +28,28 @@ function SidebarLoading() {
 // Re-export the type for backwards compatibility
 export type { SidebarMode }
 
+function CollapsedTaskBadge() {
+  const tasks = useTaskStore((s) => s.tasks)
+  const count = selectBadgeCount(tasks)
+  if (count === 0) return null
+  const display = count <= 9 ? String(count) : '*'
+  return (
+    <button
+      onClick={() => usePageStore.getState().openTaskManager()}
+      className="flex h-8 w-8 items-center justify-center"
+      aria-label={`Open task manager — ${count} due or overdue`}
+      title={`${count} due/overdue tasks (Alt+Shift+T)`}
+    >
+      <span
+        className="flex h-5 w-6 items-center justify-center rounded text-xs font-semibold text-base-07"
+        style={{ backgroundColor: 'color-mix(in srgb, var(--base08) 50%, transparent)' }}
+      >
+        {display}
+      </span>
+    </button>
+  )
+}
+
 // Resize constraints
 const MIN_WIDTH = 279
 const getMaxWidth = () => (typeof window !== 'undefined' ? window.innerWidth * 0.4 : 500)
@@ -44,25 +67,8 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const { recentSheets, recentTags } = useRecentSheetsStore()
   const getTagColors = useTagStore((state) => state.getTagColors)
 
-  // Task counts for navigation panel
-  const [taskItems, setTaskItems] = useState<TaskItem[]>([])
-  const pageVersion = currentPage?.version
-
-  useEffect(() => {
-    let cancelled = false
-    async function fetchTaskCounts() {
-      try {
-        const data = await todosApi.list()
-        if (!cancelled) {
-          setTaskItems(data.tasks)
-        }
-      } catch {
-        // Silently fail - task counts are non-critical
-      }
-    }
-    fetchTaskCounts()
-    return () => { cancelled = true }
-  }, [pageVersion]) // Re-fetch when page version changes (after save)
+  // Task counts for navigation panel — use shared taskStore to avoid duplicate fetch
+  const taskItems = useTaskStore((s) => s.tasks)
 
   const taskCounts = useMemo(() => {
     const todayStr = formatDateYMD(new Date())
@@ -346,6 +352,7 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" />
             </svg>
           </button>
+          <CollapsedTaskBadge />
           <button
             onClick={toggleSidebar}
             className="p-1 text-base-03 hover:text-base-05 transition-colors"

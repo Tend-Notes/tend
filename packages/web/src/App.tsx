@@ -158,13 +158,19 @@ function App() {
   // Handle browser back/forward navigation
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      const state = event.state as { type: 'page' | 'journal'; name: string } | null
+      const state = event.state as { type: 'page' | 'journal'; name: string; viewingTasks?: boolean } | null
+      if (state?.viewingTasks === true) {
+        usePageStore.setState({ viewingTasks: true })
+        return
+      }
       if (state) {
         if (state.type === 'journal') {
           navigateToJournal(state.name, false)
         } else {
           navigateToPage(state.name, false)
         }
+        // Ensure task manager is dismissed when navigating to a page/journal
+        usePageStore.setState({ viewingTasks: false })
       } else {
         // No state means we're at the initial URL - reinitialize
         initializeFromUrl()
@@ -215,6 +221,13 @@ function App() {
       if (e.altKey && e.shiftKey && e.code === 'KeyJ') {
         e.preventDefault()
         navigateToJournal(formatDateYMD(new Date()))
+        return
+      }
+
+      // Alt + Shift + T - Open task manager (works even when editing)
+      if (e.altKey && e.shiftKey && e.code === 'KeyT') {
+        e.preventDefault()
+        usePageStore.getState().openTaskManager()
         return
       }
 
