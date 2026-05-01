@@ -13,6 +13,19 @@ import {
   type Task,
 } from '../../stores/taskStore';
 
+type Priority = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+
+const PRIORITY_BUTTONS: Array<{
+  key: Priority;
+  label: string;
+  activeBg: string;
+}> = [
+  { key: 'HIGH',   label: 'High',   activeBg: 'color-mix(in srgb, var(--base08) 50%, transparent)' },
+  { key: 'MEDIUM', label: 'Medium', activeBg: 'color-mix(in srgb, var(--base0D) 50%, transparent)' },
+  { key: 'LOW',    label: 'Low',    activeBg: 'color-mix(in srgb, var(--base0B) 50%, transparent)' },
+  { key: 'NONE',   label: 'None',   activeBg: 'var(--base02)' },
+];
+
 type ViewKey =
   | 'today'
   | 'overdue'
@@ -35,7 +48,16 @@ const VIEWS: Array<{ key: ViewKey; label: string; selector: (t: Task[]) => Task[
 export function TaskManagerPage() {
   const closeTaskManager = usePageStore((s) => s.closeTaskManager);
   const [activeView, setActiveView] = useState<ViewKey>('today');
+  const [activePriorities, setActivePriorities] = useState<Set<Priority>>(new Set());
   const tasks = useTaskStore((s) => s.tasks);
+
+  const togglePriority = (p: Priority) =>
+    setActivePriorities((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p);
+      else next.add(p);
+      return next;
+    });
 
   return (
     <div className="flex h-full w-full flex-col bg-base-00 text-base-05">
@@ -73,6 +95,28 @@ export function TaskManagerPage() {
                 </button>
               );
             })}
+          </div>
+          <div className="space-y-1">
+            <div className="px-2 text-xs font-semibold uppercase tracking-wide text-base-03">
+              Priority
+            </div>
+            <div className="flex flex-col gap-1">
+              {PRIORITY_BUTTONS.map((p) => {
+                const isActive = activePriorities.has(p.key);
+                return (
+                  <button
+                    key={p.key}
+                    onClick={() => togglePriority(p.key)}
+                    className={`flex items-center justify-between rounded-md px-2 py-1 text-sm transition-colors ${
+                      isActive ? 'text-base-06' : 'text-base-04 hover:bg-base-01'
+                    }`}
+                    style={isActive ? { backgroundColor: p.activeBg } : undefined}
+                  >
+                    <span>{p.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </aside>
         <main className="flex-1 overflow-y-auto">
