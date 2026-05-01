@@ -379,6 +379,24 @@ impl Config {
                     .to_string(),
             );
         }
+
+        let is_loopback = self.host.is_loopback();
+        let dev_insecure = std::env::var("TEND_DEV_ALLOW_INSECURE")
+            .is_ok_and(|v| v == "true");
+        if !self.auth.required && !is_loopback && !dev_insecure {
+            return Err(
+                "Refusing to start: TEND_AUTH_REQUIRED=false with a non-loopback bind address\n\
+                 is unsafe — any host that can reach this port has unauthenticated access.\n\
+                 Options:\n\
+                   1. Set TEND_AUTH_REQUIRED=true and configure a reverse proxy with\n\
+                      TEND_AUTH_VERIFY_URL pointing to its auth endpoint.\n\
+                   2. Change TEND_HOST to 127.0.0.1 (loopback) if running locally.\n\
+                   3. Set TEND_DEV_ALLOW_INSECURE=true to override this check for\n\
+                      LAN development only — never use this in production."
+                    .to_string(),
+            );
+        }
+
         Ok(())
     }
 
@@ -467,6 +485,49 @@ mod tests {
         let mut config = base_config();
         config.auth.required = false;
         config.auth.verify_url = None;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_auth_disabled_on_loopback() {
+        let mut config = base_config();
+        config.host = "127.0.0.1".parse().unwrap();
+        config.auth.required = false;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_auth_disabled_on_nonloopback() {
+        let mut config = base_config();
+        config.host = "0.0.0.0".parse().unwrap();
+        config.auth.required = false;
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        let result = config.validate();
+        assert!(result.is_err(), "expected error when auth disabled on 0.0.0.0");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("TEND_DEV_ALLOW_INSECURE"),
+            "error should mention TEND_DEV_ALLOW_INSECURE"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_auth_disabled_nonloopback_with_dev_insecure() {
+        let mut config = base_config();
+        config.host = "0.0.0.0".parse().unwrap();
+        config.auth.required = false;
+        std::env::set_var("TEND_DEV_ALLOW_INSECURE", "true");
+        let result = config.validate();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_auth_required_on_nonloopback_with_verify_url() {
+        let mut config = base_config();
+        config.host = "0.0.0.0".parse().unwrap();
+        config.auth.required = true;
+        config.auth.verify_url = Some("http://localhost:9091/api/verify".to_string());
         assert!(config.validate().is_ok());
     }
 }

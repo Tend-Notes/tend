@@ -107,6 +107,13 @@ RUN mkdir -p /data/Gardens/Notes/pages /data/Gardens/Notes/journals && \
 USER tend
 
 # Environment variables
+# TEND_HOST=0.0.0.0 is correct for containers: the container's network namespace
+# is isolated and traffic only reaches it through published ports (-p host:container).
+# HOWEVER, this means the server IS reachable on any published port. In production
+# you MUST front this container with a reverse proxy (nginx, Caddy, Traefil, etc.)
+# that handles TLS and auth before traffic reaches Tend.
+# The server will refuse to start if TEND_HOST is non-loopback AND
+# TEND_AUTH_REQUIRED=false, unless TEND_DEV_ALLOW_INSECURE=true is also set.
 ENV TEND_HOST=0.0.0.0
 ENV TEND_PORT=3000
 ENV TEND_BASE_DIR=/data
