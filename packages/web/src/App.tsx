@@ -218,6 +218,13 @@ function App() {
         return
       }
 
+      // Alt + Shift + T - Open task manager (works even when editing)
+      if (e.altKey && e.shiftKey && e.code === 'KeyT') {
+        e.preventDefault()
+        usePageStore.getState().openTaskManager()
+        return
+      }
+
       // Skip other shortcuts if we're editing
       if (isEditing) return
 
