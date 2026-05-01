@@ -5,8 +5,10 @@ use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::{routing::get, Router};
 use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -16,6 +18,7 @@ use tracing::{info, Level};
 mod auth;
 mod config;
 mod error;
+mod headers;
 mod indices;
 mod routes;
 mod state;
@@ -40,7 +43,17 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let config = Config::load()?;
+    if let Err(msg) = config.validate() {
+        tracing::error!("Configuration error: {}", msg);
+        std::process::exit(1);
+    }
     info!("Loaded configuration");
+    config.log_security_posture();
+    info!(
+        "Request body limit: {} bytes ({} MB); upload endpoint retains 500 MB per-route override",
+        config.request_body_limit,
+        config.request_body_limit / (1024 * 1024)
+    );
     info!("Data directory: {}", config.data_dir.display());
 
     // Initialize application state (multi-tenant - no gardens loaded at startup)
@@ -67,11 +80,16 @@ async fn main() -> anyhow::Result<()> {
         info!("CORS: same-origin only (no cross-origin requests allowed)");
         CorsLayer::new()
     } else if config.cors.allowed_origins.len() == 1 && config.cors.allowed_origins[0] == "*" {
-        // Wildcard = allow all origins (least restrictive, for development/trusted proxies)
-        info!("CORS: allowing all origins (permissive mode)");
-        CorsLayer::permissive()
+        // Wildcard allowed only via TEND_DEV_ALLOW_INSECURE=true (validated in Config::validate).
+        // Explicitly disable credentials so a wildcard origin cannot be combined with them.
+        info!("CORS: permissive (dev-insecure) — all origins, credentials disabled");
+        CorsLayer::new()
+            .allow_origin(tower_http::cors::Any)
+            .allow_methods(tower_http::cors::Any)
+            .allow_headers(tower_http::cors::Any)
+            .allow_credentials(false)
     } else {
-        // Specific origins listed
+        // Specific origins listed — credentials are safe with an explicit allowlist.
         use axum::http::HeaderValue;
         let origins: Vec<HeaderValue> = config
             .cors
@@ -79,11 +97,12 @@ async fn main() -> anyhow::Result<()> {
             .iter()
             .filter_map(|o| o.parse().ok())
             .collect();
-        info!("CORS: allowing specific origins: {:?}", config.cors.allowed_origins);
+        info!("CORS: explicit origins: {:?}", config.cors.allowed_origins);
         CorsLayer::new()
             .allow_origin(origins)
             .allow_methods(tower_http::cors::Any)
             .allow_headers(tower_http::cors::Any)
+            .allow_credentials(true)
     };
 
     // Build rate limiting layer if enabled
@@ -102,6 +121,7 @@ async fn main() -> anyhow::Result<()> {
         let governor_config = GovernorConfigBuilder::default()
             .per_millisecond(period_ms)
             .burst_size(burst.get())
+            .key_extractor(SmartIpKeyExtractor)
             .finish()
             .expect("Invalid rate limit configuration");
 
@@ -119,8 +139,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build router with API routes (rate-limited) and static files (not rate-limited)
+    // Apply a global body limit to all API endpoints. Per-route limits (e.g. the 500 MB
+    // upload limit) are applied first and override this router-level default.
     let api_router = Router::new()
-        .nest("/api/v1", routes::api_router())
+        .nest(
+            "/api/v1",
+            routes::api_router()
+                .layer(DefaultBodyLimit::max(config.request_body_limit)),
+        )
         .route("/ws", get(ws::ws_handler));
 
     // Apply rate limiting only to API routes if enabled
@@ -136,8 +162,15 @@ async fn main() -> anyhow::Result<()> {
         .append_index_html_on_directories(true)
         .fallback(ServeFile::new(&index_path));
 
+    let [sec0, sec1, sec2, sec3, sec4, sec5] = headers::security_headers_layer();
     let app = api_router
         .fallback_service(static_service)
+        .layer(sec5)
+        .layer(sec4)
+        .layer(sec3)
+        .layer(sec2)
+        .layer(sec1)
+        .layer(sec0)
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
         .with_state(state);

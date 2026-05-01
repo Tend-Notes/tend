@@ -11,6 +11,18 @@ export default defineConfig({
   // Use /tend/ base path for GitHub Pages (repo is tend-notes/tend)
   base: isDemo ? '/tend/' : '/',
   plugins: [
+    {
+      name: 'strip-demo-only-script',
+      transformIndexHtml(html) {
+        if (!isDemo) {
+          return html.replace(
+            /[ \t]*<!-- demo-only:gh-pages-redirect:start -->[\s\S]*?<!-- demo-only:gh-pages-redirect:end -->\n?/m,
+            ''
+          );
+        }
+        return html;
+      },
+    },
     react(),
     // PWA is disabled in demo mode since there's no backend to cache
     !isDemo && VitePWA({

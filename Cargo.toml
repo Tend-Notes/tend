@@ -11,7 +11,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.7.0"
 edition = "2021"
 license = "MIT"  # With Commons Clause - see LICENSE file
 authors = ["Tend Contributors"]
@@ -44,7 +44,7 @@ regex = "1"
 # Web framework
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "fs"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "fs", "set-header"] }
 tower_governor = "0.8"
 governor = "0.10"
 

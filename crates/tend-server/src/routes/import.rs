@@ -30,6 +30,13 @@ use crate::state::{AppState, UserState};
 /// Maximum upload size: 500 MB
 pub const MAX_UPLOAD_SIZE: usize = 500 * 1024 * 1024;
 
+/// Maximum total uncompressed size across all entries (defense against zip bombs).
+pub const MAX_UNCOMPRESSED_TOTAL: u64 = 2 * 1024 * 1024 * 1024; // 2 GB
+/// Maximum size of any single entry after decompression.
+pub const MAX_UNCOMPRESSED_ENTRY: u64 = 100 * 1024 * 1024; // 100 MB
+/// Maximum number of files in a single import.
+pub const MAX_FILE_COUNT: usize = 50_000;
+
 /// Progress event sent as JSON lines during import
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase", tag = "type")]
@@ -242,6 +249,75 @@ pub async fn import_logseq_zip(
         .unwrap())
 }
 
+/// Extract a zip archive to a directory, enforcing resource caps.
+///
+/// Defends against decompression bombs by checking:
+/// - Total entry count against `MAX_FILE_COUNT`
+/// - Per-entry declared and actual uncompressed size against `MAX_UNCOMPRESSED_ENTRY`
+/// - Running total uncompressed size against `MAX_UNCOMPRESSED_TOTAL`
+fn extract_zip_to_dir(zip_data: &[u8], dest: &std::path::Path) -> anyhow::Result<()> {
+    use std::io::Read;
+
+    let cursor = std::io::Cursor::new(zip_data);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+
+    // File count cap (checked before extracting anything)
+    let entry_count = archive.len();
+    if entry_count > MAX_FILE_COUNT {
+        anyhow::bail!(
+            "Archive contains too many files (max: {})",
+            MAX_FILE_COUNT
+        );
+    }
+
+    let mut total_uncompressed: u64 = 0;
+
+    for i in 0..entry_count {
+        let mut file = archive.by_index(i)?;
+        let outpath = match file.enclosed_name() {
+            Some(path) => dest.join(path),
+            None => continue,
+        };
+
+        if file.is_dir() {
+            std::fs::create_dir_all(&outpath)?;
+        } else {
+            // Per-entry uncompressed size cap (declared size as quick check)
+            let declared_size = file.size();
+            if declared_size > MAX_UNCOMPRESSED_ENTRY {
+                anyhow::bail!(
+                    "Archive entry '{}' exceeds maximum uncompressed size (100 MB)",
+                    file.name()
+                );
+            }
+
+            // Total uncompressed cap (using declared size for early rejection)
+            total_uncompressed = total_uncompressed.saturating_add(declared_size);
+            if total_uncompressed > MAX_UNCOMPRESSED_TOTAL {
+                anyhow::bail!("Archive uncompressed size exceeds total limit (2 GB)");
+            }
+
+            if let Some(p) = outpath.parent() {
+                if !p.exists() {
+                    std::fs::create_dir_all(p)?;
+                }
+            }
+            let mut outfile = std::fs::File::create(&outpath)?;
+            // Enforce per-entry cap during actual decompression to guard
+            // against lying declared sizes (zip bomb with false metadata).
+            let mut limited = (&mut file).take(MAX_UNCOMPRESSED_ENTRY + 1);
+            let written = std::io::copy(&mut limited, &mut outfile)?;
+            if written > MAX_UNCOMPRESSED_ENTRY {
+                anyhow::bail!(
+                    "Archive entry '{}' exceeds maximum uncompressed size (100 MB)",
+                    outpath.file_name().and_then(|n| n.to_str()).unwrap_or("unknown")
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Process the import in a background task
 async fn process_import(
     zip_data: Vec<u8>,
@@ -271,30 +347,8 @@ async fn process_import(
     // Extract zip file (blocking operation)
     let zip_data_clone = zip_data.clone();
     let temp_path_owned = temp_path.to_path_buf();
-    tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-        let cursor = std::io::Cursor::new(zip_data_clone);
-        let mut archive = zip::ZipArchive::new(cursor)?;
-
-        for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
-            let outpath = match file.enclosed_name() {
-                Some(path) => temp_path_owned.join(path),
-                None => continue,
-            };
-
-            if file.is_dir() {
-                std::fs::create_dir_all(&outpath)?;
-            } else {
-                if let Some(p) = outpath.parent() {
-                    if !p.exists() {
-                        std::fs::create_dir_all(p)?;
-                    }
-                }
-                let mut outfile = std::fs::File::create(&outpath)?;
-                std::io::copy(&mut file, &mut outfile)?;
-            }
-        }
-        Ok(())
+    tokio::task::spawn_blocking(move || {
+        extract_zip_to_dir(&zip_data_clone, &temp_path_owned)
     })
     .await??;
 
@@ -1571,5 +1625,51 @@ More text";
             result.content,
             "<!-- Logseq query removed -->\nMore text"
         );
+    }
+
+    // --- Resource-cap tests for extract_zip_to_dir ---
+
+    fn make_zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let buf = Vec::new();
+        let cursor = std::io::Cursor::new(buf);
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, data) in entries {
+            zip.start_file(*name, options).unwrap();
+            zip.write_all(data).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn test_extract_zip_file_count_cap() {
+        // Build an archive with MAX_FILE_COUNT + 1 entries (each 1 byte).
+        // Total data is ~50 KB — acceptable for a unit test.
+        let names: Vec<String> = (0..=MAX_FILE_COUNT).map(|i| format!("f{}.txt", i)).collect();
+        let entries: Vec<(&str, &[u8])> = names.iter().map(|n| (n.as_str(), b"x" as &[u8])).collect();
+        let zip_data = make_zip_bytes(&entries);
+        let tmp = tempfile::tempdir().unwrap();
+        let err = extract_zip_to_dir(&zip_data, tmp.path()).unwrap_err();
+        assert!(
+            err.to_string().contains("too many files"),
+            "expected 'too many files' error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_extract_zip_normal_archive_passes_caps() {
+        // A small, well-formed archive should extract without hitting any cap.
+        let entries: Vec<(&str, &[u8])> = vec![
+            ("pages/note.md", b"# Hello\n"),
+            ("journals/2024-01-01.md", b"- entry\n"),
+        ];
+        let zip_data = make_zip_bytes(&entries);
+        let tmp = tempfile::tempdir().unwrap();
+        extract_zip_to_dir(&zip_data, tmp.path()).expect("normal archive should extract cleanly");
+        assert!(tmp.path().join("pages/note.md").exists());
+        assert!(tmp.path().join("journals/2024-01-01.md").exists());
     }
 }

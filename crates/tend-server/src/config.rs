@@ -40,6 +40,12 @@ pub struct Config {
     /// Authentication configuration
     #[serde(default)]
     pub auth: AuthConfig,
+
+    /// Maximum request body size in bytes for general API endpoints.
+    /// Override with TEND_REQUEST_BODY_LIMIT. Default: 10 MB.
+    /// The upload endpoint retains its own larger per-route limit (500 MB).
+    #[serde(default = "default_request_body_limit")]
+    pub request_body_limit: usize,
 }
 
 /// Authentication configuration
@@ -348,6 +354,14 @@ fn default_backup_interval() -> u32 {
     30
 }
 
+fn default_request_body_limit() -> usize {
+    // 10 MB default; override with TEND_REQUEST_BODY_LIMIT (bytes)
+    std::env::var("TEND_REQUEST_BODY_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10 * 1024 * 1024)
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -359,11 +373,144 @@ impl Default for Config {
             cors: CorsConfig::default(),
             rate_limit: RateLimitConfig::default(),
             auth: AuthConfig::default(),
+            request_body_limit: default_request_body_limit(),
         }
     }
 }
 
 impl Config {
+    /// Validate configuration for fatal mismatches.
+    ///
+    /// Returns an error with an actionable message if the configuration would
+    /// leave the server in an insecure or broken state.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.auth.required && self.auth.verify_url.is_none() {
+            return Err(
+                "auth.required is true but TEND_AUTH_VERIFY_URL is not set.\n\
+                 WebSocket connections cannot be authenticated without a verify URL.\n\
+                 Fix: set TEND_AUTH_VERIFY_URL to your reverse proxy's auth verification\n\
+                 endpoint (e.g. https://authelia.example.com/api/verify), OR set\n\
+                 TEND_AUTH_REQUIRED=false for local development only."
+                    .to_string(),
+            );
+        }
+
+        let is_loopback = self.host.is_loopback();
+        let dev_insecure = std::env::var("TEND_DEV_ALLOW_INSECURE")
+            .is_ok_and(|v| v == "true");
+        if !self.auth.required && !is_loopback && !dev_insecure {
+            return Err(
+                "Refusing to start: TEND_AUTH_REQUIRED=false with a non-loopback bind address\n\
+                 is unsafe — any host that can reach this port has unauthenticated access.\n\
+                 Options:\n\
+                   1. Set TEND_AUTH_REQUIRED=true and configure a reverse proxy with\n\
+                      TEND_AUTH_VERIFY_URL pointing to its auth endpoint.\n\
+                   2. Change TEND_HOST to 127.0.0.1 (loopback) if running locally.\n\
+                   3. Set TEND_DEV_ALLOW_INSECURE=true to override this check for\n\
+                      LAN development only — never use this in production."
+                    .to_string(),
+            );
+        }
+
+        let is_wildcard_cors = self.cors.allowed_origins.len() == 1
+            && self.cors.allowed_origins[0] == "*";
+        if is_wildcard_cors && !dev_insecure {
+            return Err(
+                "Refusing to start: TEND_CORS_ORIGINS=* is not allowed without the dev-insecure\n\
+                 escape hatch because a wildcard CORS origin combined with credentials is a\n\
+                 security risk.\n\
+                 Options:\n\
+                   1. Set TEND_CORS_ORIGINS= (empty) for same-origin only — the default.\n\
+                   2. Set TEND_CORS_ORIGINS=https://app.example.com,https://other.example.com\n\
+                      to allow explicit origins.\n\
+                   3. Set TEND_DEV_ALLOW_INSECURE=true to permit wildcard CORS for local\n\
+                      development only — never use this in production."
+                    .to_string(),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Emit a clearly-delimited block of log lines describing the effective
+    /// security posture.  Normal/safe values use `tracing::info!`; unusual-but-
+    /// allowed values use `tracing::warn!` so operators see them immediately.
+    pub fn log_security_posture(&self) {
+        use tracing::{info, warn};
+
+        let is_loopback = self.host.is_loopback();
+        let dev_insecure = std::env::var("TEND_DEV_ALLOW_INSECURE")
+            .is_ok_and(|v| v == "true");
+
+        info!("================ Tend security posture ================");
+
+        // Bind address
+        if is_loopback {
+            info!("  Bind:        {}:{}", self.host, self.port);
+        } else {
+            warn!(
+                "  Bind:        {}:{}  (non-loopback — reachable from network)",
+                self.host, self.port
+            );
+        }
+
+        // Auth state
+        if self.auth.required {
+            info!(
+                "  Auth:        required (header: {})",
+                self.auth.user_header
+            );
+        } else if dev_insecure {
+            warn!(
+                "  Auth:        DISABLED — TEND_DEV_ALLOW_INSECURE=true, \
+                 unauthenticated access permitted from network"
+            );
+        } else {
+            warn!(
+                "  Auth:        disabled (loopback only) — no authentication enforced"
+            );
+        }
+
+        // WebSocket verify URL
+        match &self.auth.verify_url {
+            Some(url) => info!("  WS verify:   {}", url),
+            None => info!("  WS verify:   unset (WebSocket connections not auth-verified)"),
+        }
+
+        // CORS mode
+        if self.cors.allowed_origins.is_empty() {
+            info!("  CORS:        same-origin");
+        } else if self.cors.allowed_origins.len() == 1
+            && self.cors.allowed_origins[0] == "*"
+        {
+            warn!("  CORS:        permissive (dev-insecure) — all origins, credentials disabled");
+        } else {
+            info!("  CORS:        explicit: {:?}", self.cors.allowed_origins);
+        }
+
+        // Rate limiting
+        if self.rate_limit.enabled {
+            info!(
+                "  Rate limit:  {} rps, burst {} (per-IP)",
+                self.rate_limit.requests_per_second, self.rate_limit.burst_size
+            );
+        } else {
+            warn!("  Rate limit:  DISABLED — no request rate enforcement");
+        }
+
+        // Body size limit
+        info!(
+            "  Body limit:  {} bytes ({} MB) — upload endpoint retains 500 MB per-route override",
+            self.request_body_limit,
+            self.request_body_limit / (1024 * 1024)
+        );
+
+        // Encryption (runtime-configured, not a server config field)
+        info!("  Encryption:  per-garden (configured at runtime)");
+
+        info!("========================================================");
+    }
+
     /// Load configuration from file and environment
     pub fn load() -> anyhow::Result<Self> {
         // Try to load from config file in base directory
@@ -399,5 +546,170 @@ impl Config {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn base_config() -> Config {
+        Config {
+            host: "127.0.0.1".parse().unwrap(),
+            port: 3000,
+            data_dir: std::path::PathBuf::from("./data"),
+            static_dir: std::path::PathBuf::from("./static"),
+            git: GitConfig::default(),
+            cors: CorsConfig::default(),
+            rate_limit: RateLimitConfig::default(),
+            auth: AuthConfig {
+                user_header: "Remote-User".to_string(),
+                required: false,
+                default_user: None,
+                dev_user_header: "X-Dev-User".to_string(),
+                verify_url: None,
+            },
+            request_body_limit: default_request_body_limit(),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_required_auth_without_verify_url() {
+        let mut config = base_config();
+        config.auth.required = true;
+        config.auth.verify_url = None;
+        let result = config.validate();
+        assert!(result.is_err(), "expected error when auth.required=true and verify_url=None");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("TEND_AUTH_VERIFY_URL"), "error should mention TEND_AUTH_VERIFY_URL");
+    }
+
+    #[test]
+    fn validate_accepts_required_auth_with_verify_url() {
+        let mut config = base_config();
+        config.auth.required = true;
+        config.auth.verify_url = Some("http://localhost:9091/api/verify".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_auth_not_required_without_verify_url() {
+        let mut config = base_config();
+        config.auth.required = false;
+        config.auth.verify_url = None;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_auth_disabled_on_loopback() {
+        let mut config = base_config();
+        config.host = "127.0.0.1".parse().unwrap();
+        config.auth.required = false;
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_auth_disabled_on_nonloopback() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        let mut config = base_config();
+        config.host = "0.0.0.0".parse().unwrap();
+        config.auth.required = false;
+        let result = config.validate();
+        assert!(result.is_err(), "expected error when auth disabled on 0.0.0.0");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("TEND_DEV_ALLOW_INSECURE"),
+            "error should mention TEND_DEV_ALLOW_INSECURE"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_auth_disabled_nonloopback_with_dev_insecure() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        let mut config = base_config();
+        config.host = "0.0.0.0".parse().unwrap();
+        config.auth.required = false;
+        std::env::set_var("TEND_DEV_ALLOW_INSECURE", "true");
+        let result = config.validate();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_auth_required_on_nonloopback_with_verify_url() {
+        let mut config = base_config();
+        config.host = "0.0.0.0".parse().unwrap();
+        config.auth.required = true;
+        config.auth.verify_url = Some("http://localhost:9091/api/verify".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_wildcard_cors_without_dev_insecure() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        let mut config = base_config();
+        config.cors.allowed_origins = vec!["*".to_string()];
+        let result = config.validate();
+        assert!(result.is_err(), "expected error for TEND_CORS_ORIGINS=* without dev-insecure");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("TEND_DEV_ALLOW_INSECURE"),
+            "error should mention TEND_DEV_ALLOW_INSECURE"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_wildcard_cors_with_dev_insecure() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        let mut config = base_config();
+        config.cors.allowed_origins = vec!["*".to_string()];
+        std::env::set_var("TEND_DEV_ALLOW_INSECURE", "true");
+        let result = config.validate();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        assert!(result.is_ok(), "wildcard CORS should be accepted when TEND_DEV_ALLOW_INSECURE=true");
+    }
+
+    #[test]
+    fn validate_accepts_explicit_cors_origin() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        let mut config = base_config();
+        config.cors.allowed_origins = vec!["https://example.com".to_string()];
+        assert!(config.validate().is_ok(), "explicit origin should be accepted");
+    }
+
+    #[test]
+    fn request_body_limit_defaults_to_10mb() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        assert_eq!(default_request_body_limit(), 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn request_body_limit_env_var_overrides_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        std::env::set_var("TEND_REQUEST_BODY_LIMIT", "20971520"); // 20 MB
+        let limit = default_request_body_limit();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        assert_eq!(limit, 20 * 1024 * 1024);
+    }
+
+    #[test]
+    fn request_body_limit_invalid_env_var_falls_back_to_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        std::env::set_var("TEND_REQUEST_BODY_LIMIT", "not-a-number");
+        let limit = default_request_body_limit();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        assert_eq!(limit, 10 * 1024 * 1024);
     }
 }
