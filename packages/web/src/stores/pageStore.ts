@@ -490,6 +490,13 @@ export const usePageStore = create<PageState>()(
 
     initializeFromUrl: async () => {
       try {
+        const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+        if (window.location.pathname === `${base}/tasks`) {
+          set((state) => {
+            state.viewingTasks = true
+          })
+          return
+        }
         const { type, name } = parseUrlPath(window.location.pathname)
         if (type && name) {
           if (type === 'journal') {
@@ -926,6 +933,7 @@ export const usePageStore = create<PageState>()(
         state.editingTemplate = null
         state.editingImportError = null
         state.pendingCursorPosition = null
+        state.viewingTasks = false
       })
     },
 
@@ -1336,8 +1344,11 @@ export const usePageStore = create<PageState>()(
       await get().flushPendingSave()
       set((state) => {
         state.viewingTasks = true
+        state.editingTemplate = null
+        state.editingImportError = null
       })
-      window.history.pushState({ viewingTasks: true }, '', '/tasks')
+      const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+      window.history.pushState({ viewingTasks: true }, '', `${base}/tasks`)
     },
 
     closeTaskManager: () => {
