@@ -364,6 +364,24 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Validate configuration for fatal mismatches.
+    ///
+    /// Returns an error with an actionable message if the configuration would
+    /// leave the server in an insecure or broken state.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.auth.required && self.auth.verify_url.is_none() {
+            return Err(
+                "auth.required is true but TEND_AUTH_VERIFY_URL is not set.\n\
+                 WebSocket connections cannot be authenticated without a verify URL.\n\
+                 Fix: set TEND_AUTH_VERIFY_URL to your reverse proxy's auth verification\n\
+                 endpoint (e.g. https://authelia.example.com/api/verify), OR set\n\
+                 TEND_AUTH_REQUIRED=false for local development only."
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
     /// Load configuration from file and environment
     pub fn load() -> anyhow::Result<Self> {
         // Try to load from config file in base directory
@@ -399,5 +417,56 @@ impl Config {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config() -> Config {
+        Config {
+            host: "127.0.0.1".parse().unwrap(),
+            port: 3000,
+            data_dir: std::path::PathBuf::from("./data"),
+            static_dir: std::path::PathBuf::from("./static"),
+            git: GitConfig::default(),
+            cors: CorsConfig::default(),
+            rate_limit: RateLimitConfig::default(),
+            auth: AuthConfig {
+                user_header: "Remote-User".to_string(),
+                required: false,
+                default_user: None,
+                dev_user_header: "X-Dev-User".to_string(),
+                verify_url: None,
+            },
+        }
+    }
+
+    #[test]
+    fn validate_rejects_required_auth_without_verify_url() {
+        let mut config = base_config();
+        config.auth.required = true;
+        config.auth.verify_url = None;
+        let result = config.validate();
+        assert!(result.is_err(), "expected error when auth.required=true and verify_url=None");
+        let msg = result.unwrap_err();
+        assert!(msg.contains("TEND_AUTH_VERIFY_URL"), "error should mention TEND_AUTH_VERIFY_URL");
+    }
+
+    #[test]
+    fn validate_accepts_required_auth_with_verify_url() {
+        let mut config = base_config();
+        config.auth.required = true;
+        config.auth.verify_url = Some("http://localhost:9091/api/verify".to_string());
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_auth_not_required_without_verify_url() {
+        let mut config = base_config();
+        config.auth.required = false;
+        config.auth.verify_url = None;
+        assert!(config.validate().is_ok());
     }
 }

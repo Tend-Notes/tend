@@ -40,6 +40,10 @@ async fn main() -> anyhow::Result<()> {
 
     // Load configuration
     let config = Config::load()?;
+    if let Err(msg) = config.validate() {
+        tracing::error!("Configuration error: {}", msg);
+        std::process::exit(1);
+    }
     info!("Loaded configuration");
     info!("Data directory: {}", config.data_dir.display());
 
