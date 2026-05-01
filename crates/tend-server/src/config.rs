@@ -40,6 +40,12 @@ pub struct Config {
     /// Authentication configuration
     #[serde(default)]
     pub auth: AuthConfig,
+
+    /// Maximum request body size in bytes for general API endpoints.
+    /// Override with TEND_REQUEST_BODY_LIMIT. Default: 10 MB.
+    /// The upload endpoint retains its own larger per-route limit (500 MB).
+    #[serde(default = "default_request_body_limit")]
+    pub request_body_limit: usize,
 }
 
 /// Authentication configuration
@@ -348,6 +354,14 @@ fn default_backup_interval() -> u32 {
     30
 }
 
+fn default_request_body_limit() -> usize {
+    // 10 MB default; override with TEND_REQUEST_BODY_LIMIT (bytes)
+    std::env::var("TEND_REQUEST_BODY_LIMIT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10 * 1024 * 1024)
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -359,6 +373,7 @@ impl Default for Config {
             cors: CorsConfig::default(),
             rate_limit: RateLimitConfig::default(),
             auth: AuthConfig::default(),
+            request_body_limit: default_request_body_limit(),
         }
     }
 }
@@ -466,6 +481,13 @@ impl Config {
             warn!("  Rate limit:  DISABLED — no request rate enforcement");
         }
 
+        // Body size limit
+        info!(
+            "  Body limit:  {} bytes ({} MB) — upload endpoint retains 500 MB per-route override",
+            self.request_body_limit,
+            self.request_body_limit / (1024 * 1024)
+        );
+
         // Encryption (runtime-configured, not a server config field)
         info!("  Encryption:  per-garden (configured at runtime)");
 
@@ -530,6 +552,7 @@ mod tests {
                 dev_user_header: "X-Dev-User".to_string(),
                 verify_url: None,
             },
+            request_body_limit: default_request_body_limit(),
         }
     }
 
@@ -601,5 +624,27 @@ mod tests {
         config.auth.required = true;
         config.auth.verify_url = Some("http://localhost:9091/api/verify".to_string());
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn request_body_limit_defaults_to_10mb() {
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        assert_eq!(default_request_body_limit(), 10 * 1024 * 1024);
+    }
+
+    #[test]
+    fn request_body_limit_env_var_overrides_default() {
+        std::env::set_var("TEND_REQUEST_BODY_LIMIT", "20971520"); // 20 MB
+        let limit = default_request_body_limit();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        assert_eq!(limit, 20 * 1024 * 1024);
+    }
+
+    #[test]
+    fn request_body_limit_invalid_env_var_falls_back_to_default() {
+        std::env::set_var("TEND_REQUEST_BODY_LIMIT", "not-a-number");
+        let limit = default_request_body_limit();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
+        assert_eq!(limit, 10 * 1024 * 1024);
     }
 }

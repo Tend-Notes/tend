@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::{routing::get, Router};
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::GovernorLayer;
@@ -47,6 +48,11 @@ async fn main() -> anyhow::Result<()> {
     }
     info!("Loaded configuration");
     config.log_security_posture();
+    info!(
+        "Request body limit: {} bytes ({} MB); upload endpoint retains 500 MB per-route override",
+        config.request_body_limit,
+        config.request_body_limit / (1024 * 1024)
+    );
     info!("Data directory: {}", config.data_dir.display());
 
     // Initialize application state (multi-tenant - no gardens loaded at startup)
@@ -125,8 +131,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build router with API routes (rate-limited) and static files (not rate-limited)
+    // Apply a global body limit to all API endpoints. Per-route limits (e.g. the 500 MB
+    // upload limit) are applied first and override this router-level default.
     let api_router = Router::new()
-        .nest("/api/v1", routes::api_router())
+        .nest(
+            "/api/v1",
+            routes::api_router()
+                .layer(DefaultBodyLimit::max(config.request_body_limit)),
+        )
         .route("/ws", get(ws::ws_handler));
 
     // Apply rate limiting only to API routes if enabled
