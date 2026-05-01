@@ -12,6 +12,8 @@ import {
   selectCompleted,
   type Task,
 } from '../../stores/taskStore';
+import { formatShortDate, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils';
+import { getPriorityDisplay } from '../ui/PriorityPickerPopover';
 
 // '3' = high, '2' = medium, '1' = low, 'none' = sentinel for null priority
 type Priority = '3' | '2' | '1' | 'none';
@@ -46,8 +48,81 @@ const VIEWS: Array<{ key: ViewKey; label: string; selector: (t: Task[]) => Task[
   { key: 'completed',    label: 'Completed',     selector: selectCompleted },
 ];
 
+function emptyMessage(view: ViewKey): string {
+  switch (view) {
+    case 'today':        return 'Nothing due today';
+    case 'overdue':      return 'No overdue tasks';
+    case 'dueSoon':      return 'Nothing due in the next 7 days';
+    case 'startingSoon': return 'Nothing starting in the next 7 days';
+    case 'noDueDate':    return 'Every task has a due date';
+    case 'allActive':    return 'No active tasks';
+    case 'completed':    return 'No completed tasks';
+  }
+}
+
+function TaskRow({ task, onOpen }: { task: Task; onOpen: (pageName: string) => void }) {
+  const priorityInfo = task.priority ? getPriorityDisplay(task.priority) : null;
+  const urgencyDate = task.startDate || task.dueDate;
+  const urgencyStyle = urgencyDate ? getUrgencyStyle(urgencyDate) : null;
+  const daysFromDue = task.dueDate ? getDaysFromDue(task.dueDate) : null;
+
+  return (
+    <li>
+      <button
+        onClick={() => onOpen(task.pageName)}
+        className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-base-01 transition-colors"
+      >
+        <div className="flex items-start gap-2">
+          {priorityInfo && priorityInfo.indicator && (
+            <span
+              className="text-xs font-bold flex-shrink-0"
+              style={{ color: priorityInfo.color }}
+              title={`Priority: ${priorityInfo.label}`}
+            >
+              {priorityInfo.indicator}
+            </span>
+          )}
+          <span className="text-sm flex-1 text-base-05">
+            {task.content || '(empty)'}
+          </span>
+        </div>
+        <div className="flex items-center gap-2 mt-1 ml-0.5">
+          <span className="text-xs text-base-04">
+            {task.pageTitle ?? task.pageName}
+          </span>
+          {task.startDate && (
+            <span
+              className="text-xs"
+              style={urgencyStyle?.style}
+              title={`Start: ${task.startDate}`}
+            >
+              Start: {formatShortDate(task.startDate)}
+            </span>
+          )}
+          {task.dueDate && (
+            <span
+              className="text-xs"
+              style={!task.startDate ? urgencyStyle?.style : undefined}
+              title={
+                daysFromDue !== null && daysFromDue < 0
+                  ? `${Math.abs(daysFromDue)} day${Math.abs(daysFromDue) === 1 ? '' : 's'} overdue`
+                  : daysFromDue === 0
+                  ? 'Due today'
+                  : `Due in ${daysFromDue} day${daysFromDue === 1 ? '' : 's'}`
+              }
+            >
+              Due: {formatShortDate(task.dueDate)}
+            </span>
+          )}
+        </div>
+      </button>
+    </li>
+  );
+}
+
 export function TaskManagerPage() {
   const closeTaskManager = usePageStore((s) => s.closeTaskManager);
+  const navigateToPage = usePageStore((s) => s.navigateToPage);
   const [activeView, setActiveView] = useState<ViewKey>('today');
   const [activePriorities, setActivePriorities] = useState<Set<Priority>>(new Set());
   const tasks = useTaskStore((s) => s.tasks);
@@ -59,6 +134,12 @@ export function TaskManagerPage() {
       else next.add(p);
       return next;
     });
+
+  const viewedTasks = VIEWS.find((v) => v.key === activeView)!.selector(tasks);
+  const filteredTasks =
+    activePriorities.size === 0
+      ? viewedTasks
+      : viewedTasks.filter((t) => activePriorities.has((t.priority ?? 'none') as Priority));
 
   return (
     <div className="flex h-full w-full flex-col bg-base-00 text-base-05">
@@ -121,7 +202,15 @@ export function TaskManagerPage() {
           </div>
         </aside>
         <main className="flex-1 overflow-y-auto">
-          {/* task list — Task 8 */}
+          {filteredTasks.length === 0 ? (
+            <p className="px-2 py-4 text-sm text-base-04">{emptyMessage(activeView)}</p>
+          ) : (
+            <ul className="space-y-1">
+              {filteredTasks.map((t) => (
+                <TaskRow key={t.uuid} task={t} onOpen={navigateToPage} />
+              ))}
+            </ul>
+          )}
         </main>
       </div>
     </div>
