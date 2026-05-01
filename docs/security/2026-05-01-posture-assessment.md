@@ -21,11 +21,11 @@ There are, however, **three classes of issue worth treating as load-bearing**:
 
 2. **Auth misconfiguration is silent.** `TEND_AUTH_REQUIRED=false` produces no startup warning. Combined with point 1, a misconfigured Docker deploy can be world-facing AND auth-disabled with no log signal.
 
-3. **Wikilink protocol filtering is absent at one DOM-write site.** Wikilink targets are URL-encoded but not protocol-filtered before being assigned via `link.href = ...` outside React's JSX (where React's protocol filtering would apply). `[[javascript:alert(1)]]` is the canonical test case; this needs a manual verification before being flagged Critical, but it is the highest-priority finding to confirm.
+3. **Wikilink protocol filtering is absent at one DOM-write site.** Wikilink targets are URL-encoded but not protocol-filtered before being assigned via `link.href = ...` outside React's JSX. **Manually verified 2026-05-01: not exploitable on left-click** — the SPA click handler calls `navigateToPage(target)` and creates a page literally named `"javascript:alert(1)"` rather than letting the browser evaluate the URL. Edge cases remain (middle-click "open in new tab", drag-to-address-bar) where the browser would use the raw `href`; modern browsers block `javascript:` URLs in those contexts but not uniformly. Downgraded to Medium as defense-in-depth.
 
 The remaining issues are real but smaller: rate limiting is global rather than per-IP/per-user, there's no per-endpoint authorization, and the npm audit shows 75 findings that are all dev/build-time (none in the runtime bundle). None of the critical invariants — demo isolation, per-user filesystem boundary, encrypted-garden key scoping — appear breakable from the data we collected.
 
-The triaged plan in §6 has 22 findings: 4 Critical, 6 High, 7 Medium, 5 Low.
+The triaged plan in §6 has 22 findings: 3 Critical, 6 High, 8 Medium, 5 Low (after C1 was manually verified as not exploitable on the dominant click path and downgraded).
 
 ---
 
@@ -189,7 +189,7 @@ The user-stated invariant: *unauthenticated user sees demo, has zero capability 
 | Anonymous → `/ws` direct, **`TEND_AUTH_VERIFY_URL` unset** | WebSocket accepts; user identity falls back to `X-Dev-User` or default user. | ⚠️ Documented as silent in §2.1; real bypass if combined with bypass of reverse proxy. |
 | Anonymous → `/api/v1/health` | "OK" only. No data. | ✅ |
 | Auth'd user A → reads user B's files | Username from `Remote-User` is the only handle. No cross-user code path exists. Filesystem boundary is `users/$username/`. | ✅ |
-| Auth'd user with `[[javascript:alert(1)]]` in their content → views own page | If wikilink-to-href passes the protocol through, executes JS in their own session. **Self-XSS is the floor; if the same content is shared (e.g., via export/import or shared garden) this becomes stored XSS.** | ⚠️ Needs manual verification. |
+| Auth'd user with `[[javascript:alert(1)]]` in their content → views own page | **Verified 2026-05-01: not exploitable on left-click.** SPA click handler calls `navigateToPage(target)` and creates a page literally named `"javascript:alert(1)"`. Browser never evaluates the `href`. Middle-click / drag-to-address-bar paths are edge cases where the raw `href` is used; modern browsers block `javascript:` in most of those, but coverage is not uniform. | ✅ for primary path; defense-in-depth gap. |
 | Auth'd user → drops a CSP-bypassing payload via wikilink | No CSP exists, so nothing to bypass. | ⚠️ Defense-in-depth gap. |
 | Adversarial reverse proxy (compromised) → injects arbitrary `Remote-User` | Server believes the proxy. Adversary becomes any user. | Out of scope: assume reverse proxy is in TCB. |
 
@@ -250,10 +250,11 @@ Effort estimates are agent-hours, including review.
 
 | # | Finding | File:line | Fix sketch | Effort |
 |---|---------|-----------|------------|--------|
-| C1 | Wikilink `link.href` is set without protocol filtering | `wikilink.ts:125-126`, `blockReference.ts:187` | Add a `safeHref(target)` helper that rejects/encodes `javascript:`, `data:`, `vbscript:`, `file:`. Apply at both DOM-write sites and in `renderTaskContent.tsx`. **Manually verify exploitability first.** | 2h |
 | C2 | Dockerfile silently overrides `TEND_HOST=0.0.0.0` | `Dockerfile:110` | Either (a) remove the override and document that operators must set `TEND_HOST=0.0.0.0` themselves, or (b) keep it but log a startup warning + refuse to serve unencrypted to non-loopback unless `TEND_TRUST_PROXY=true` is explicitly set. Prefer (a). | 1h |
 | C3 | No security headers on HTTP responses | `main.rs` (router setup) | Add a `tower_http::set_header` or middleware emitting `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Strict-Transport-Security: max-age=31536000; includeSubDomains` (when `X-Forwarded-Proto: https`), and a strict CSP (`default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; ...`). Test: ensure SPA still loads. | 4h |
 | C4 | WebSocket auth silently disabled when `TEND_AUTH_VERIFY_URL` unset | `ws.rs:78-217` | Refuse to start `/ws` route, OR refuse to start the server, when `auth.required=true` but `verify_url=None`. Loud error at startup. | 1h |
+
+(C1 — wikilink protocol filtering — was verified manually on 2026-05-01 as not exploitable on the dominant click path. Moved to Medium as M8.)
 
 ### High
 
@@ -277,6 +278,7 @@ Effort estimates are agent-hours, including review.
 | M5 | Encrypted gardens leak metadata via filenames | `encryption.rs:11-12` | Documentation finding: surface this in user-facing docs so the threat model is honest. Optional: per-garden filename-encryption mode. | 1h doc / future feature |
 | M6 | Search index plaintext for encrypted gardens (TTL window) | `state.rs:378-419` | Already mitigated with TTL. Document. Optional: encrypt the on-disk index at rest. | 1h doc / future |
 | M7 | `TEND_AUTH_DEFAULT_USER` could become a backdoor | `auth.rs:107-123` | When `auth.required=true`, refuse to read `default_user` even if set. Currently it's just unused, but the value lives in config and could be reached by a future bug. | 1h |
+| M8 | Wikilink `href` not protocol-filtered (defense-in-depth) | `wikilink.ts:125-126`, `blockReference.ts:187`, `renderTaskContent.tsx` | Add a `safeHref(target)` helper that returns `'#'` (or empty) for targets matching `^(javascript|data|vbscript|file):`. Apply at all DOM-write sites. Click-path is already safe via SPA router; this closes middle-click / drag-to-address edge cases. | 1h |
 
 ### Low
 
@@ -297,15 +299,15 @@ A pragmatic single-sprint sequence:
 1. **C4** (WS auth refuses to start when misconfigured) — 1h, no UX impact, high signal.
 2. **C2** (Dockerfile bind + warning) — 1h, deploy-time correctness.
 3. **H1** (startup posture log) — 2h, tells you whether anything else is misconfigured.
-4. **C1** (wikilink protocol filter) — 2h after manual verification of exploitability.
-5. **C3** (security headers) — 4h, defense-in-depth.
-6. **H6** (zip-import resource caps) — 3h, addresses real foot-gun.
-7. **H4** (body limits) — 2h.
-8. **H3** (per-IP rate limiting) — 2h.
-9. **H2** (CORS hardening) — 1h.
+4. **C3** (security headers) — 4h, defense-in-depth (also closes most of M8's edge cases via CSP).
+5. **H6** (zip-import resource caps) — 3h, addresses real foot-gun.
+6. **H4** (body limits) — 2h.
+7. **H3** (per-IP rate limiting) — 2h.
+8. **H2** (CORS hardening) — 1h.
+9. **M8** (wikilink protocol filter) — 1h, defense-in-depth.
 10. **L3** (cargo audit in CI) — 30m, lasting hygiene win.
 
-Total ~18.5h for the load-bearing items. Mediums and other Lows can follow on subsequent branches.
+Total ~17.5h for the load-bearing items. Mediums and other Lows can follow on subsequent branches.
 
 ---
 
