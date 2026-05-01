@@ -178,7 +178,16 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
           </svg>
         </button>
         <span className="text-sm font-medium text-base-05">Tasks</span>
-        <div className="w-4" />
+        <button
+          onClick={() => usePageStore.getState().openTaskManager()}
+          className="rounded p-1 text-base-04 hover:bg-base-01 hover:text-base-06"
+          aria-label="Expand task manager to full view"
+          title="Expand task manager (Alt+Shift+T)"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-5h-4m4 0v4m0-4l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          </svg>
+        </button>
       </div>
 
       {/* Filter and sort controls */}
