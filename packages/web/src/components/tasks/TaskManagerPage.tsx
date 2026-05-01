@@ -13,17 +13,18 @@ import {
   type Task,
 } from '../../stores/taskStore';
 
-type Priority = 'HIGH' | 'MEDIUM' | 'LOW' | 'NONE';
+// '3' = high, '2' = medium, '1' = low, 'none' = sentinel for null priority
+type Priority = '3' | '2' | '1' | 'none';
 
 const PRIORITY_BUTTONS: Array<{
   key: Priority;
   label: string;
   activeBg: string;
 }> = [
-  { key: 'HIGH',   label: 'High',   activeBg: 'color-mix(in srgb, var(--base08) 50%, transparent)' },
-  { key: 'MEDIUM', label: 'Medium', activeBg: 'color-mix(in srgb, var(--base0D) 50%, transparent)' },
-  { key: 'LOW',    label: 'Low',    activeBg: 'color-mix(in srgb, var(--base0B) 50%, transparent)' },
-  { key: 'NONE',   label: 'None',   activeBg: 'var(--base02)' },
+  { key: '3',    label: 'High',   activeBg: 'color-mix(in srgb, var(--base08) 50%, transparent)' },
+  { key: '2',    label: 'Medium', activeBg: 'color-mix(in srgb, var(--base0D) 50%, transparent)' },
+  { key: '1',    label: 'Low',    activeBg: 'color-mix(in srgb, var(--base0B) 50%, transparent)' },
+  { key: 'none', label: 'None',   activeBg: 'var(--base02)' },
 ];
 
 type ViewKey =
