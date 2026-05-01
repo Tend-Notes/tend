@@ -5,7 +5,7 @@ import { useUIStore, type SidebarMode } from '../../stores/uiStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { useTagStore } from '../../stores/tagStore'
-import { todos as todosApi, isDemoMode, type TaskItem } from '../../lib/api'
+import { isDemoMode } from '../../lib/api'
 import { formatDateYMD } from '../../lib/dateUtils'
 import { useTaskStore, selectBadgeCount } from '../../stores/taskStore'
 import { SidebarOptions } from './SidebarOptions'
@@ -67,25 +67,8 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const { recentSheets, recentTags } = useRecentSheetsStore()
   const getTagColors = useTagStore((state) => state.getTagColors)
 
-  // Task counts for navigation panel
-  const [taskItems, setTaskItems] = useState<TaskItem[]>([])
-  const pageVersion = currentPage?.version
-
-  useEffect(() => {
-    let cancelled = false
-    async function fetchTaskCounts() {
-      try {
-        const data = await todosApi.list()
-        if (!cancelled) {
-          setTaskItems(data.tasks)
-        }
-      } catch {
-        // Silently fail - task counts are non-critical
-      }
-    }
-    fetchTaskCounts()
-    return () => { cancelled = true }
-  }, [pageVersion]) // Re-fetch when page version changes (after save)
+  // Task counts for navigation panel — use shared taskStore to avoid duplicate fetch
+  const taskItems = useTaskStore((s) => s.tasks)
 
   const taskCounts = useMemo(() => {
     const todayStr = formatDateYMD(new Date())
