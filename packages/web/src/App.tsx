@@ -158,13 +158,19 @@ function App() {
   // Handle browser back/forward navigation
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
-      const state = event.state as { type: 'page' | 'journal'; name: string } | null
+      const state = event.state as { type: 'page' | 'journal'; name: string; viewingTasks?: boolean } | null
+      if (state?.viewingTasks === true) {
+        usePageStore.setState({ viewingTasks: true })
+        return
+      }
       if (state) {
         if (state.type === 'journal') {
           navigateToJournal(state.name, false)
         } else {
           navigateToPage(state.name, false)
         }
+        // Ensure task manager is dismissed when navigating to a page/journal
+        usePageStore.setState({ viewingTasks: false })
       } else {
         // No state means we're at the initial URL - reinitialize
         initializeFromUrl()
