@@ -44,7 +44,7 @@ regex = "1"
 # Web framework
 axum = { version = "0.8", features = ["ws", "macros"] }
 tower = "0.5"
-tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "fs"] }
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "trace", "fs", "set-header"] }
 tower_governor = "0.8"
 governor = "0.10"
 

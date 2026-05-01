@@ -16,6 +16,7 @@ use tracing::{info, Level};
 mod auth;
 mod config;
 mod error;
+mod headers;
 mod indices;
 mod routes;
 mod state;
@@ -141,8 +142,15 @@ async fn main() -> anyhow::Result<()> {
         .append_index_html_on_directories(true)
         .fallback(ServeFile::new(&index_path));
 
+    let [sec0, sec1, sec2, sec3, sec4, sec5] = headers::security_headers_layer();
     let app = api_router
         .fallback_service(static_service)
+        .layer(sec5)
+        .layer(sec4)
+        .layer(sec3)
+        .layer(sec2)
+        .layer(sec1)
+        .layer(sec0)
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
         .with_state(state);
