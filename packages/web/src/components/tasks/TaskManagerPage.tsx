@@ -14,6 +14,7 @@ import {
 } from '../../stores/taskStore';
 import { formatShortDate, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils';
 import { getPriorityDisplay } from '../ui/PriorityPickerPopover';
+import { renderContentWithWikilinks } from '../../lib/renderTaskContent';
 
 // '3' = high, '2' = medium, '1' = low, 'none' = sentinel for null priority
 type Priority = '3' | '2' | '1' | 'none';
@@ -60,7 +61,17 @@ function emptyMessage(view: ViewKey): string {
   }
 }
 
-function TaskRow({ task, onOpen }: { task: Task; onOpen: (pageName: string) => void }) {
+function TaskRow({
+  task,
+  onOpen,
+  navigateToPage,
+  navigateToJournal,
+}: {
+  task: Task;
+  onOpen: (task: Task) => void;
+  navigateToPage: (name: string) => void;
+  navigateToJournal: (date: string) => void;
+}) {
   const priorityInfo = task.priority ? getPriorityDisplay(task.priority) : null;
   const urgencyDate = task.startDate || task.dueDate;
   const urgencyStyle = urgencyDate ? getUrgencyStyle(urgencyDate) : null;
@@ -69,7 +80,7 @@ function TaskRow({ task, onOpen }: { task: Task; onOpen: (pageName: string) => v
   return (
     <li>
       <button
-        onClick={() => onOpen(task.pageName)}
+        onClick={() => onOpen(task)}
         className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-base-01 transition-colors"
       >
         <div className="flex items-start gap-2">
@@ -83,7 +94,9 @@ function TaskRow({ task, onOpen }: { task: Task; onOpen: (pageName: string) => v
             </span>
           )}
           <span className="text-sm flex-1 text-base-05">
-            {task.content || '(empty)'}
+            {task.content
+              ? renderContentWithWikilinks(task.content, navigateToPage, navigateToJournal)
+              : '(empty)'}
           </span>
         </div>
         <div className="flex items-center gap-2 mt-1 ml-0.5">
@@ -123,6 +136,7 @@ function TaskRow({ task, onOpen }: { task: Task; onOpen: (pageName: string) => v
 export function TaskManagerPage() {
   const closeTaskManager = usePageStore((s) => s.closeTaskManager);
   const navigateToPage = usePageStore((s) => s.navigateToPage);
+  const navigateToJournal = usePageStore((s) => s.navigateToJournal);
   const [activeView, setActiveView] = useState<ViewKey>('today');
   const [activePriorities, setActivePriorities] = useState<Set<Priority>>(new Set());
   const tasks = useTaskStore((s) => s.tasks);
@@ -134,6 +148,14 @@ export function TaskManagerPage() {
       else next.add(p);
       return next;
     });
+
+  const openTask = (task: Task) => {
+    if (task.isJournal && task.journalDate) {
+      navigateToJournal(task.journalDate);
+    } else {
+      navigateToPage(task.pageName);
+    }
+  };
 
   const viewedTasks = VIEWS.find((v) => v.key === activeView)!.selector(tasks);
   const filteredTasks =
@@ -207,7 +229,13 @@ export function TaskManagerPage() {
           ) : (
             <ul className="space-y-1">
               {filteredTasks.map((t) => (
-                <TaskRow key={t.uuid} task={t} onOpen={navigateToPage} />
+                <TaskRow
+                  key={t.uuid}
+                  task={t}
+                  onOpen={openTask}
+                  navigateToPage={navigateToPage}
+                  navigateToJournal={navigateToJournal}
+                />
               ))}
             </ul>
           )}
