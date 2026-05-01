@@ -112,8 +112,19 @@ USER tend
 # HOWEVER, this means the server IS reachable on any published port. In production
 # you MUST front this container with a reverse proxy (nginx, Caddy, Traefil, etc.)
 # that handles TLS and auth before traffic reaches Tend.
-# The server will refuse to start if TEND_HOST is non-loopback AND
+#
+# REQUIRED env vars for production deploys (effective v0.7.0):
+#   TEND_AUTH_VERIFY_URL=https://<your-auth-proxy>/api/verify
+#     Without this, the server refuses to start because WebSocket auth
+#     would otherwise be silently bypassed.
+#
+# The server will also refuse to start if TEND_HOST is non-loopback AND
 # TEND_AUTH_REQUIRED=false, unless TEND_DEV_ALLOW_INSECURE=true is also set.
+#
+# For local-only / single-user testing without a reverse proxy, set:
+#   TEND_AUTH_REQUIRED=false
+#   TEND_AUTH_DEFAULT_USER=<your-username>
+#   TEND_DEV_ALLOW_INSECURE=true   (only when binding to a non-loopback addr)
 ENV TEND_HOST=0.0.0.0
 ENV TEND_PORT=3000
 ENV TEND_BASE_DIR=/data

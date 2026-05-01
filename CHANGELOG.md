@@ -32,6 +32,9 @@ All notable changes to Tend are documented in this file.
 ### Fixed
 - Env-var-touching tests in `crates/tend-server/src/config.rs` now serialize via a shared mutex so they're reliable under `--test-threads=8` (a9e3243)
 
+### Breaking
+- **Docker upgrade requires new env var.** Existing Docker deployments that set `TEND_AUTH_REQUIRED=true` (default) but did NOT set `TEND_AUTH_VERIFY_URL` will refuse to start after upgrade. Set `TEND_AUTH_VERIFY_URL` to your reverse proxy's auth verification endpoint (e.g. `https://authelia.example.com/api/verify`), or for single-user local deploys set `TEND_AUTH_REQUIRED=false` with `TEND_AUTH_DEFAULT_USER=<your-username>`. Closes a silent WebSocket auth bypass; see Dockerfile comments for full setup.
+
 ## [0.1.1] - 2026-03-30
 
 Note: Version was incorrectly labeled 0.1.1. The actual version is v0.1.20260330-203511.
