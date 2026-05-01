@@ -77,6 +77,8 @@ export function selectBadgeCount(tasks: Task[]): number {
   ).length
 }
 
+import { usePageStore } from './pageStore'
+
 // Store
 
 interface TaskState {
@@ -113,3 +115,14 @@ export const useTaskStore = create<TaskState>()(
     },
   }))
 )
+
+let lastPageVersion = usePageStore.getState().currentPage?.version
+usePageStore.subscribe((state) => {
+  const version = state.currentPage?.version
+  if (version !== lastPageVersion) {
+    lastPageVersion = version
+    void useTaskStore.getState().refresh()
+  }
+})
+
+void useTaskStore.getState().refresh()
