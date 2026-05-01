@@ -95,16 +95,16 @@ export function MainContent() {
     )
   }
 
+  if (viewingTasks) {
+    return <TaskManagerPage />
+  }
+
   if (!currentPage) {
     return (
       <main className="flex-1 flex items-center justify-center">
         <div className="text-base-03 text-sm">Select a page to begin</div>
       </main>
     )
-  }
-
-  if (viewingTasks) {
-    return <TaskManagerPage />
   }
 
   // Render template editor when editing a template
