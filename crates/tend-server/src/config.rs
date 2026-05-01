@@ -474,7 +474,7 @@ impl Config {
         // Rate limiting
         if self.rate_limit.enabled {
             info!(
-                "  Rate limit:  {} rps, burst {}",
+                "  Rate limit:  {} rps, burst {} (per-IP)",
                 self.rate_limit.requests_per_second, self.rate_limit.burst_size
             );
         } else {

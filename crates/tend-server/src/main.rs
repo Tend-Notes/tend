@@ -8,6 +8,7 @@ use std::sync::Arc;
 use axum::extract::DefaultBodyLimit;
 use axum::{routing::get, Router};
 use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
 use tower_governor::GovernorLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -114,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
         let governor_config = GovernorConfigBuilder::default()
             .per_millisecond(period_ms)
             .burst_size(burst.get())
+            .key_extractor(SmartIpKeyExtractor)
             .finish()
             .expect("Invalid rate limit configuration");
 
