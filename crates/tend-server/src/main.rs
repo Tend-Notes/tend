@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
     info!("Loaded configuration");
+    config.log_security_posture();
     info!("Data directory: {}", config.data_dir.display());
 
     // Initialize application state (multi-tenant - no gardens loaded at startup)

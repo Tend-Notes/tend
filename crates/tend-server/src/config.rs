@@ -400,6 +400,78 @@ impl Config {
         Ok(())
     }
 
+    /// Emit a clearly-delimited block of log lines describing the effective
+    /// security posture.  Normal/safe values use `tracing::info!`; unusual-but-
+    /// allowed values use `tracing::warn!` so operators see them immediately.
+    pub fn log_security_posture(&self) {
+        use tracing::{info, warn};
+
+        let is_loopback = self.host.is_loopback();
+        let dev_insecure = std::env::var("TEND_DEV_ALLOW_INSECURE")
+            .is_ok_and(|v| v == "true");
+
+        info!("================ Tend security posture ================");
+
+        // Bind address
+        if is_loopback {
+            info!("  Bind:        {}:{}", self.host, self.port);
+        } else {
+            warn!(
+                "  Bind:        {}:{}  (non-loopback — reachable from network)",
+                self.host, self.port
+            );
+        }
+
+        // Auth state
+        if self.auth.required {
+            info!(
+                "  Auth:        required (header: {})",
+                self.auth.user_header
+            );
+        } else if dev_insecure {
+            warn!(
+                "  Auth:        DISABLED — TEND_DEV_ALLOW_INSECURE=true, \
+                 unauthenticated access permitted from network"
+            );
+        } else {
+            warn!(
+                "  Auth:        disabled (loopback only) — no authentication enforced"
+            );
+        }
+
+        // WebSocket verify URL
+        match &self.auth.verify_url {
+            Some(url) => info!("  WS verify:   {}", url),
+            None => info!("  WS verify:   unset (WebSocket connections not auth-verified)"),
+        }
+
+        // CORS mode
+        if self.cors.allowed_origins.is_empty() {
+            info!("  CORS:        same-origin");
+        } else if self.cors.allowed_origins.len() == 1
+            && self.cors.allowed_origins[0] == "*"
+        {
+            warn!("  CORS:        * (permissive — all origins accepted)");
+        } else {
+            info!("  CORS:        {:?}", self.cors.allowed_origins);
+        }
+
+        // Rate limiting
+        if self.rate_limit.enabled {
+            info!(
+                "  Rate limit:  {} rps, burst {}",
+                self.rate_limit.requests_per_second, self.rate_limit.burst_size
+            );
+        } else {
+            warn!("  Rate limit:  DISABLED — no request rate enforcement");
+        }
+
+        // Encryption (runtime-configured, not a server config field)
+        info!("  Encryption:  per-garden (configured at runtime)");
+
+        info!("========================================================");
+    }
+
     /// Load configuration from file and environment
     pub fn load() -> anyhow::Result<Self> {
         // Try to load from config file in base directory
