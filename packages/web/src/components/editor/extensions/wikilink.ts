@@ -16,6 +16,7 @@ import {
   WidgetType,
 } from '@codemirror/view'
 import { Range, Extension } from '@codemirror/state'
+import { safeHref } from '../../../lib/safeHref'
 
 // Current wikilink being typed (for suggestions popup)
 export interface WikilinkState {
@@ -123,7 +124,7 @@ class WikilinkWidget extends WidgetType {
 
   toDOM(): HTMLElement {
     const link = document.createElement('a')
-    link.href = this.buildHref(this.target)
+    link.href = safeHref(this.buildHref(this.target))
     link.className = 'wiki-link'
     // Display only the name after the last slash (for content type paths like person/John Smith)
     const lastSlash = this.target.lastIndexOf('/')
