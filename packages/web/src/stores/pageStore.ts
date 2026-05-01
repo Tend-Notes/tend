@@ -57,6 +57,9 @@ interface PageState {
     hasUnsavedChanges: boolean
   } | null
 
+  // Task manager viewing state
+  viewingTasks: boolean
+
   // Pending cursor position from template creation
   // This is consumed by the editor when it mounts to position the cursor
   pendingCursorPosition: CursorPosition | null
@@ -106,6 +109,9 @@ interface PageState {
   saveImportError: (contentType: string, date?: string) => Promise<void>
   discardImportError: () => Promise<void>
   closeImportErrorEditor: () => void
+  // Task manager actions
+  openTaskManager: () => Promise<void>
+  closeTaskManager: () => void
 }
 
 // Helper to build URL path for content
@@ -268,6 +274,7 @@ export const usePageStore = create<PageState>()(
     pendingConflict: null,
     editingTemplate: null,
     editingImportError: null,
+    viewingTasks: false,
     pendingCursorPosition: null,
     pendingScrollTarget: null,
 
@@ -290,6 +297,7 @@ export const usePageStore = create<PageState>()(
         state.isLoading = true
         state.error = null
         state.pendingDraftRecovery = null
+        state.viewingTasks = false
       })
 
       // Reset sync status when navigating to a new page
@@ -428,6 +436,7 @@ export const usePageStore = create<PageState>()(
         state.isLoading = true
         state.error = null
         state.pendingDraftRecovery = null
+        state.viewingTasks = false
       })
 
       // Reset sync status when navigating to a new page
@@ -1320,6 +1329,20 @@ export const usePageStore = create<PageState>()(
     closeImportErrorEditor: () => {
       set((state) => {
         state.editingImportError = null
+      })
+    },
+
+    openTaskManager: async () => {
+      await get().flushPendingSave()
+      set((state) => {
+        state.viewingTasks = true
+      })
+      window.history.pushState({ viewingTasks: true }, '', '/tasks')
+    },
+
+    closeTaskManager: () => {
+      set((state) => {
+        state.viewingTasks = false
       })
     },
   }))
