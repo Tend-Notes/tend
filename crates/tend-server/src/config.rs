@@ -552,6 +552,9 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn base_config() -> Config {
         Config {
@@ -610,10 +613,11 @@ mod tests {
 
     #[test]
     fn validate_rejects_auth_disabled_on_nonloopback() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
         let mut config = base_config();
         config.host = "0.0.0.0".parse().unwrap();
         config.auth.required = false;
-        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
         let result = config.validate();
         assert!(result.is_err(), "expected error when auth disabled on 0.0.0.0");
         let msg = result.unwrap_err();
@@ -625,6 +629,8 @@ mod tests {
 
     #[test]
     fn validate_accepts_auth_disabled_nonloopback_with_dev_insecure() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
         let mut config = base_config();
         config.host = "0.0.0.0".parse().unwrap();
         config.auth.required = false;
@@ -645,9 +651,10 @@ mod tests {
 
     #[test]
     fn validate_rejects_wildcard_cors_without_dev_insecure() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
         let mut config = base_config();
         config.cors.allowed_origins = vec!["*".to_string()];
-        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
         let result = config.validate();
         assert!(result.is_err(), "expected error for TEND_CORS_ORIGINS=* without dev-insecure");
         let msg = result.unwrap_err();
@@ -659,6 +666,8 @@ mod tests {
 
     #[test]
     fn validate_accepts_wildcard_cors_with_dev_insecure() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
         let mut config = base_config();
         config.cors.allowed_origins = vec!["*".to_string()];
         std::env::set_var("TEND_DEV_ALLOW_INSECURE", "true");
@@ -669,20 +678,25 @@ mod tests {
 
     #[test]
     fn validate_accepts_explicit_cors_origin() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
         let mut config = base_config();
         config.cors.allowed_origins = vec!["https://example.com".to_string()];
-        std::env::remove_var("TEND_DEV_ALLOW_INSECURE");
         assert!(config.validate().is_ok(), "explicit origin should be accepted");
     }
 
     #[test]
     fn request_body_limit_defaults_to_10mb() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
         assert_eq!(default_request_body_limit(), 10 * 1024 * 1024);
     }
 
     #[test]
     fn request_body_limit_env_var_overrides_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
         std::env::set_var("TEND_REQUEST_BODY_LIMIT", "20971520"); // 20 MB
         let limit = default_request_body_limit();
         std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
@@ -691,6 +705,8 @@ mod tests {
 
     #[test]
     fn request_body_limit_invalid_env_var_falls_back_to_default() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
         std::env::set_var("TEND_REQUEST_BODY_LIMIT", "not-a-number");
         let limit = default_request_body_limit();
         std::env::remove_var("TEND_REQUEST_BODY_LIMIT");
