@@ -3,7 +3,7 @@
 
 import { useCallback, useState, useMemo } from 'react'
 import { usePageStore } from '../../stores/pageStore'
-import { useSettingsStore } from '../../stores/settingsStore'
+import { useSettingsStore, usesDate } from '../../stores/settingsStore'
 import type { Page, Block } from '../../types'
 import { Plots } from './plots/Plots'
 import { DatePickerPopover } from '../ui/DatePickerPopover'
@@ -116,8 +116,10 @@ export function ImportErrorEditor({
     [contentTypes, selectedContentType]
   )
 
-  // Determine if the selected content type uses date-based organization
-  const isSaveByDate = selectedContentTypeConfig?.saveByDate || selectedContentType === 'journal'
+  // Determine if the selected content type associates a date with each sheet
+  const isSaveByDate =
+    (selectedContentTypeConfig ? usesDate(selectedContentTypeConfig) : false) ||
+    selectedContentType === 'journal'
 
   // When content type changes, update fileName/title appropriately
   const handleContentTypeChange = useCallback((newContentType: string) => {
@@ -126,7 +128,7 @@ export function ImportErrorEditor({
     // If switching away from saveByDate and user hasn't edited, keep current behavior
     if (!userEditedTitle) {
       const newConfig = contentTypes.find(ct => ct.id === newContentType)
-      if (newConfig?.saveByDate || newContentType === 'journal') {
+      if ((newConfig && usesDate(newConfig)) || newContentType === 'journal') {
         // Use the parsed title for dated content types
         setSheetTitle(parsedFilename.title)
       }

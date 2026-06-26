@@ -3,7 +3,7 @@ import { Command } from 'cmdk'
 import { useEffect, useState, useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
-import { useSettingsStore, type ContentType } from '../../stores/settingsStore'
+import { useSettingsStore, usesDateFolder, type ContentType } from '../../stores/settingsStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useToastStore } from '../../stores/toastStore'
 import * as api from '../../lib/api'
@@ -186,11 +186,11 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     }
 
     // Build the wiki link path based on content type
-    // Format: [[directory/name]] or [[directory/date/name]] for saveByDate types
-    const dateOption = creatingSheet.saveByDate
+    // Format: [[directory/name]] or [[directory/date/name]] for date-foldered types
+    const dateOption = usesDateFolder(creatingSheet)
       ? (useToday ? formatDateYMD(new Date()) : sheetDate)
       : undefined
-    const linkPath = creatingSheet.saveByDate && dateOption
+    const linkPath = usesDateFolder(creatingSheet) && dateOption
       ? `${creatingSheet.directory}/${dateOption}/${sheetName.trim()}`
       : `${creatingSheet.directory}/${sheetName.trim()}`
     const wikiLink = `[[${linkPath}]]`
@@ -406,7 +406,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             const filtered = linkingSheet.sheets
               .filter(s => s.title.toLowerCase().includes(query) || s.name.toLowerCase().includes(query))
               .slice(0, 15)
-            const newSheetPath = linkingSheet.contentType.saveByDate
+            const newSheetPath = usesDateFolder(linkingSheet.contentType)
               ? `${linkingSheet.contentType.directory}/${new Date().toISOString().slice(0, 10)}/${search.trim()}`
               : `${linkingSheet.contentType.directory}/${search.trim()}`
             return (
@@ -516,8 +516,8 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             {sheetError && (
               <div className="text-xs text-base-08">{sheetError}</div>
             )}
-            {/* Date options for saveByDate content types */}
-            {creatingSheet.saveByDate && (
+            {/* Date options for date-foldered content types */}
+            {usesDateFolder(creatingSheet) && (
               <div className="space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input

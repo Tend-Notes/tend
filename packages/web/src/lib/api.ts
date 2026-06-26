@@ -431,7 +431,7 @@ export interface ContentType {
   id: string
   name: string
   directory: string
-  saveByDate: boolean
+  organization: 'flat' | 'dateNamed' | 'dateFoldered'
   template: string
 }
 

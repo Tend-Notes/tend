@@ -681,13 +681,13 @@ export interface ContentType {
   id: string
   name: string
   directory: string
-  saveByDate: boolean
+  organization: 'flat' | 'dateNamed' | 'dateFoldered'
   template: string
 }
 
 const DEFAULT_CONTENT_TYPES: ContentType[] = [
-  { id: 'page', name: 'Pages', directory: 'pages', saveByDate: false, template: '' },
-  { id: 'journal', name: 'Journals', directory: 'journals', saveByDate: true, template: '' },
+  { id: 'page', name: 'Pages', directory: 'pages', organization: 'flat', template: '' },
+  { id: 'journal', name: 'Journals', directory: 'journals', organization: 'dateNamed', template: '' },
 ]
 
 export const contentTypes = {

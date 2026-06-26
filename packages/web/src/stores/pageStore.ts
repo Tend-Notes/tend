@@ -9,7 +9,7 @@ import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 import { useActivityLogStore } from './activityLogStore'
 import { useSyncStatusStore } from './syncStatusStore'
-import { useSettingsStore, type ContentType } from './settingsStore'
+import { useSettingsStore, usesDateFolder, type ContentType } from './settingsStore'
 import { useRecentSheetsStore } from './recentSheetsStore'
 import { formatDateYMD } from '../lib/dateUtils'
 
@@ -221,7 +221,7 @@ function extractSheetName(contentType: ContentType, pageName: string): string {
     return pageName
   }
   const withoutDir = pageName.slice(contentType.directory.length + 1)
-  if (contentType.saveByDate && withoutDir.includes('/')) {
+  if (usesDateFolder(contentType) && withoutDir.includes('/')) {
     // Format: YYYY-MM-DD/name -> return just name
     const slashIndex = withoutDir.indexOf('/')
     return withoutDir.slice(slashIndex + 1)
@@ -232,7 +232,7 @@ function extractSheetName(contentType: ContentType, pageName: string): string {
 // Helper to extract date from page name for saveByDate content types
 // "meeting/2026-01-30/Standup" -> "2026-01-30"
 function extractDateFromPageName(contentType: ContentType, pageName: string): string | undefined {
-  if (!contentType.saveByDate) return undefined
+  if (!usesDateFolder(contentType)) return undefined
   if (!pageName.startsWith(contentType.directory + '/')) return undefined
   const withoutDir = pageName.slice(contentType.directory.length + 1)
   if (withoutDir.includes('/')) {
@@ -316,8 +316,8 @@ export const usePageStore = create<PageState>()(
         contentType = contentTypes.find(ct => ct.directory === possibleDir && ct.id !== 'page' && ct.id !== 'journal')
         if (contentType) {
           const remainder = name.slice(slashIndex + 1)
-          // For saveByDate content types, the path may be: directory/YYYY-MM-DD/name
-          if (contentType.saveByDate) {
+          // For date-foldered content types, the path may be: directory/YYYY-MM-DD/name
+          if (usesDateFolder(contentType)) {
             const dateMatch = remainder.match(/^(\d{4}-\d{2}-\d{2})\/(.+)$/)
             if (dateMatch) {
               sheetDate = dateMatch[1]
@@ -548,8 +548,8 @@ export const usePageStore = create<PageState>()(
           contentType = contentTypes.find(ct => ct.directory === possibleDir && ct.id !== 'page' && ct.id !== 'journal')
           if (contentType) {
             const remainder = name.slice(slashIndex + 1)
-            // For saveByDate content types, the path may be: directory/YYYY-MM-DD/name
-            if (contentType.saveByDate) {
+            // For date-foldered content types, the path may be: directory/YYYY-MM-DD/name
+            if (usesDateFolder(contentType)) {
               const dateMatch = remainder.match(/^(\d{4}-\d{2}-\d{2})\/(.+)$/)
               if (dateMatch) {
                 sheetDate = dateMatch[1]
