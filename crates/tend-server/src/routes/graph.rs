@@ -143,9 +143,9 @@ pub async fn get_graph(
 /// `list_sheets` returns PageMeta with names like "meetings/StandupNotes" or
 /// "meetings/2026-01-23/StandupNotes" (for saveByDate types), but `read_sheet`
 /// expects just "StandupNotes" because it reconstructs the full path internally.
-fn strip_directory_prefix<'a>(name: &'a str, directory: &str, save_by_date: bool) -> &'a str {
+fn strip_directory_prefix<'a>(name: &'a str, directory: &str, date_foldered: bool) -> &'a str {
     if let Some(without_dir) = name.strip_prefix(directory).and_then(|s| s.strip_prefix('/')) {
-        if save_by_date {
+        if date_foldered {
             // Format: YYYY-MM-DD/name - strip the date component too
             if let Some((_date, bare)) = without_dir.split_once('/') {
                 bare
