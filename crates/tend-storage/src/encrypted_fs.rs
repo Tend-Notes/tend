@@ -355,19 +355,9 @@ impl EncryptedFileManager {
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
 
-        // Set the page name: bare for page/journal, directory-prefixed otherwise.
-        page.name = if content_type.name_includes_directory() {
-            if content_type.is_date_foldered() {
-                match resolved_date {
-                    Some(d) => format!("{}/{}/{}", content_type.directory, d.format("%Y-%m-%d"), name),
-                    None => format!("{}/{}", content_type.directory, name),
-                }
-            } else {
-                format!("{}/{}", content_type.directory, name)
-            }
-        } else {
-            name.to_string()
-        };
+        // Canonical page name via the shared name authority (bare for
+        // page/journal, directory-prefixed otherwise).
+        page.name = tend_core::qualify_name(content_type, name, resolved_date);
 
         // Set content type
         page.content_type = content_type.id.clone();
@@ -411,21 +401,9 @@ impl EncryptedFileManager {
             return self.write_file(&path, page).await;
         }
 
-        // Determine the bare sheet name. Directory-prefixed types carry the
-        // "{directory}/" (and optional "{date}/") prefix in page.name; strip it.
-        let sheet_name = if content_type.name_includes_directory()
-            && page.name.starts_with(&content_type.directory)
-            && page.name.contains('/')
-        {
-            let without_dir = &page.name[content_type.directory.len() + 1..];
-            if content_type.is_date_foldered() && without_dir.contains('/') {
-                without_dir.split_once('/').map_or(without_dir, |(_, rest)| rest)
-            } else {
-                without_dir
-            }
-        } else {
-            page.name.as_str()
-        };
+        // Decompose the canonical page.name to the bare sheet name via the
+        // shared name authority.
+        let (sheet_name, _) = tend_core::split_name(content_type, &page.name);
 
         validate_safe_name(sheet_name)?;
         validate_safe_name(&content_type.directory)?;

@@ -536,13 +536,9 @@ impl GardenState {
         ct: &ContentType,
         meta: &PageMeta,
     ) -> Option<Page> {
-        // Page/journal carry a bare name; directory-prefixed types must be stripped
-        // back to the bare sheet name before the unified read.
-        let bare_name = if ct.name_includes_directory() {
-            strip_directory_prefix(&meta.name, &ct.directory, ct.is_date_foldered())
-        } else {
-            &meta.name
-        };
+        // Decompose the canonical name to the bare sheet name via the shared
+        // name authority (handles page/journal/custom uniformly).
+        let (bare_name, _) = tend_core::split_name(ct, &meta.name);
         self.file_manager
             .read_sheet(ct, bare_name, meta.journal_date)
             .await
@@ -668,25 +664,6 @@ impl GardenState {
     pub async fn is_todo_index_populated(&self) -> bool {
         let index = self.todo_index.read().await;
         !index.is_empty()
-    }
-}
-
-/// Strip the directory prefix from a sheet name to get the bare name.
-fn strip_directory_prefix<'a>(name: &'a str, directory: &str, date_foldered: bool) -> &'a str {
-    if let Some(without_dir) = name.strip_prefix(directory).and_then(|s| s.strip_prefix('/')) {
-        if date_foldered {
-            // Format: YYYY-MM-DD/name - strip the date component too
-            if let Some((_date, bare)) = without_dir.split_once('/') {
-                bare
-            } else {
-                without_dir
-            }
-        } else {
-            without_dir
-        }
-    } else {
-        // Name doesn't have the expected prefix; use as-is
-        name
     }
 }
 

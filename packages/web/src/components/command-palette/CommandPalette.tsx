@@ -8,6 +8,7 @@ import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useToastStore } from '../../stores/toastStore'
 import * as api from '../../lib/api'
 import { formatDateYMD } from '../../lib/dateUtils'
+import { qualifyName } from '../../lib/name'
 import type { PageMeta } from '../../types'
 
 interface CommandPaletteProps {
@@ -185,14 +186,11 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       return
     }
 
-    // Build the wiki link path based on content type
-    // Format: [[directory/name]] or [[directory/date/name]] for date-foldered types
+    // Build the canonical wiki link path via the shared name authority.
     const dateOption = usesDateFolder(creatingSheet)
       ? (useToday ? formatDateYMD(new Date()) : sheetDate)
       : undefined
-    const linkPath = usesDateFolder(creatingSheet) && dateOption
-      ? `${creatingSheet.directory}/${dateOption}/${sheetName.trim()}`
-      : `${creatingSheet.directory}/${sheetName.trim()}`
+    const linkPath = qualifyName(creatingSheet, sheetName.trim(), dateOption)
     const wikiLink = `[[${linkPath}]]`
 
     // Close dialog first, then invoke callback after dialog has closed
@@ -406,9 +404,11 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             const filtered = linkingSheet.sheets
               .filter(s => s.title.toLowerCase().includes(query) || s.name.toLowerCase().includes(query))
               .slice(0, 15)
-            const newSheetPath = usesDateFolder(linkingSheet.contentType)
-              ? `${linkingSheet.contentType.directory}/${new Date().toISOString().slice(0, 10)}/${search.trim()}`
-              : `${linkingSheet.contentType.directory}/${search.trim()}`
+            const newSheetPath = qualifyName(
+              linkingSheet.contentType,
+              search.trim(),
+              usesDateFolder(linkingSheet.contentType) ? new Date().toISOString().slice(0, 10) : undefined
+            )
             return (
               <>
                 <Command.Input

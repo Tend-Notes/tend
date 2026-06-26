@@ -9,7 +9,8 @@ import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 import { useActivityLogStore } from './activityLogStore'
 import { useSyncStatusStore } from './syncStatusStore'
-import { useSettingsStore, usesDateFolder, type ContentType } from './settingsStore'
+import { useSettingsStore, type ContentType } from './settingsStore'
+import { parseName, splitName } from '../lib/name'
 import { useRecentSheetsStore } from './recentSheetsStore'
 import { formatDateYMD } from '../lib/dateUtils'
 
@@ -217,29 +218,13 @@ export function shouldSkipFileWatcherReload(): boolean {
 // For saveByDate types: "meeting/2026-01-30/Standup" -> "Standup"
 // For non-saveByDate types: "person/John Smith" -> "John Smith"
 function extractSheetName(contentType: ContentType, pageName: string): string {
-  if (!pageName.startsWith(contentType.directory + '/')) {
-    return pageName
-  }
-  const withoutDir = pageName.slice(contentType.directory.length + 1)
-  if (usesDateFolder(contentType) && withoutDir.includes('/')) {
-    // Format: YYYY-MM-DD/name -> return just name
-    const slashIndex = withoutDir.indexOf('/')
-    return withoutDir.slice(slashIndex + 1)
-  }
-  return withoutDir
+  return splitName(contentType, pageName).bareName
 }
 
-// Helper to extract date from page name for saveByDate content types
+// Helper to extract date from page name for date-foldered content types
 // "meeting/2026-01-30/Standup" -> "2026-01-30"
 function extractDateFromPageName(contentType: ContentType, pageName: string): string | undefined {
-  if (!usesDateFolder(contentType)) return undefined
-  if (!pageName.startsWith(contentType.directory + '/')) return undefined
-  const withoutDir = pageName.slice(contentType.directory.length + 1)
-  if (withoutDir.includes('/')) {
-    // Format: YYYY-MM-DD/name -> return YYYY-MM-DD
-    return withoutDir.split('/')[0]
-  }
-  return undefined
+  return splitName(contentType, pageName).date
 }
 
 // Helper to record sheet access in the recent sheets store
@@ -306,31 +291,15 @@ export const usePageStore = create<PageState>()(
       // Check if this is a content type path (e.g., "person/John Smith" or "meeting/2026-01-23/Name")
       // by looking for a matching content type directory
       const contentTypes = useSettingsStore.getState().contentTypes
-      const slashIndex = name.indexOf('/')
-      let contentType = null
-      let sheetName = name
-      let sheetDate: string | undefined
-
-      if (slashIndex > 0) {
-        const possibleDir = name.slice(0, slashIndex)
-        contentType = contentTypes.find(ct => ct.directory === possibleDir && ct.id !== 'page' && ct.id !== 'journal')
-        if (contentType) {
-          const remainder = name.slice(slashIndex + 1)
-          // For date-foldered content types, the path may be: directory/YYYY-MM-DD/name
-          if (usesDateFolder(contentType)) {
-            const dateMatch = remainder.match(/^(\d{4}-\d{2}-\d{2})\/(.+)$/)
-            if (dateMatch) {
-              sheetDate = dateMatch[1]
-              sheetName = dateMatch[2]
-            } else {
-              // No date in path - use remainder as name
-              sheetName = remainder
-            }
-          } else {
-            sheetName = remainder
-          }
-        }
-      }
+      // Decompose via the shared name authority: a known directory prefix means
+      // a custom type; anything else is a page (the bare fallback).
+      const parsed = parseName(name, contentTypes)
+      const contentType =
+        parsed.contentTypeId === 'page'
+          ? null
+          : contentTypes.find((ct) => ct.id === parsed.contentTypeId) ?? null
+      const sheetName = parsed.bareName
+      const sheetDate = parsed.date
 
       try {
         // Use sheets API for content type paths, pages API for regular pages
@@ -538,31 +507,15 @@ export const usePageStore = create<PageState>()(
         // Check if this is a content type path (e.g., "person/John Smith" or "meeting/2026-01-23/Name")
         // by looking for a matching content type directory
         const contentTypes = useSettingsStore.getState().contentTypes
-        const slashIndex = name.indexOf('/')
-        let contentType = null
-        let sheetName = name
-        let sheetDate: string | undefined
-
-        if (slashIndex > 0) {
-          const possibleDir = name.slice(0, slashIndex)
-          contentType = contentTypes.find(ct => ct.directory === possibleDir && ct.id !== 'page' && ct.id !== 'journal')
-          if (contentType) {
-            const remainder = name.slice(slashIndex + 1)
-            // For date-foldered content types, the path may be: directory/YYYY-MM-DD/name
-            if (usesDateFolder(contentType)) {
-              const dateMatch = remainder.match(/^(\d{4}-\d{2}-\d{2})\/(.+)$/)
-              if (dateMatch) {
-                sheetDate = dateMatch[1]
-                sheetName = dateMatch[2]
-              } else {
-                // No date in path - use remainder as name
-                sheetName = remainder
-              }
-            } else {
-              sheetName = remainder
-            }
-          }
-        }
+        // Decompose via the shared name authority (custom type if a known
+        // directory prefix matches; otherwise a page).
+        const parsed = parseName(name, contentTypes)
+        const contentType =
+          parsed.contentTypeId === 'page'
+            ? null
+            : contentTypes.find((ct) => ct.id === parsed.contentTypeId) ?? null
+        const sheetName = parsed.bareName
+        const sheetDate = parsed.date
 
         // Use sheets API for content type paths, pages API for regular pages
         if (contentType) {

@@ -83,8 +83,10 @@ export function WikilinkSuggestions({ view, state }: WikilinkSuggestionsProps) {
               })
               existingValues.add(value.toLowerCase())
             } else {
-              // Custom content types: use directory prefix
-              const value = `${contentType.directory}/${sheet.name}`
+              // Custom content types: sheet.name is already the canonical name
+              // (e.g. "person/John" or "meeting/2026-01-30/Standup") — use it
+              // directly; do NOT re-prefix the directory.
+              const value = sheet.name
               suggestions.push({
                 title: sheet.title,
                 value,
