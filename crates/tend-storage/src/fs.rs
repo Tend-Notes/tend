@@ -124,12 +124,6 @@ impl FileManager {
         self.root.join("pages").join(format!("{}.md", encode_filename(name)))
     }
 
-    /// Get path to a journal file
-    pub fn journal_path(&self, date: NaiveDate) -> PathBuf {
-        let filename = date.format("%Y-%m-%d.md").to_string();
-        self.root.join("journals").join(filename)
-    }
-
     /// Check if a path is one we're currently writing
     pub async fn is_pending_write(&self, path: &Path) -> bool {
         self.pending_writes.read().await.contains(path)
@@ -376,9 +370,10 @@ impl FileManager {
     /// `id == "journal"` layer.
     pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
         validate_safe_name(name)?;
-        if content_type.name_includes_directory() {
-            validate_safe_name(&content_type.directory)?;
-        }
+        // The directory is interpolated into the on-disk path via sheet_path, and
+        // for page/journal it comes from user-editable config, so always validate
+        // it (defends against `directory = "../.."` traversal).
+        validate_safe_name(&content_type.directory)?;
 
         // For date-named types (journals) the name IS the date.
         let resolved_date = if content_type.is_date_named() {
@@ -460,10 +455,15 @@ impl FileManager {
     pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
         // Journal: the filename is its date (the isolated journal layer).
         if content_type.id == "journal" {
+            validate_safe_name(&content_type.directory)?;
             let d = page
                 .journal_date
                 .unwrap_or_else(|| chrono::Local::now().date_naive());
-            return self.write_file(&self.journal_path(d), page).await;
+            let date_name = d.format("%Y-%m-%d").to_string();
+            // Route through sheet_path so journal writes honor content_type.directory,
+            // matching reads (no read/write directory asymmetry).
+            let path = self.sheet_path(content_type, &date_name, Some(d));
+            return self.write_file(&path, page).await;
         }
 
         // Determine the bare sheet name. Directory-prefixed types carry the
@@ -484,9 +484,7 @@ impl FileManager {
         };
 
         validate_safe_name(sheet_name)?;
-        if content_type.name_includes_directory() {
-            validate_safe_name(&content_type.directory)?;
-        }
+        validate_safe_name(&content_type.directory)?;
 
         // Ensure directory exists
         self.ensure_content_type_dir(content_type, date).await?;
@@ -499,18 +497,18 @@ impl FileManager {
     pub async fn delete_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<(), StorageError> {
         // Journal: the name IS the date (the isolated journal layer).
         let path = if content_type.id == "journal" {
+            validate_safe_name(&content_type.directory)?;
             let journal_date = NaiveDate::parse_from_str(name, "%Y-%m-%d")
                 .map_err(|_| StorageError::NotFound(format!("Invalid journal date: {}", name)))?;
-            let path = self.journal_path(journal_date);
+            let date_name = journal_date.format("%Y-%m-%d").to_string();
+            let path = self.sheet_path(content_type, &date_name, None);
             if !path.exists() {
                 return Err(StorageError::NotFound(format!("Journal not found: {}", name)));
             }
             path
         } else {
             validate_safe_name(name)?;
-            if content_type.name_includes_directory() {
-                validate_safe_name(&content_type.directory)?;
-            }
+            validate_safe_name(&content_type.directory)?;
             let path = self.sheet_path(content_type, name, date);
 
             // Backwards compat: try encoded path first, fall back to raw path
@@ -544,18 +542,10 @@ impl FileManager {
 
     /// Check if a sheet exists.
     pub async fn sheet_exists(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> bool {
-        // Journal: the name IS the date (the isolated journal layer).
-        if content_type.id == "journal" {
-            if let Ok(journal_date) = NaiveDate::parse_from_str(name, "%Y-%m-%d") {
-                return self.journal_path(journal_date).exists();
-            }
-            return false;
-        }
-
         if validate_safe_name(name).is_err() {
             return false;
         }
-        if content_type.name_includes_directory() && validate_safe_name(&content_type.directory).is_err() {
+        if validate_safe_name(&content_type.directory).is_err() {
             return false;
         }
         self.sheet_path(content_type, name, date).exists()
@@ -712,6 +702,29 @@ mod tests {
 
         // A missing custom-flat sheet is a NotFound, not an empty page.
         assert!(fm.read_sheet(&flat_type(), "Nope", None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_tampered_directory_rejected() {
+        let (_temp_dir, fm) = setup().await;
+
+        // A "page" content type whose directory escapes the garden root must be
+        // rejected on every storage method, even though page uses a bare name.
+        let mut evil = ContentType::page();
+        evil.directory = "../escape".to_string();
+        let mut page = Page::new("X");
+        page.add_block(tend_core::Block::new("y"));
+        assert!(fm.write_sheet(&evil, &page, None).await.is_err());
+        assert!(fm.read_sheet(&evil, "X", None).await.is_err());
+        assert!(!fm.sheet_exists(&evil, "X", None).await);
+
+        // Journal writes also validate the directory now (no read/write asymmetry).
+        let mut evil_journal = ContentType::journal();
+        evil_journal.directory = "../escape".to_string();
+        let date = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        let j = Page::new_journal(date);
+        assert!(fm.write_sheet(&evil_journal, &j, Some(date)).await.is_err());
+        assert!(fm.read_sheet(&evil_journal, "2026-01-01", None).await.is_err());
     }
 
     #[tokio::test]

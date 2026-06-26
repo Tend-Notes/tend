@@ -89,11 +89,6 @@ impl EncryptedFileManager {
         &self.root
     }
 
-    /// Get path to an encrypted journal file
-    fn journal_path(&self, date: NaiveDate) -> PathBuf {
-        let filename = date.format(&format!("%Y-%m-%d.{}", ENCRYPTED_EXT)).to_string();
-        self.root.join("journals").join(filename)
-    }
 
     /// Check if a path is one we're currently writing
     pub async fn is_pending_write(&self, path: &Path) -> bool {
@@ -317,9 +312,10 @@ impl EncryptedFileManager {
     /// Read and decrypt a sheet (one code path, driven by `organization`).
     pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
         validate_safe_name(name)?;
-        if content_type.name_includes_directory() {
-            validate_safe_name(&content_type.directory)?;
-        }
+        // The directory is interpolated into the on-disk path via sheet_path, and
+        // for page/journal it comes from user-editable config, so always validate
+        // it (defends against `directory = "../.."` traversal).
+        validate_safe_name(&content_type.directory)?;
 
         // For date-named types (journals) the name IS the date.
         let resolved_date = if content_type.is_date_named() {
@@ -404,10 +400,15 @@ impl EncryptedFileManager {
     pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
         // Journal: the filename is its date (the isolated journal layer).
         if content_type.id == "journal" {
+            validate_safe_name(&content_type.directory)?;
             let d = page
                 .journal_date
                 .unwrap_or_else(|| chrono::Local::now().date_naive());
-            return self.write_file(&self.journal_path(d), page).await;
+            let date_name = d.format("%Y-%m-%d").to_string();
+            // Route through sheet_path so journal writes honor content_type.directory,
+            // matching reads (no read/write directory asymmetry).
+            let path = self.sheet_path(content_type, &date_name, Some(d));
+            return self.write_file(&path, page).await;
         }
 
         // Determine the bare sheet name. Directory-prefixed types carry the
@@ -427,9 +428,7 @@ impl EncryptedFileManager {
         };
 
         validate_safe_name(sheet_name)?;
-        if content_type.name_includes_directory() {
-            validate_safe_name(&content_type.directory)?;
-        }
+        validate_safe_name(&content_type.directory)?;
         self.ensure_content_type_dir(content_type, date).await?;
         let path = self.sheet_path(content_type, sheet_name, date);
         self.write_file(&path, page).await
@@ -439,18 +438,18 @@ impl EncryptedFileManager {
     pub async fn delete_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<(), StorageError> {
         // Journal: the name IS the date (the isolated journal layer).
         let path = if content_type.id == "journal" {
+            validate_safe_name(&content_type.directory)?;
             let journal_date = NaiveDate::parse_from_str(name, "%Y-%m-%d")
                 .map_err(|_| StorageError::NotFound(format!("Invalid journal date: {}", name)))?;
-            let path = self.journal_path(journal_date);
+            let date_name = journal_date.format("%Y-%m-%d").to_string();
+            let path = self.sheet_path(content_type, &date_name, None);
             if !path.exists() {
                 return Err(StorageError::NotFound(format!("Journal not found: {}", name)));
             }
             path
         } else {
             validate_safe_name(name)?;
-            if content_type.name_includes_directory() {
-                validate_safe_name(&content_type.directory)?;
-            }
+            validate_safe_name(&content_type.directory)?;
             let path = self.sheet_path(content_type, name, date);
 
             // Backwards compat: try encoded path first, fall back to raw path
@@ -482,18 +481,10 @@ impl EncryptedFileManager {
 
     /// Check if an encrypted sheet exists.
     pub async fn sheet_exists(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> bool {
-        // Journal: the name IS the date (the isolated journal layer).
-        if content_type.id == "journal" {
-            if let Ok(journal_date) = NaiveDate::parse_from_str(name, "%Y-%m-%d") {
-                return self.journal_path(journal_date).exists();
-            }
-            return false;
-        }
-
         if validate_safe_name(name).is_err() {
             return false;
         }
-        if content_type.name_includes_directory() && validate_safe_name(&content_type.directory).is_err() {
+        if validate_safe_name(&content_type.directory).is_err() {
             return false;
         }
         self.sheet_path(content_type, name, date).exists()
