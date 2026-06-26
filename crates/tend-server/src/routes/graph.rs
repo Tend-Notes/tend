@@ -94,7 +94,7 @@ pub async fn get_graph(
             } else {
                 // sheet_meta.name includes the directory prefix (e.g., "meetings/StandupNotes")
                 // but read_sheet expects just the bare name without the directory prefix.
-                let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.save_by_date);
+                let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.is_date_foldered());
                 garden.file_manager.read_sheet(ct, bare_name, sheet_meta.journal_date).await.ok()
             };
 

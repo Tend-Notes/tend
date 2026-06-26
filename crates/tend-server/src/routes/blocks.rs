@@ -116,7 +116,7 @@ pub async fn get_block(
             match content_type {
                 Some(ct) => {
                     // Check if this is a saveByDate content type with date in path
-                    if ct.save_by_date && parts.len() == 3 {
+                    if ct.is_date_foldered() && parts.len() == 3 {
                         // Format: directory/YYYY-MM-DD/name
                         let date = NaiveDate::parse_from_str(parts[1], "%Y-%m-%d").ok();
                         let name = parts[2];

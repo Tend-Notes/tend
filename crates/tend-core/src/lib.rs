@@ -16,6 +16,6 @@ pub mod serializer;
 
 pub use block::Block;
 pub use block_metadata::{BlockMetadata, ParsedContent};
-pub use content_type::ContentType;
+pub use content_type::{ContentType, Organization};
 pub use error::CoreError;
 pub use page::{Page, PageMeta};

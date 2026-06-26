@@ -542,7 +542,7 @@ impl GardenState {
         } else if ct.id == "page" {
             self.file_manager.read_page(&meta.name).await.ok()
         } else {
-            let bare_name = strip_directory_prefix(&meta.name, &ct.directory, ct.save_by_date);
+            let bare_name = strip_directory_prefix(&meta.name, &ct.directory, ct.is_date_foldered());
             self.file_manager.read_sheet(ct, bare_name, meta.journal_date).await.ok()
         }
     }
@@ -655,7 +655,7 @@ impl GardenState {
                     self.file_manager.read_page(&sheet_meta.name).await.ok()
                 } else {
                     // For custom content types, strip directory prefix
-                    let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.save_by_date);
+                    let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.is_date_foldered());
                     self.file_manager.read_sheet(ct, bare_name, sheet_meta.journal_date).await.ok()
                 };
 

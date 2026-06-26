@@ -385,7 +385,7 @@ impl FileManager {
     /// Otherwise: {directory}/{name}.md
     pub fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.save_by_date {
+        if content_type.is_date_foldered() {
             if let Some(d) = date {
                 dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", encode_filename(name)))
             } else {
@@ -400,7 +400,7 @@ impl FileManager {
     /// Raw (unencoded) sheet path for backwards compatibility with pre-encoding files
     fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.save_by_date {
+        if content_type.is_date_foldered() {
             if let Some(d) = date {
                 dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", name))
             } else {
@@ -414,7 +414,7 @@ impl FileManager {
 
     /// Ensure content type directory exists (and date subdirectory if save_by_date)
     pub async fn ensure_content_type_dir(&self, content_type: &ContentType, date: Option<NaiveDate>) -> Result<(), StorageError> {
-        let dir = if content_type.save_by_date {
+        let dir = if content_type.is_date_foldered() {
             let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
             self.root.join(&content_type.directory).join(d.format("%Y-%m-%d").to_string())
         } else {
@@ -442,7 +442,7 @@ impl FileManager {
 
         let mut sheets = Vec::new();
 
-        if content_type.save_by_date {
+        if content_type.is_date_foldered() {
             // Scan date subdirectories
             let mut date_dirs = tokio::fs::read_dir(&base_dir).await?;
             while let Some(date_entry) = date_dirs.next_entry().await? {
@@ -529,7 +529,7 @@ impl FileManager {
 
         // Set the full page name with directory path for block index storage
         // Format: directory/name or directory/YYYY-MM-DD/name for saveByDate
-        page.name = if content_type.save_by_date {
+        page.name = if content_type.is_date_foldered() {
             if let Some(d) = date {
                 format!("{}/{}/{}", content_type.directory, d.format("%Y-%m-%d"), name)
             } else {
@@ -543,7 +543,7 @@ impl FileManager {
         page.content_type = content_type.id.clone();
 
         // Set journal_date for saveByDate content types (used for building URLs)
-        if content_type.save_by_date {
+        if content_type.is_date_foldered() {
             page.journal_date = date;
         }
 
@@ -571,7 +571,7 @@ impl FileManager {
         let sheet_name = if page.name.starts_with(&content_type.directory) && page.name.contains('/') {
             // Strip directory prefix and optional date
             let without_dir = &page.name[content_type.directory.len() + 1..];
-            if content_type.save_by_date && without_dir.contains('/') {
+            if content_type.is_date_foldered() && without_dir.contains('/') {
                 // Format: YYYY-MM-DD/name - extract name after date
                 without_dir.split_once('/').map_or(without_dir, |(_, rest)| rest)
             } else {
