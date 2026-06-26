@@ -97,6 +97,18 @@ impl ContentType {
             Organization::DateNamed | Organization::DateFoldered
         )
     }
+
+    /// Whether `Page::name` embeds the content type's directory (and date subfolder).
+    ///
+    /// The default `page` type and date-named types (journals) use *bare* names
+    /// (`"My Page"`, `"2026-01-21"`); every other type prefixes its directory
+    /// (`"person/John"`, `"meeting/2026-01-30/Standup"`). This is load-bearing:
+    /// `Page::name` is hashed into the link index and drives URLs, so the bare
+    /// names of page/journal must be preserved. This is the one irreducible
+    /// place where `page` is not a fully generic sheet.
+    pub fn name_includes_directory(&self) -> bool {
+        !(self.id == "page" || self.is_date_named())
+    }
 }
 
 /// On-the-wire / on-disk representation of a [`ContentType`].
