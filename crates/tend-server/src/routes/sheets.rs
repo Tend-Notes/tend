@@ -30,7 +30,7 @@ const CURSOR_MARKER: &str = "{{cursor}}";
 /// - Non-date: `directory/name` (e.g., "person/John Smith")
 /// - SaveByDate: `directory/YYYY-MM-DD/name` (e.g., "meeting/2026-01-30/Standup")
 fn build_sheet_page_name(content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> String {
-    if content_type.save_by_date {
+    if content_type.is_date_foldered() {
         if let Some(d) = date {
             format!("{}/{}/{}", content_type.directory, d.format("%Y-%m-%d"), name)
         } else {
@@ -269,7 +269,7 @@ pub async fn create_sheet(
     let date = parse_date(&req.date)?;
 
     // For save_by_date types, use today if no date provided
-    let date = if content_type.save_by_date && date.is_none() {
+    let date = if content_type.is_date_foldered() && date.is_none() {
         Some(chrono::Local::now().date_naive())
     } else {
         date

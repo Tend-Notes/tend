@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::NaiveDate;
-use tend_core::parser::{is_journal_filename, parse_journal_filename, parse_markdown};
+use tend_core::parser::{parse_journal_filename, parse_markdown};
 use tend_core::serializer::serialize_page;
 use tend_core::{ContentType, Page, PageMeta};
 use tokio::sync::RwLock;
@@ -89,18 +89,6 @@ impl EncryptedFileManager {
         &self.root
     }
 
-    /// Get path to an encrypted page file
-    fn page_path(&self, name: &str) -> PathBuf {
-        self.root
-            .join("pages")
-            .join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
-    }
-
-    /// Get path to an encrypted journal file
-    fn journal_path(&self, date: NaiveDate) -> PathBuf {
-        let filename = date.format(&format!("%Y-%m-%d.{}", ENCRYPTED_EXT)).to_string();
-        self.root.join("journals").join(filename)
-    }
 
     /// Check if a path is one we're currently writing
     pub async fn is_pending_write(&self, path: &Path) -> bool {
@@ -112,160 +100,35 @@ impl EncryptedFileManager {
         Arc::clone(&self.pending_writes)
     }
 
-    /// List all encrypted pages
+    /// List all encrypted pages (thin wrapper over the unified sheet path).
     pub async fn list_pages(&self) -> Result<Vec<PageMeta>, StorageError> {
-        let pages_dir = self.root.join("pages");
-        let mut pages = Vec::new();
-
-        let mut entries = tokio::fs::read_dir(&pages_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-
-            // Check for .md.age extension
-            if let Some(name) = path.file_name().and_then(|s| s.to_str()) {
-                if name.ends_with(&format!(".{}", ENCRYPTED_EXT)) {
-                    let raw_name = name.strip_suffix(&format!(".{}", ENCRYPTED_EXT)).unwrap();
-                    let page_name = decode_filename(raw_name);
-                    match self.read_page(&page_name).await {
-                        Ok(page) => pages.push(PageMeta::from(&page)),
-                        Err(e) => {
-                            debug!("Failed to read encrypted page {}: {}", page_name, e);
-                        }
-                    }
-                }
-            }
-        }
-
-        pages.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
-        Ok(pages)
+        self.list_sheets(&ContentType::page()).await
     }
 
-    /// List all encrypted journals
+    /// List all encrypted journals (thin wrapper over the unified sheet path).
     pub async fn list_journals(&self) -> Result<Vec<PageMeta>, StorageError> {
-        let journals_dir = self.root.join("journals");
-        let mut journals = Vec::new();
-
-        let mut entries = tokio::fs::read_dir(&journals_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                // Check for encrypted journal format: YYYY-MM-DD.md.age
-                if filename.ends_with(&format!(".{}", ENCRYPTED_EXT)) {
-                    let base_name = filename.strip_suffix(".age").unwrap();
-                    if is_journal_filename(base_name) {
-                        if let Some(date) = parse_journal_filename(base_name) {
-                            match self.read_journal(date).await {
-                                Ok(page) => journals.push(PageMeta::from(&page)),
-                                Err(e) => {
-                                    debug!("Failed to read encrypted journal {}: {}", filename, e);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        journals.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
-        Ok(journals)
+        self.list_sheets(&ContentType::journal()).await
     }
 
-    /// Read and decrypt a page by name
+    /// Read and decrypt a page by name (thin wrapper over the unified sheet path).
     pub async fn read_page(&self, name: &str) -> Result<Page, StorageError> {
-        validate_safe_name(name)?;
-        let path = self.page_path(name);
-
-        // Backwards compat: try encoded path first, fall back to raw path
-        let path = if !path.exists() {
-            let raw_path = self.root.join("pages").join(format!("{}.{}", name, ENCRYPTED_EXT));
-            if raw_path.exists() {
-                raw_path
-            } else {
-                return Err(StorageError::NotFound(name.to_string()));
-            }
-        } else {
-            path
-        };
-
-        let encrypted = tokio::fs::read(&path).await?;
-        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
-            EncryptionError::WrongPassphrase => {
-                StorageError::Other("Wrong passphrase".to_string())
-            }
-            _ => StorageError::Other(format!("Decryption failed: {}", e)),
-        })?;
-
-        let mut page = parse_markdown(&content, name)
-            .map_err(|e| StorageError::ParseError(e.to_string()))?;
-
-        // Set content type
-        page.content_type = "page".to_string();
-
-        // Get file metadata for timestamps
-        let metadata = tokio::fs::metadata(&path).await?;
-        if let Ok(modified) = metadata.modified() {
-            page.modified_at = modified.into();
-        }
-        if let Ok(created) = metadata.created() {
-            page.created_at = created.into();
-        }
-
-        Ok(page)
+        self.read_sheet(&ContentType::page(), name, None).await
     }
 
-    /// Read and decrypt a journal by date
+    /// Read and decrypt a journal by date (thin wrapper over the unified sheet path).
     pub async fn read_journal(&self, date: NaiveDate) -> Result<Page, StorageError> {
-        let path = self.journal_path(date);
-
-        if !path.exists() {
-            // Return an empty journal page (not an error)
-            return Ok(Page::new_journal(date));
-        }
-
-        let encrypted = tokio::fs::read(&path).await?;
-        let content = decrypt(&encrypted, &self.passphrase).map_err(|e| match e {
-            EncryptionError::WrongPassphrase => {
-                StorageError::Other("Wrong passphrase".to_string())
-            }
-            _ => StorageError::Other(format!("Decryption failed: {}", e)),
-        })?;
-
         let name = date.format("%Y-%m-%d").to_string();
-        let mut page = parse_markdown(&content, &name)
-            .map_err(|e| StorageError::ParseError(e.to_string()))?;
-
-        // Set journal-specific fields
-        page.content_type = "journal".to_string();
-        page.is_journal = true;
-        page.journal_date = Some(date);
-        page.title = date.format("%A, %B %-d, %Y").to_string();
-
-        // Get file metadata for timestamps
-        let metadata = tokio::fs::metadata(&path).await?;
-        if let Ok(modified) = metadata.modified() {
-            page.modified_at = modified.into();
-        }
-        if let Ok(created) = metadata.created() {
-            page.created_at = created.into();
-        }
-
-        Ok(page)
+        self.read_sheet(&ContentType::journal(), &name, None).await
     }
 
-    /// Encrypt and write a page
+    /// Encrypt and write a page or journal (thin wrapper over the unified sheet path).
     pub async fn write_page(&self, page: &Page) -> Result<(), StorageError> {
-        if !page.is_journal {
-            validate_safe_name(&page.name)?;
-        }
-        let path = if page.is_journal {
-            self.journal_path(page.journal_date.unwrap_or_else(|| {
-                chrono::Local::now().date_naive()
-            }))
+        let content_type = if page.is_journal {
+            ContentType::journal()
         } else {
-            self.page_path(&page.name)
+            ContentType::page()
         };
-
-        self.write_file(&path, page).await
+        self.write_sheet(&content_type, page, page.journal_date).await
     }
 
     /// Encrypt and write a page to a specific path
@@ -306,52 +169,20 @@ impl EncryptedFileManager {
         Ok(())
     }
 
-    /// Delete an encrypted page
+    /// Delete an encrypted page (thin wrapper over the unified sheet path).
     pub async fn delete_page(&self, name: &str) -> Result<(), StorageError> {
-        validate_safe_name(name)?;
-        let path = self.page_path(name);
-
-        // Backwards compat: try encoded path first, fall back to raw path
-        let path = if !path.exists() {
-            let raw_path = self.root.join("pages").join(format!("{}.{}", name, ENCRYPTED_EXT));
-            if raw_path.exists() {
-                raw_path
-            } else {
-                return Err(StorageError::NotFound(name.to_string()));
-            }
-        } else {
-            path
-        };
-
-        let _guard = self.write_lock.read().await;
-
-        {
-            let mut pending = self.pending_writes.write().await;
-            pending.insert(path.clone());
-        }
-
-        tokio::fs::remove_file(&path).await?;
-
-        info!("Deleted encrypted page: {}", name);
-
-        Ok(())
+        self.delete_sheet(&ContentType::page(), name, None).await
     }
 
-    /// Check if an encrypted page exists
+    /// Check if an encrypted page exists (thin wrapper over the unified sheet path).
     pub async fn page_exists(&self, name: &str) -> bool {
-        if validate_safe_name(name).is_err() {
-            return false;
-        }
-        if self.page_path(name).exists() {
-            return true;
-        }
-        // Backwards compat: check raw path
-        self.root.join("pages").join(format!("{}.{}", name, ENCRYPTED_EXT)).exists()
+        self.sheet_exists(&ContentType::page(), name, None).await
     }
 
-    /// Check if an encrypted journal exists
+    /// Check if an encrypted journal exists (thin wrapper over the unified sheet path).
     pub async fn journal_exists(&self, date: NaiveDate) -> bool {
-        self.journal_path(date).exists()
+        let name = date.format("%Y-%m-%d").to_string();
+        self.sheet_exists(&ContentType::journal(), &name, None).await
     }
 
     /// Acquire exclusive lock (for git backup)
@@ -365,7 +196,7 @@ impl EncryptedFileManager {
     /// Get path to an encrypted sheet file for a content type
     fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.save_by_date {
+        if content_type.is_date_foldered() {
             let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
             dir.join(d.format("%Y-%m-%d").to_string())
                 .join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
@@ -377,7 +208,7 @@ impl EncryptedFileManager {
     /// Raw (unencoded) sheet path for backwards compatibility
     fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.save_by_date {
+        if content_type.is_date_foldered() {
             let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
             dir.join(d.format("%Y-%m-%d").to_string())
                 .join(format!("{}.{}", name, ENCRYPTED_EXT))
@@ -388,7 +219,7 @@ impl EncryptedFileManager {
 
     /// Ensure content type directory exists
     pub async fn ensure_content_type_dir(&self, content_type: &ContentType, date: Option<NaiveDate>) -> Result<(), StorageError> {
-        let dir = if content_type.save_by_date {
+        let dir = if content_type.is_date_foldered() {
             let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
             self.root.join(&content_type.directory).join(d.format("%Y-%m-%d").to_string())
         } else {
@@ -398,16 +229,8 @@ impl EncryptedFileManager {
         Ok(())
     }
 
-    /// List all encrypted sheets of a content type
+    /// List all encrypted sheets of a content type (one code path, driven by `organization`).
     pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
-        // Handle built-in types by delegating to existing methods
-        if content_type.id == "page" {
-            return self.list_pages().await;
-        }
-        if content_type.id == "journal" {
-            return self.list_journals().await;
-        }
-
         let base_dir = self.root.join(&content_type.directory);
 
         if !base_dir.exists() {
@@ -417,7 +240,7 @@ impl EncryptedFileManager {
         let mut sheets = Vec::new();
         let ext_suffix = format!(".{}", ENCRYPTED_EXT);
 
-        if content_type.save_by_date {
+        if content_type.is_date_foldered() {
             let mut date_dirs = tokio::fs::read_dir(&base_dir).await?;
             while let Some(date_entry) = date_dirs.next_entry().await? {
                 let date_path = date_entry.path();
@@ -431,8 +254,7 @@ impl EncryptedFileManager {
                     while let Some(entry) = entries.next_entry().await? {
                         let path = entry.path();
                         if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                            if filename.ends_with(&ext_suffix) {
-                                let raw_name = filename.strip_suffix(&ext_suffix).unwrap();
+                            if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
                                 let name = decode_filename(raw_name);
                                 match self.read_sheet(content_type, &name, date).await {
                                     Ok(page) => sheets.push(PageMeta::from(&page)),
@@ -449,50 +271,79 @@ impl EncryptedFileManager {
             let mut entries = tokio::fs::read_dir(&base_dir).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
-                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                    if filename.ends_with(&ext_suffix) {
-                        let raw_name = filename.strip_suffix(&ext_suffix).unwrap();
-                        let name = decode_filename(raw_name);
-                        match self.read_sheet(content_type, &name, None).await {
-                            Ok(page) => sheets.push(PageMeta::from(&page)),
-                            Err(e) => {
-                                debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
-                            }
-                        }
+                let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                if !filename.ends_with(&ext_suffix) {
+                    continue;
+                }
+                // Date-named types (journals): "YYYY-MM-DD.md.age" -> base "YYYY-MM-DD.md".
+                let name = if content_type.is_date_named() {
+                    let Some(base) = filename.strip_suffix(".age") else {
+                        continue;
+                    };
+                    match parse_journal_filename(base) {
+                        Some(d) => d.format("%Y-%m-%d").to_string(),
+                        None => continue,
+                    }
+                } else {
+                    let Some(raw_name) = filename.strip_suffix(&ext_suffix) else {
+                        continue;
+                    };
+                    decode_filename(raw_name)
+                };
+                match self.read_sheet(content_type, &name, None).await {
+                    Ok(page) => sheets.push(PageMeta::from(&page)),
+                    Err(e) => {
+                        debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
                     }
                 }
             }
         }
 
-        sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
+        if content_type.is_date_named() {
+            sheets.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
+        } else {
+            sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
+        }
         Ok(sheets)
     }
 
-    /// Read and decrypt a sheet
+    /// Read and decrypt a sheet (one code path, driven by `organization`).
     pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
-        // Handle built-in types by delegating to existing methods
-        if content_type.id == "page" {
-            return self.read_page(name).await;
-        }
-        if content_type.id == "journal" {
-            let journal_date = NaiveDate::parse_from_str(name, "%Y-%m-%d")
-                .map_err(|_| StorageError::NotFound(format!("Invalid journal date: {}", name)))?;
-            return self.read_journal(journal_date).await;
-        }
         validate_safe_name(name)?;
+        // The directory is interpolated into the on-disk path via sheet_path, and
+        // for page/journal it comes from user-editable config, so always validate
+        // it (defends against `directory = "../.."` traversal).
         validate_safe_name(&content_type.directory)?;
-        let path = self.sheet_path(content_type, name, date);
 
-        // Backwards compat: try encoded path first, fall back to raw path
-        let path = if !path.exists() {
-            let raw_path = self.raw_sheet_path(content_type, name, date);
+        // For date-named types (journals) the name IS the date.
+        let resolved_date = if content_type.is_date_named() {
+            Some(
+                NaiveDate::parse_from_str(name, "%Y-%m-%d")
+                    .map_err(|_| StorageError::NotFound(format!("Invalid date: {}", name)))?,
+            )
+        } else {
+            date
+        };
+
+        let path = self.sheet_path(content_type, name, resolved_date);
+
+        // Backwards compat: try encoded path first, fall back to raw path.
+        let path = if path.exists() {
+            path
+        } else {
+            let raw_path = self.raw_sheet_path(content_type, name, resolved_date);
             if raw_path.exists() {
                 raw_path
+            } else if content_type.id == "journal" {
+                // Journal-only: a missing date is an empty journal, not an error.
+                return Ok(Page::new_journal(
+                    resolved_date.expect("date-named type resolves a date"),
+                ));
             } else {
                 return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
             }
-        } else {
-            path
         };
 
         let encrypted = tokio::fs::read(&path).await?;
@@ -504,24 +355,24 @@ impl EncryptedFileManager {
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
 
-        // Set the full page name with directory path for block index storage
-        // Format: directory/name or directory/YYYY-MM-DD/name for saveByDate
-        page.name = if content_type.save_by_date {
-            if let Some(d) = date {
-                format!("{}/{}/{}", content_type.directory, d.format("%Y-%m-%d"), name)
-            } else {
-                format!("{}/{}", content_type.directory, name)
-            }
-        } else {
-            format!("{}/{}", content_type.directory, name)
-        };
+        // Canonical page name via the shared name authority (bare for
+        // page/journal, directory-prefixed otherwise).
+        page.name = tend_core::qualify_name(content_type, name, resolved_date);
 
         // Set content type
         page.content_type = content_type.id.clone();
 
-        // Set journal_date for saveByDate content types (used for building URLs)
-        if content_type.save_by_date {
-            page.journal_date = date;
+        // Associate a date for date-foldered types (used for building URLs).
+        if content_type.is_date_foldered() {
+            page.journal_date = resolved_date;
+        }
+
+        // Journal-specific fields (the isolated journal layer).
+        if content_type.id == "journal" {
+            let d = resolved_date.expect("journal resolves a date");
+            page.is_journal = true;
+            page.journal_date = Some(d);
+            page.title = d.format("%A, %B %-d, %Y").to_string();
         }
 
         let metadata = tokio::fs::metadata(&path).await?;
@@ -535,27 +386,24 @@ impl EncryptedFileManager {
         Ok(page)
     }
 
-    /// Encrypt and write a sheet
+    /// Encrypt and write a sheet.
     pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
-        // Handle built-in types by delegating to existing methods
-        if content_type.id == "page" || content_type.id == "journal" {
-            return self.write_page(page).await;
+        // Journal: the filename is its date (the isolated journal layer).
+        if content_type.id == "journal" {
+            validate_safe_name(&content_type.directory)?;
+            let d = page
+                .journal_date
+                .unwrap_or_else(|| chrono::Local::now().date_naive());
+            let date_name = d.format("%Y-%m-%d").to_string();
+            // Route through sheet_path so journal writes honor content_type.directory,
+            // matching reads (no read/write directory asymmetry).
+            let path = self.sheet_path(content_type, &date_name, Some(d));
+            return self.write_file(&path, page).await;
         }
 
-        // Extract the sheet name from page.name, which may contain the full path
-        // Format: directory/name or directory/YYYY-MM-DD/name
-        let sheet_name = if page.name.starts_with(&content_type.directory) && page.name.contains('/') {
-            // Strip directory prefix and optional date
-            let without_dir = &page.name[content_type.directory.len() + 1..];
-            if content_type.save_by_date && without_dir.contains('/') {
-                // Format: YYYY-MM-DD/name - extract name after date
-                without_dir.split_once('/').map_or(without_dir, |(_, rest)| rest)
-            } else {
-                without_dir
-            }
-        } else {
-            &page.name
-        };
+        // Decompose the canonical page.name to the bare sheet name via the
+        // shared name authority.
+        let (sheet_name, _) = tend_core::split_name(content_type, &page.name);
 
         validate_safe_name(sheet_name)?;
         validate_safe_name(&content_type.directory)?;
@@ -564,39 +412,35 @@ impl EncryptedFileManager {
         self.write_file(&path, page).await
     }
 
-    /// Delete an encrypted sheet
+    /// Delete an encrypted sheet.
     pub async fn delete_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<(), StorageError> {
-        // Handle built-in types by delegating to existing methods
-        if content_type.id == "page" {
-            return self.delete_page(name).await;
-        }
-        if content_type.id == "journal" {
-            // For journals, the name IS the date (YYYY-MM-DD)
+        // Journal: the name IS the date (the isolated journal layer).
+        let path = if content_type.id == "journal" {
+            validate_safe_name(&content_type.directory)?;
             let journal_date = NaiveDate::parse_from_str(name, "%Y-%m-%d")
                 .map_err(|_| StorageError::NotFound(format!("Invalid journal date: {}", name)))?;
-            let path = self.journal_path(journal_date);
+            let date_name = journal_date.format("%Y-%m-%d").to_string();
+            let path = self.sheet_path(content_type, &date_name, None);
             if !path.exists() {
                 return Err(StorageError::NotFound(format!("Journal not found: {}", name)));
             }
-            tokio::fs::remove_file(&path).await?;
-            info!("Deleted encrypted journal: {}", name);
-            return Ok(());
-        }
-
-        validate_safe_name(name)?;
-        validate_safe_name(&content_type.directory)?;
-        let path = self.sheet_path(content_type, name, date);
-
-        // Backwards compat: try encoded path first, fall back to raw path
-        let path = if !path.exists() {
-            let raw_path = self.raw_sheet_path(content_type, name, date);
-            if raw_path.exists() {
-                raw_path
-            } else {
-                return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
-            }
-        } else {
             path
+        } else {
+            validate_safe_name(name)?;
+            validate_safe_name(&content_type.directory)?;
+            let path = self.sheet_path(content_type, name, date);
+
+            // Backwards compat: try encoded path first, fall back to raw path
+            if path.exists() {
+                path
+            } else {
+                let raw_path = self.raw_sheet_path(content_type, name, date);
+                if raw_path.exists() {
+                    raw_path
+                } else {
+                    return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
+                }
+            }
         };
 
         let _guard = self.write_lock.read().await;
@@ -613,28 +457,16 @@ impl EncryptedFileManager {
         Ok(())
     }
 
-    /// Check if an encrypted sheet exists
+    /// Check if an encrypted sheet exists.
     pub async fn sheet_exists(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> bool {
-        // Handle built-in types
-        if content_type.id == "page" {
-            return self.page_exists(name).await;
-        }
-        if content_type.id == "journal" {
-            // For journals, the name IS the date (YYYY-MM-DD)
-            if let Ok(journal_date) = NaiveDate::parse_from_str(name, "%Y-%m-%d") {
-                return self.journal_path(journal_date).exists();
-            }
+        if validate_safe_name(name).is_err() {
             return false;
         }
-
-        if validate_safe_name(name).is_err() || validate_safe_name(&content_type.directory).is_err() {
+        if validate_safe_name(&content_type.directory).is_err() {
             return false;
         }
-        if self.sheet_path(content_type, name, date).exists() {
-            return true;
-        }
-        // Backwards compat: check raw path
-        self.raw_sheet_path(content_type, name, date).exists()
+        self.sheet_path(content_type, name, date).exists()
+            || self.raw_sheet_path(content_type, name, date).exists()
     }
 }
 

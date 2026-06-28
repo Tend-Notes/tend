@@ -226,7 +226,7 @@ pub async fn stabilize(
                 }
             } else if ct.id == "page" {
                 root.join("pages").join(format!("{}.md", sheet_meta.name))
-            } else if ct.save_by_date {
+            } else if ct.is_date_foldered() {
                 if let Some(date) = sheet_meta.journal_date {
                     // Extract the sheet name from the full path (directory/date/name)
                     let name_part = sheet_meta.name

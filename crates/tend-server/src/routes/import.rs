@@ -878,7 +878,7 @@ pub async fn accept_import_error(
 
     // Determine destination path
     let req_date = req.date.clone();
-    let dest_dir = if content_type.save_by_date {
+    let dest_dir = if content_type.is_date_foldered() {
         let date = req_date.clone().unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
         garden_path.join(&content_type.directory).join(&date)
     } else {
@@ -924,7 +924,7 @@ pub async fn accept_import_error(
         .map_err(|e| AppError::Internal(format!("Failed to parse content: {}", e)))?;
 
     // Determine the date for save_by_date content types
-    let sheet_date = if content_type.save_by_date || content_type.id == "journal" {
+    let sheet_date = if content_type.is_date_foldered() || content_type.id == "journal" {
         req_date
             .as_ref()
             .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())

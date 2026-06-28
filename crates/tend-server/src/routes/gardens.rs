@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use chrono::{DateTime, Utc};
 
-use tend_core::ContentType;
+use tend_core::{ContentType, Organization};
 
 use crate::auth::AuthenticatedUser;
 use crate::config::{base_dir, gardens_json_path, gardens_root, user_gardens_json_path, user_gardens_root};
@@ -884,6 +884,27 @@ pub async fn update_content_types(
             return Err(AppError::BadRequest(format!(
                 "Duplicate content type directory: {}",
                 ct.directory
+            )));
+        }
+    }
+
+    // Validate: id and directory flow into filesystem paths, so they must be safe
+    // (no traversal, control chars, etc.); date-named organization is reserved for
+    // journals (only id=="journal" has defined date-identity behavior).
+    for ct in &req.content_types {
+        tend_storage::fs::validate_safe_name(&ct.id).map_err(|e| {
+            AppError::BadRequest(format!("Invalid content type id '{}': {}", ct.id, e))
+        })?;
+        tend_storage::fs::validate_safe_name(&ct.directory).map_err(|e| {
+            AppError::BadRequest(format!(
+                "Invalid content type directory '{}': {}",
+                ct.directory, e
+            ))
+        })?;
+        if matches!(ct.organization, Organization::DateNamed) && ct.id != "journal" {
+            return Err(AppError::BadRequest(format!(
+                "Content type '{}' may not use date-named organization (reserved for journals)",
+                ct.id
             )));
         }
     }

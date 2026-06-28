@@ -536,15 +536,13 @@ impl GardenState {
         ct: &ContentType,
         meta: &PageMeta,
     ) -> Option<Page> {
-        if ct.id == "journal" {
-            let date = meta.journal_date?;
-            self.file_manager.read_journal(date).await.ok()
-        } else if ct.id == "page" {
-            self.file_manager.read_page(&meta.name).await.ok()
-        } else {
-            let bare_name = strip_directory_prefix(&meta.name, &ct.directory, ct.save_by_date);
-            self.file_manager.read_sheet(ct, bare_name, meta.journal_date).await.ok()
-        }
+        // Decompose the canonical name to the bare sheet name via the shared
+        // name authority (handles page/journal/custom uniformly).
+        let (bare_name, _) = tend_core::split_name(ct, &meta.name);
+        self.file_manager
+            .read_sheet(ct, bare_name, meta.journal_date)
+            .await
+            .ok()
     }
 
     /// Rebuild the link index from all pages, journals, and custom sheets
@@ -641,25 +639,11 @@ impl GardenState {
         let mut todo_index = self.todo_index.write().await;
         todo_index.clear();
 
-        // Index all content types
+        // Index all content types through the unified loader.
         for ct in content_types {
             let sheets = self.file_manager.list_sheets(ct).await?;
             for sheet_meta in &sheets {
-                let page = if ct.id == "journal" {
-                    if let Some(date) = sheet_meta.journal_date {
-                        self.file_manager.read_journal(date).await.ok()
-                    } else {
-                        None
-                    }
-                } else if ct.id == "page" {
-                    self.file_manager.read_page(&sheet_meta.name).await.ok()
-                } else {
-                    // For custom content types, strip directory prefix
-                    let bare_name = strip_directory_prefix(&sheet_meta.name, &ct.directory, ct.save_by_date);
-                    self.file_manager.read_sheet(ct, bare_name, sheet_meta.journal_date).await.ok()
-                };
-
-                if let Some(page) = page {
+                if let Some(page) = self.load_sheet_from_meta(ct, sheet_meta).await {
                     todo_index.index_page(&page, ct, sheet_meta.journal_date);
                 }
             }
@@ -680,25 +664,6 @@ impl GardenState {
     pub async fn is_todo_index_populated(&self) -> bool {
         let index = self.todo_index.read().await;
         !index.is_empty()
-    }
-}
-
-/// Strip the directory prefix from a sheet name to get the bare name.
-fn strip_directory_prefix<'a>(name: &'a str, directory: &str, save_by_date: bool) -> &'a str {
-    if let Some(without_dir) = name.strip_prefix(directory).and_then(|s| s.strip_prefix('/')) {
-        if save_by_date {
-            // Format: YYYY-MM-DD/name - strip the date component too
-            if let Some((_date, bare)) = without_dir.split_once('/') {
-                bare
-            } else {
-                without_dir
-            }
-        } else {
-            without_dir
-        }
-    } else {
-        // Name doesn't have the expected prefix; use as-is
-        name
     }
 }
 

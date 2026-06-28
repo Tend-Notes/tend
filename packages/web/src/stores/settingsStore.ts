@@ -41,13 +41,31 @@ export const TASK_STATUS_SETS: Record<TaskStatusSet, TaskStatus[]> = {
   ],
 }
 
+// How a content type's sheets are named/foldered on disk. Mirrors the backend
+// `Organization` enum (replaces the old `saveByDate` boolean, which couldn't
+// express journals: flat directory, but the filename IS the date).
+export type Organization = 'flat' | 'dateNamed' | 'dateFoldered'
+
 // Content type definition
 export interface ContentType {
   id: string
   name: string
   directory: string
-  saveByDate: boolean // creates date subfolders like meetings/2026-01-19/
+  organization: Organization
   template: string // markdown template for new sheets
+}
+
+// True for types whose sheets live in date subfolders ({dir}/YYYY-MM-DD/name).
+// This is the path-layout check that the old `saveByDate` boolean stood in for.
+export function usesDateFolder(ct: ContentType): boolean {
+  return ct.organization === 'dateFoldered'
+}
+
+// True for any type that associates a date with each sheet (journals are
+// date-named; custom by-date types are date-foldered). Use for "needs a date
+// picker" UI decisions.
+export function usesDate(ct: ContentType): boolean {
+  return ct.organization === 'dateFoldered' || ct.organization === 'dateNamed'
 }
 
 // Default content types
@@ -56,14 +74,14 @@ const DEFAULT_CONTENT_TYPES: ContentType[] = [
     id: 'page',
     name: 'Page',
     directory: 'pages',
-    saveByDate: false,
+    organization: 'flat',
     template: '',
   },
   {
     id: 'journal',
     name: 'Journal',
     directory: 'journals',
-    saveByDate: true, // journals use date as filename (YYYY-MM-DD.md)
+    organization: 'dateNamed', // journals use the date as the filename (YYYY-MM-DD.md)
     template: '',
   },
 ]
@@ -223,6 +241,27 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'tend-settings',
+      version: 1,
+      // v0 stored content types with a `saveByDate` boolean; map it to the
+      // `organization` enum (journals are always date-named).
+      migrate: (persisted: unknown, _version: number) => {
+        const state = persisted as { contentTypes?: unknown }
+        if (state && Array.isArray(state.contentTypes)) {
+          state.contentTypes = state.contentTypes.map((raw) => {
+            const ct = raw as Record<string, unknown>
+            if (ct.organization) return ct
+            const organization: Organization =
+              ct.id === 'journal'
+                ? 'dateNamed'
+                : ct.saveByDate
+                  ? 'dateFoldered'
+                  : 'flat'
+            const { saveByDate: _drop, ...rest } = ct
+            return { ...rest, organization }
+          })
+        }
+        return state
+      },
     }
   )
 )

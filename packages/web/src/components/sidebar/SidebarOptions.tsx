@@ -3,7 +3,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
+import { useSettingsStore, usesDate, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
@@ -1211,7 +1211,7 @@ function ContentTypesSection() {
       id: `custom-${Date.now()}`,
       name: newName,
       directory: newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom',
-      saveByDate: false,
+      organization: 'flat',
       template: '',
     }
     addContentType(newType)
@@ -1359,8 +1359,8 @@ function ContentTypeRow({
                 <label className="text-xs text-base-04 w-16">By date</label>
                 <div className={isBuiltIn ? 'opacity-50' : ''}>
                   <Toggle
-                    checked={type.saveByDate}
-                    onChange={(checked) => !isBuiltIn && onUpdate({ saveByDate: checked })}
+                    checked={usesDate(type)}
+                    onChange={(checked) => !isBuiltIn && onUpdate({ organization: checked ? 'dateFoldered' : 'flat' })}
                   />
                 </div>
                 <span className="text-xs text-base-03">

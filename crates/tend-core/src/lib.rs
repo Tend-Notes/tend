@@ -10,12 +10,14 @@ pub mod block;
 pub mod block_metadata;
 pub mod content_type;
 pub mod error;
+pub mod name;
 pub mod page;
 pub mod parser;
 pub mod serializer;
 
 pub use block::Block;
 pub use block_metadata::{BlockMetadata, ParsedContent};
-pub use content_type::ContentType;
+pub use content_type::{ContentType, Organization};
 pub use error::CoreError;
+pub use name::{parse as parse_name, qualify as qualify_name, split as split_name, ParsedName};
 pub use page::{Page, PageMeta};
