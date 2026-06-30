@@ -1867,9 +1867,12 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       updateCurrentPage(orderedBlocks(next), next.rootBlocks)
 
       if (alsoDeleted > 0) {
+        // Destructive + currently unrecoverable in-app, so keep it on screen
+        // longer. TODO: add an "Undo" action here once structural undo (EF-02)
+        // is wired so this delete can be reversed from the notification.
         useToastStore
           .getState()
-          .addToast(`${alsoDeleted} hidden child ${alsoDeleted === 1 ? 'bullet' : 'bullets'} also deleted`)
+          .addToast(`${alsoDeleted} hidden child ${alsoDeleted === 1 ? 'bullet' : 'bullets'} also deleted`, 8000)
       }
 
       // Activate the merged block at the cursor position
