@@ -958,18 +958,32 @@ const ActiveSeed = forwardRef<SeedHandle, {
 
     if (block.content !== contentRef.current) {
       isExternalUpdate.current = true
-      contentRef.current = block.content
+      const oldText = view.state.doc.toString()
+      const newText = block.content
+      contentRef.current = newText
 
-      const cursorPos = view.state.selection.main.head
+      // Replace only the changed middle (common prefix + suffix preserved) and
+      // let CodeMirror map the current selection through the change, so an
+      // external update (draft restore / conflict reload / another client)
+      // doesn't blow away the caret or undo history (EF-17).
+      let prefix = 0
+      const maxPrefix = Math.min(oldText.length, newText.length)
+      while (prefix < maxPrefix && oldText[prefix] === newText[prefix]) prefix++
+      let suffix = 0
+      const maxSuffix = Math.min(oldText.length - prefix, newText.length - prefix)
+      while (
+        suffix < maxSuffix &&
+        oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]
+      ) {
+        suffix++
+      }
 
-      view.dispatch({
-        changes: {
-          from: 0,
-          to: view.state.doc.length,
-          insert: block.content,
-        },
-        selection: { anchor: Math.min(cursorPos, block.content.length) },
-      })
+      const from = prefix
+      const to = oldText.length - suffix
+      const insert = newText.slice(prefix, newText.length - suffix)
+      if (from !== to || insert.length > 0) {
+        view.dispatch({ changes: { from, to, insert } })
+      }
 
       isExternalUpdate.current = false
     }
