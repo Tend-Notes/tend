@@ -14,6 +14,7 @@ import { useSelectionStore } from '../../../stores/selectionStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useToastStore } from '../../../stores/toastStore'
 import { Seed, SeedBoundaryEvent } from './Seed'
+import { descendantClosure, deleteBlocks, orderedBlocks, type TreeState } from './blockTree'
 import { parseContent, mapRenderedOffsetToSource } from '../contentRenderer'
 import { useBlockFlip } from './useBlockFlip'
 import { useBlockSwipe } from './useBlockSwipe'
@@ -1834,39 +1835,45 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       // Clear selection before modifying DOM
       selection.removeAllRanges()
 
-      // Build the updated block list:
-      // - First block gets merged content
-      // - Middle blocks (fully selected) are removed
-      // - Last block is removed (its remaining text merged into first)
-      const blocks = getAllBlocks().map((b) => ({ ...b, children: [...b.children] }))
+      // Build the new tree from the MODEL (not the DOM):
+      // - the first selected block is kept, with the merged content
+      // - every other selected block AND its full descendant subtree (including
+      //   collapsed/hidden children) is deleted — descendants are never orphaned.
+      const state: TreeState = {
+        blocks: pageBlocksRef.current,
+        rootBlocks: pageRootBlocksRef.current,
+      }
+      const explicitDelete = blockUuids.slice(1)
 
-      // UUIDs to delete: everything except the first block
-      const uuidsToDelete = new Set(blockUuids.slice(1))
-
-      // Update the first block's content
-      const firstBlockObj = blocks.find((b) => b.uuid === startUuid)
-      if (firstBlockObj) {
-        firstBlockObj.content = mergedContent
+      // Count descendants pulled in beyond what was visibly selected, so we can
+      // tell the user that hidden child bullets were also removed.
+      const selectedSet = new Set(blockUuids)
+      let alsoDeleted = 0
+      for (const id of descendantClosure(state, explicitDelete)) {
+        if (!selectedSet.has(id)) alsoDeleted++
       }
 
-      // Remove deleted blocks from their parents' children arrays
-      for (const uuid of uuidsToDelete) {
-        const block = blocks.find((b) => b.uuid === uuid)
-        if (!block) continue
-
-        if (block.parentUuid) {
-          const parent = blocks.find((b) => b.uuid === block.parentUuid)
-          if (parent) {
-            parent.children = parent.children.filter((id) => id !== uuid)
-          }
-        }
+      // Apply the merged content to the kept first block, then delete the rest
+      // (deleteBlocks expands to the full descendant closure internally).
+      const merged: TreeState = {
+        blocks: {
+          ...state.blocks,
+          [startUuid]: { ...state.blocks[startUuid], content: mergedContent },
+        },
+        rootBlocks: state.rootBlocks,
       }
+      const next = deleteBlocks(merged, explicitDelete)
 
-      // Filter out deleted blocks and compute new rootBlocks
-      const updatedBlocks = blocks.filter((b) => !uuidsToDelete.has(b.uuid))
-      const newRootBlocks = pageRootBlocksRef.current.filter((id) => !uuidsToDelete.has(id))
+      updateCurrentPage(orderedBlocks(next), next.rootBlocks)
 
-      updateCurrentPage(updatedBlocks, newRootBlocks)
+      if (alsoDeleted > 0) {
+        // Destructive + currently unrecoverable in-app, so keep it on screen
+        // longer. TODO: add an "Undo" action here once structural undo (EF-02)
+        // is wired so this delete can be reversed from the notification.
+        useToastStore
+          .getState()
+          .addToast(`${alsoDeleted} hidden child ${alsoDeleted === 1 ? 'bullet' : 'bullets'} also deleted`, 8000)
+      }
 
       // Activate the merged block at the cursor position
       focusBlock(startUuid, cursorPos)
@@ -1875,7 +1882,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     } catch {
       return false
     }
-  }, [getAllBlocks, updateCurrentPage, focusBlock])
+  }, [updateCurrentPage, focusBlock])
 
   // Keyboard handler: when all seeds are dormant and the container has focus,
   // activate a block on keypress so the user can start typing immediately.
@@ -2117,38 +2124,8 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         }
       }
 
-      // Build flat fragments for text/plain (as before, for backward compat)
-      const fragments: string[] = []
-      // Track the minimum depth among selected blocks for relative indentation
-      let minDepth = Infinity
-      for (const uuid of blockUuids) {
-        const block = pageBlocksRef.current[uuid]
-        if (block && block.depth < minDepth) minDepth = block.depth
-      }
-
-      for (let i = 0; i < blockUuids.length; i++) {
-        const uuid = blockUuids[i]
-        const block = pageBlocksRef.current[uuid]
-        if (!block) continue
-
-        let content = block.content
-        const isFirst = i === 0
-        const isLast = i === blockUuids.length - 1
-
-        if (isFirst && isLast) {
-          // Should not happen (same block case caught above), but handle defensively
-        } else if (isFirst) {
-          content = content.slice(firstSourceOffset)
-        } else if (isLast && lastSourceOffset !== null) {
-          content = content.slice(0, lastSourceOffset)
-        }
-
-        // Emit indented markdown list format for text/plain so external
-        // paste targets preserve tree structure readably.
-        const relativeDepth = block.depth - minDepth
-        const indent = '  '.repeat(relativeDepth)
-        fragments.push(`${indent}- ${content}`)
-      }
+      // (text/plain is built from the copied tree below, after the nested
+      // structure — including collapsed descendants — has been assembled.)
 
       // ── Build text/tend-blocks JSON for lossless internal round-trip ──
       // CopiedBlock is a recursive tree structure carrying content + children.
@@ -2171,16 +2148,16 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         if (sliceEnd !== undefined) content = content.slice(0, sliceEnd)
 
         const children: CopiedBlock[] = []
+        // Include ALL model children (not only DOM-selected ones) so collapsed
+        // and otherwise-hidden descendants are copied, not silently dropped.
         for (const childUuid of block.children) {
-          if (selectedSet.has(childUuid)) {
-            const isLastBlock = childUuid === blockUuids[blockUuids.length - 1]
-            const child = buildCopiedTree(
-              childUuid,
-              undefined,
-              isLastBlock && lastSourceOffset !== null ? lastSourceOffset : undefined,
-            )
-            if (child) children.push(child)
-          }
+          const isLastBlock = childUuid === blockUuids[blockUuids.length - 1]
+          const child = buildCopiedTree(
+            childUuid,
+            undefined,
+            isLastBlock && lastSourceOffset !== null ? lastSourceOffset : undefined,
+          )
+          if (child) children.push(child)
         }
         return { content, children }
       }
@@ -2224,6 +2201,14 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         markHandled(uuid)
       }
 
+      // text/plain: indented markdown list mirroring the copied tree, so
+      // external paste targets get the full structure incl. collapsed children.
+      const fragments: string[] = []
+      const emitPlain = (node: CopiedBlock, depth: number) => {
+        fragments.push(`${'  '.repeat(depth)}- ${node.content}`)
+        for (const c of node.children) emitPlain(c, depth + 1)
+      }
+      for (const root of copiedBlocks) emitPlain(root, 0)
       const markdownContent = fragments.join('\n')
 
       const tendBlocksJson = JSON.stringify(copiedBlocks)
