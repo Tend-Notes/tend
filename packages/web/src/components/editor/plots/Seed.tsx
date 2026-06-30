@@ -59,8 +59,8 @@ export type SeedBoundaryEvent =
   | { type: 'shift-tab' }
   | { type: 'alt-arrow-up' }
   | { type: 'alt-arrow-down' }
-  | { type: 'shift-arrow-up'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
-  | { type: 'shift-arrow-down'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number } }
+  | { type: 'shift-arrow-up'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number }; lineHeight: number }
+  | { type: 'shift-arrow-down'; anchorCoords: { x: number; y: number }; headCoords: { x: number; y: number }; lineHeight: number }
   | { type: 'paste-multiline'; lines: string[]; textBefore: string; textAfter: string; rawPastedLines: string[]; tendBlocks?: string }
 
 export interface SeedHandle {
@@ -578,6 +578,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
               type: 'shift-arrow-up',
               anchorCoords: { x: anchorRect.left, y: (anchorRect.top + anchorRect.bottom) / 2 },
               headCoords: { x: headRect.left, y: (headRect.top + headRect.bottom) / 2 },
+              lineHeight: headRect.bottom - headRect.top,
             })
             return true
           },
@@ -600,6 +601,7 @@ const ActiveSeed = forwardRef<SeedHandle, {
               type: 'shift-arrow-down',
               anchorCoords: { x: anchorRect.left, y: (anchorRect.top + anchorRect.bottom) / 2 },
               headCoords: { x: headRect.left, y: (headRect.top + headRect.bottom) / 2 },
+              lineHeight: headRect.bottom - headRect.top,
             })
             return true
           },
@@ -624,6 +626,50 @@ const ActiveSeed = forwardRef<SeedHandle, {
             const pos = view.state.selection.main.head
             const hasSelection = !view.state.selection.main.empty
             if (pos === view.state.doc.length && !hasSelection) {
+              onBoundaryEventRef.current({ type: 'delete-at-end' })
+              return true
+            }
+            return false
+          },
+        },
+        // Word-delete at a block boundary should merge like plain Backspace/Delete
+        // (EF-09). When the caret is at the edge with no selection, fire the merge
+        // event; otherwise return false so CodeMirror performs the in-block word
+        // delete. Mod = Ctrl/Cmd, Alt = Option.
+        {
+          key: 'Mod-Backspace',
+          run: (view) => {
+            if (view.state.selection.main.empty && view.state.selection.main.head === 0) {
+              onBoundaryEventRef.current({ type: 'backspace-at-start' })
+              return true
+            }
+            return false
+          },
+        },
+        {
+          key: 'Alt-Backspace',
+          run: (view) => {
+            if (view.state.selection.main.empty && view.state.selection.main.head === 0) {
+              onBoundaryEventRef.current({ type: 'backspace-at-start' })
+              return true
+            }
+            return false
+          },
+        },
+        {
+          key: 'Mod-Delete',
+          run: (view) => {
+            if (view.state.selection.main.empty && view.state.selection.main.head === view.state.doc.length) {
+              onBoundaryEventRef.current({ type: 'delete-at-end' })
+              return true
+            }
+            return false
+          },
+        },
+        {
+          key: 'Alt-Delete',
+          run: (view) => {
+            if (view.state.selection.main.empty && view.state.selection.main.head === view.state.doc.length) {
               onBoundaryEventRef.current({ type: 'delete-at-end' })
               return true
             }

@@ -30,13 +30,16 @@ export interface WikilinkState {
   coords: { top: number; left: number }
 }
 
-// Regex to find wikilinks: [[content]]
-const WIKILINK_REGEX = /\[\[([^\]]+)\]\]/g
+// Regex to find wikilinks: [[target]] or [[target|display alias]]
+const WIKILINK_REGEX = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g
 
 interface WikilinkSpan {
   from: number
   to: number
+  // Navigation/link target (the part before any "|")
   target: string
+  // Optional display alias (the part after "|"), shown instead of the target
+  display?: string
 }
 
 /**
@@ -51,6 +54,7 @@ function findWikilinks(doc: string): WikilinkSpan[] {
       from: match.index,
       to: match.index + match[0].length,
       target: match[1],
+      display: match[2],
     })
   }
   return results
@@ -117,7 +121,8 @@ class WikilinkWidget extends WidgetType {
   constructor(
     readonly target: string,
     readonly buildHref: (target: string) => string,
-    readonly onNavigate?: (target: string) => void
+    readonly onNavigate?: (target: string) => void,
+    readonly display?: string
   ) {
     super()
   }
@@ -126,9 +131,14 @@ class WikilinkWidget extends WidgetType {
     const link = document.createElement('a')
     link.href = safeHref(this.buildHref(this.target))
     link.className = 'wiki-link'
-    // Display only the name after the last slash (for content type paths like person/John Smith)
-    const lastSlash = this.target.lastIndexOf('/')
-    link.textContent = lastSlash >= 0 ? this.target.slice(lastSlash + 1) : this.target
+    // Prefer an explicit alias ([[target|alias]]); otherwise show the name after
+    // the last slash (for content-type paths like person/John Smith).
+    if (this.display) {
+      link.textContent = this.display
+    } else {
+      const lastSlash = this.target.lastIndexOf('/')
+      link.textContent = lastSlash >= 0 ? this.target.slice(lastSlash + 1) : this.target
+    }
 
     // Prevent CodeMirror from handling mousedown (which would move cursor)
     link.addEventListener('mousedown', (e) => {
@@ -150,7 +160,7 @@ class WikilinkWidget extends WidgetType {
   }
 
   eq(other: WikilinkWidget): boolean {
-    return other.target === this.target
+    return other.target === this.target && other.display === this.display
   }
 }
 
@@ -183,7 +193,7 @@ function buildDecorations(
       // Cursor outside - replace entire wikilink with widget (actual <a> tag)
       decorations.push(
         Decoration.replace({
-          widget: new WikilinkWidget(wl.target, buildHref, onNavigate),
+          widget: new WikilinkWidget(wl.target, buildHref, onNavigate, wl.display),
         }).range(wl.from, wl.to)
       )
     } else {

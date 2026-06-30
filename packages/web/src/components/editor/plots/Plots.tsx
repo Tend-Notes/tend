@@ -899,7 +899,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
             // Extend from the anchor toward the previous block by finding a position
             // one line-height above the head coordinates
-            const lineHeight = 24 // approximate line height
+            const lineHeight = event.lineHeight // real line height from the source block
             const targetY = headCoordsUp.y - lineHeight
             let extNode: Node | null = null
             let extOffset = 0
@@ -958,7 +958,7 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
             // Extend from the anchor toward the next block by finding a position
             // one line-height below the head coordinates
-            const lineHeight = 24 // approximate line height
+            const lineHeight = event.lineHeight // real line height from the source block
             const targetY = headCoordsDown.y + lineHeight
             let extNode: Node | null = null
             let extOffset = 0
