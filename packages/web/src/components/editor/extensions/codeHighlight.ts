@@ -142,8 +142,10 @@ export function codeHighlightExtension(language: string): Extension {
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet
+      lastContent: string
 
       constructor(view: EditorView) {
+        this.lastContent = view.state.doc.toString()
         this.decorations = this.buildDecorations(view, language)
       }
 
@@ -175,6 +177,13 @@ export function codeHighlightExtension(language: string): Extension {
 
       update(update: ViewUpdate) {
         if (update.docChanged) {
+          // Skip the (expensive) re-highlight when the text is unchanged — e.g.
+          // edits that net to the same content, or non-content doc transactions
+          // (EF-19). A full debounce/incremental pass is deferred as it risks
+          // flicker/mis-highlighting across viewport boundaries.
+          const content = update.state.doc.toString()
+          if (content === this.lastContent) return
+          this.lastContent = content
           this.decorations = this.buildDecorations(update.view, language)
         }
       }
