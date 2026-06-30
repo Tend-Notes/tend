@@ -284,48 +284,63 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // Apply pending focus after render
   // Track the current focus target to cancel stale polls
   const currentFocusTargetRef = useRef<string | null>(null)
+  // Observer that waits for the target block's editor node to be inserted.
+  const focusObserverRef = useRef<MutationObserver | null>(null)
 
   useEffect(() => {
     // Clear the pending cursor position after render - the seed has consumed it
     // via initialCursorPosition prop during this render cycle
     pendingCursorPositionRef.current = undefined
 
-    if (pendingFocusRef.current) {
-      const { uuid, position } = pendingFocusRef.current
-      pendingFocusRef.current = null
+    if (!pendingFocusRef.current) return
+    const { uuid, position } = pendingFocusRef.current
+    pendingFocusRef.current = null
 
-      // Set current target - any previous poll will see this changed and stop
-      currentFocusTargetRef.current = uuid
+    // Set current target - any in-flight observer will see this changed and stop.
+    currentFocusTargetRef.current = uuid
+    focusObserverRef.current?.disconnect()
+    focusObserverRef.current = null
 
-      // Poll for the block element to appear in the DOM
-      // This handles rapid block creation where React hasn't rendered yet
-      let attempts = 0
-      const maxAttempts = 10 // Give up after ~100ms
+    // Returns true once the focus is resolved (delivered OR superseded), so the
+    // caller can stop waiting.
+    const tryFocus = (): boolean => {
+      // A newer focus request superseded this one — stop.
+      if (currentFocusTargetRef.current !== uuid) return true
 
-      const tryFocus = () => {
-        // Cancel if a newer focus was requested
-        if (currentFocusTargetRef.current !== uuid) {
-          return
-        }
+      const blockEl = document.querySelector(`[data-block-id="${uuid}"]`)
+      const editorEl = blockEl?.querySelector('[data-seed-editor]') as HTMLElement | null
+      if (!editorEl) return false
 
-        const blockEl = document.querySelector(`[data-block-id="${uuid}"]`)
-        const editorEl = blockEl?.querySelector('[data-seed-editor]') as HTMLElement
-
-        if (editorEl) {
-          const event = new CustomEvent('seed-focus', {
-            detail: { position },
-            bubbles: false,
-          })
-          editorEl.dispatchEvent(event)
-        } else if (attempts < maxAttempts) {
-          attempts++
-          requestAnimationFrame(tryFocus)
-        }
-      }
-
-      requestAnimationFrame(tryFocus)
+      editorEl.dispatchEvent(
+        new CustomEvent('seed-focus', { detail: { position }, bubbles: false })
+      )
+      return true
     }
+
+    // Fast path: on a normal render the editor node is already in the DOM.
+    if (tryFocus()) return
+
+    // Otherwise wait for the exact moment the node is inserted instead of polling
+    // a fixed number of frames and silently giving up on a slow render (EF-16).
+    const root = containerRef.current ?? document.body
+    const observer = new MutationObserver(() => {
+      if (tryFocus()) {
+        observer.disconnect()
+        if (focusObserverRef.current === observer) focusObserverRef.current = null
+      }
+    })
+    focusObserverRef.current = observer
+    observer.observe(root, { childList: true, subtree: true })
+
+    // Safety valve: a target that never appears must not leak the observer.
+    window.setTimeout(() => {
+      observer.disconnect()
+      if (focusObserverRef.current === observer) focusObserverRef.current = null
+    }, 2000)
   })
+
+  // Disconnect any in-flight focus observer on unmount.
+  useEffect(() => () => focusObserverRef.current?.disconnect(), [])
 
   // ─────────────────────────────────────────────────────────────────────────
   // TREE OPERATIONS
