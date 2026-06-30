@@ -7,7 +7,7 @@
 // Seeds handle text editing and report boundary events back to Plots.
 // Code fence detection scans blocks to identify ``` regions for visual treatment.
 
-import { useMemo, useEffect, useCallback, useState, useRef } from 'react'
+import { useMemo, useEffect, useCallback, useState, useRef, memo } from 'react'
 import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
@@ -139,8 +139,232 @@ function BlockSwipeWrapper({
   )
 }
 
+// Detect markdown header and extract level (1-6)
+function getHeaderLevel(content: string): number | null {
+  const match = content.match(/^(#{1,6})\s/)
+  return match ? match[1].length : null
+}
+
+// Detect if block content is purely a block reference ((uuid)) — used to hide
+// the bullet when the chain icon replaces it.
+function isBlockReference(content: string): boolean {
+  const trimmed = content.trim()
+  return /^\(\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)\)$/i.test(trimmed)
+}
+
+// Shared stable empty set so rows bail on the memo check when nothing is
+// multi-selected (the common case, including while typing).
+const EMPTY_SELECTED: ReadonlySet<string> = new Set()
+
+// The per-block callbacks BlockRow needs. Held behind a ref so BlockRow gets a
+// stable identity (the impls close over page.blocks and change every keystroke;
+// calling through the ref always hits the latest without changing the prop).
+interface RowHandlers {
+  focusBlock: (uuid: string, position: 'start' | 'end' | number) => void
+  handleIndent: (uuid: string) => void
+  handleOutdent: (uuid: string) => void
+  handleToggleCollapse: (uuid: string) => void
+  handleBulletContextMenu: (e: React.MouseEvent, uuid: string) => void
+  handleBlockChange: (uuid: string, content: string) => void
+  handleBoundaryEvent: (uuid: string, event: SeedBoundaryEvent) => void
+  handleBlockPropertyChange: (uuid: string, key: string, value: string | null) => void
+  setSelectedUuid: (uuid: string) => void
+  setFocusedBlock: (uuid: string) => void
+  clearSelection: () => void
+  setActiveBlockUuid: (uuid: string | null) => void
+  setLastFocusedBlockUuid: (uuid: string) => void
+}
+
+interface BlockRowProps {
+  uuid: string
+  depth: number
+  readonly: boolean
+  activeBlockUuid: string | null
+  selectedUuid: string | null
+  selectedSet: ReadonlySet<string>
+  codeFenceMap: Map<string, CodeBlockInfo>
+  // In template-editing mode the page isn't in the store; read blocks from here
+  // instead of subscribing. Undefined (and stable) on the normal store path.
+  blocksOverride?: Record<string, Block>
+  handlersRef: React.MutableRefObject<RowHandlers>
+  pendingCursorPositionRef: React.MutableRefObject<number | undefined>
+  pendingSelectionAnchorRef: React.MutableRefObject<{ mousedownX: number; mousedownY: number } | null>
+}
+
+// One block's row, recursive over its children. Memoized so that typing in one
+// block re-renders only that block: on the store path each row subscribes to its
+// own block, and every other prop is referentially stable across a keystroke, so
+// React.memo bails for all the rows that didn't change (EF-07). Depth is threaded
+// through recursion (from the tree, never the stored block.depth — EF-13).
+const BlockRow = memo(function BlockRow({
+  uuid,
+  depth,
+  readonly,
+  activeBlockUuid,
+  selectedUuid,
+  selectedSet,
+  codeFenceMap,
+  blocksOverride,
+  handlersRef,
+  pendingCursorPositionRef,
+  pendingSelectionAnchorRef,
+}: BlockRowProps) {
+  // Hooks must run unconditionally; the subscription is harmless (undefined) in
+  // template mode, where blocksOverride supplies the block instead.
+  const subscribed = usePageStore((s) => s.currentPage?.blocks[uuid])
+  const block = blocksOverride ? blocksOverride[uuid] : subscribed
+  if (!block) return null
+
+  const h = handlersRef.current
+  const hasChildren = block.children.length > 0
+  const isSelected = block.uuid === selectedUuid
+  const isInMultiSelection = selectedSet.has(block.uuid)
+
+  const headerLevel = getHeaderLevel(block.content)
+  const isHeader = headerLevel !== null
+
+  const codeInfo = codeFenceMap.get(block.uuid)
+  const isCodeBlock = codeInfo?.isCodeBlock ?? false
+  const isCodeStart = codeInfo?.isStart ?? false
+  const isCodeEnd = codeInfo?.isEnd ?? false
+  const codeLanguage = codeInfo?.language ?? ''
+
+  const isBlockRef = isBlockReference(block.content)
+
+  const isTask = TASK_STATUS_REGEX.test(block.content)
+  const taskStatusMatch = isTask ? block.content.match(TASK_STATUS_REGEX) : null
+  const isTaskCompleted = taskStatusMatch?.[1] === 'DONE' || taskStatusMatch?.[1] === 'NEVER'
+
+  const hideBullet = isHeader || isCodeBlock || isBlockRef
+
+  const containerClasses = [
+    'block-container',
+    isInMultiSelection ? 'block-container--selected' : '',
+    isHeader ? 'block-container--header' : '',
+    isHeader ? `block-container--header-${headerLevel}` : '',
+    isCodeBlock ? 'block-container--code' : '',
+    isCodeStart ? 'block-container--code-start' : '',
+    isCodeEnd ? 'block-container--code-end' : '',
+    isBlockRef ? 'block-container--block-ref' : '',
+  ].filter(Boolean).join(' ')
+
+  // Code blocks break out of nesting indentation to be full width. Each level
+  // adds 36px (ml-6=24px + pl-3=12px).
+  const codeBlockStyle = isCodeBlock && depth > 0
+    ? { marginLeft: `calc(-${depth} * 36px)` }
+    : undefined
+
+  return (
+    <div
+      key={block.uuid}
+      className={containerClasses}
+      style={codeBlockStyle}
+      data-block-id={block.uuid}
+      data-code-language={isCodeBlock ? codeLanguage : undefined}
+      onClick={(e) => {
+        const target = e.target as HTMLElement
+        if (target.closest('[data-seed-editor]')) {
+          e.stopPropagation()
+          return
+        }
+        const sel = window.getSelection()
+        if (sel && !sel.isCollapsed) return
+        h.focusBlock(block.uuid, 'end')
+      }}
+    >
+      <BlockSwipeWrapper
+        onIndent={() => h.handleIndent(block.uuid)}
+        onOutdent={() => h.handleOutdent(block.uuid)}
+      >
+        <div className="block flex items-start py-0.5">
+          {!hideBullet && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                if (hasChildren) h.handleToggleCollapse(block.uuid)
+              }}
+              onContextMenu={(e) => h.handleBulletContextMenu(e, block.uuid)}
+              className={`bullet mt-[0.55rem] ${
+                hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
+              }`}
+            />
+          )}
+
+          <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''} ${isTask ? 'task-block-container' : ''}`}>
+            <Seed
+              block={block}
+              isSelected={isSelected}
+              onChange={(content) => h.handleBlockChange(block.uuid, content)}
+              onBoundaryEvent={(event) => h.handleBoundaryEvent(block.uuid, event)}
+              onFocus={() => {
+                h.setSelectedUuid(block.uuid)
+                h.setFocusedBlock(block.uuid)
+                h.clearSelection()
+              }}
+              readonly={readonly}
+              isCodeBlock={isCodeBlock}
+              codeLanguage={codeLanguage}
+              isActive={block.uuid === activeBlockUuid}
+              onActivate={(cursorOffset) => {
+                h.setActiveBlockUuid(block.uuid)
+                h.setSelectedUuid(block.uuid)
+                h.setFocusedBlock(block.uuid)
+                h.setLastFocusedBlockUuid(block.uuid)
+                h.clearSelection()
+                pendingCursorPositionRef.current = cursorOffset
+              }}
+              onDeactivate={(info) => {
+                if (info) {
+                  pendingSelectionAnchorRef.current = info
+                }
+                h.setActiveBlockUuid(null)
+              }}
+              initialCursorPosition={
+                block.uuid === activeBlockUuid
+                  ? pendingCursorPositionRef.current
+                  : undefined
+              }
+            />
+            {isTask && !readonly && (
+              <TaskMetadata
+                blockUuid={block.uuid}
+                properties={block.properties}
+                onPropertyChange={(key, value) => h.handleBlockPropertyChange(block.uuid, key, value)}
+                isCompleted={isTaskCompleted}
+                taskContent={block.content}
+              />
+            )}
+          </div>
+        </div>
+      </BlockSwipeWrapper>
+
+      {!block.collapsed && hasChildren && (
+        <div className="block-children ml-6 pl-3 border-l border-base-02">
+          {block.children.map((childUuid) => (
+            <BlockRow
+              key={childUuid}
+              uuid={childUuid}
+              depth={depth + 1}
+              readonly={readonly}
+              activeBlockUuid={activeBlockUuid}
+              selectedUuid={selectedUuid}
+              selectedSet={selectedSet}
+              codeFenceMap={codeFenceMap}
+              blocksOverride={blocksOverride}
+              handlersRef={handlersRef}
+              pendingCursorPositionRef={pendingCursorPositionRef}
+              pendingSelectionAnchorRef={pendingSelectionAnchorRef}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+})
+
 export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   const updateCurrentPageFromStore = usePageStore((state) => state.updateCurrentPage)
+  const updateBlockContent = usePageStore((state) => state.updateBlockContent)
   const consumePendingCursorPosition = usePageStore((state) => state.consumePendingCursorPosition)
   const consumePendingScrollTarget = usePageStore((state) => state.consumePendingScrollTarget)
 
@@ -215,27 +439,31 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     return result
   }, [page.blocks, page.rootBlocks])
 
-  // Derived depth per block, computed from the tree (never the stored
-  // block.depth field), so layout can't desync from structure (EF-13).
-  const blockDepths = useMemo(() => {
-    const map = new Map<string, number>()
-    const traverse = (uuids: string[], depth: number) => {
-      for (const uuid of uuids) {
-        const block = page.blocks[uuid]
-        if (block) {
-          map.set(uuid, depth)
-          if (block.children.length > 0) traverse(block.children, depth + 1)
-        }
-      }
-    }
-    traverse(page.rootBlocks, 0)
-    return map
-  }, [page.blocks, page.rootBlocks])
+  // Per-block depth is threaded through BlockRow recursion (computed from the
+  // tree, never the stored block.depth — EF-13), so no page-wide depth map is
+  // needed here.
 
-  // Detect code fence regions for visual treatment
+  // Detect code fence regions for visual treatment.
+  // Only blocks containing a ``` marker can affect code regions, so gate the
+  // expensive regex-based detection on a cheap signature of just those blocks
+  // (and their order). A keystroke in a fence-free block leaves the signature
+  // unchanged and reuses the previous map instead of re-scanning every block
+  // with three regexes — the per-keystroke lag on large pages (EF-07).
+  const fenceSignature = useMemo(() => {
+    let sig = ''
+    for (const uuid of flatBlockOrder) {
+      const content = page.blocks[uuid]?.content
+      if (content && content.includes('```')) sig += uuid + '=' + content + '|'
+    }
+    return sig
+  }, [flatBlockOrder, page.blocks])
+
   const codeFenceMap = useMemo(() => {
     return detectCodeFences(flatBlockOrder, page.blocks)
-  }, [flatBlockOrder, page.blocks])
+    // detectCodeFences only depends on fence-bearing blocks + order, captured by
+    // fenceSignature; flatBlockOrder/page.blocks are read fresh when it does run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fenceSignature])
 
   // Convert blocks object to array for saving (deterministic tree order)
   const getAllBlocks = useCallback((): Block[] => {
@@ -358,12 +586,19 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
   const handleBlockChange = useCallback(
     (uuid: string, content: string) => {
+      // Fast path: a plain text edit patches one block in the store without
+      // rebuilding the whole tree/array on every keystroke (EF-07). Template
+      // editing (onBlocksChange) has no store, so fall back to the array path.
+      if (!onBlocksChange) {
+        updateBlockContent(uuid, content)
+        return
+      }
       const blocks = getAllBlocks().map((b) =>
         b.uuid === uuid ? { ...b, content } : b
       )
-      updateCurrentPage(blocks)
+      onBlocksChange(blocks)
     },
-    [getAllBlocks, updateCurrentPage]
+    [getAllBlocks, onBlocksChange, updateBlockContent]
   )
 
   const handleBlockPropertyChange = useCallback(
@@ -1443,175 +1678,43 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // RENDER
   // ─────────────────────────────────────────────────────────────────────────
 
-  // Detect markdown header and extract level (1-6)
-  const getHeaderLevel = (content: string): number | null => {
-    const match = content.match(/^(#{1,6})\s/)
-    return match ? match[1].length : null
+  // Stable identity for the per-row callbacks: the impls below close over
+  // page.blocks and change every keystroke, so we hand BlockRow a ref and update
+  // its .current each render. BlockRow calls through the ref, so its props stay
+  // referentially stable and unchanged rows bail the memo while typing (EF-07).
+  const handlersRef = useRef<RowHandlers>(null as unknown as RowHandlers)
+  handlersRef.current = {
+    focusBlock,
+    handleIndent,
+    handleOutdent,
+    handleToggleCollapse,
+    handleBulletContextMenu,
+    handleBlockChange,
+    handleBoundaryEvent,
+    handleBlockPropertyChange,
+    setSelectedUuid,
+    setFocusedBlock,
+    clearSelection,
+    setActiveBlockUuid,
+    setLastFocusedBlockUuid,
   }
 
-  // Detect if block content is purely a block reference ((uuid))
-  // Used to hide the bullet when the chain icon replaces it
-  const isBlockReference = (content: string): boolean => {
-    const trimmed = content.trim()
-    // Match exactly: ((uuid)) where uuid is 8-4-4-4-12 hex format
-    return /^\(\([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\)\)$/i.test(trimmed)
-  }
+  // Set of blocks inside the active multi-block selection. When nothing is
+  // multi-selected (the common case, and always while typing) this returns a
+  // shared stable empty set, so the row prop doesn't churn per keystroke even
+  // though flatBlockOrder is rebuilt each render.
+  const selectedSet = useMemo<ReadonlySet<string>>(() => {
+    if (!anchorUuid || !focusUuid) return EMPTY_SELECTED
+    const set = new Set<string>()
+    for (const uuid of flatBlockOrder) {
+      if (isInSelection(uuid, flatBlockOrder)) set.add(uuid)
+    }
+    return set
+  }, [anchorUuid, focusUuid, flatBlockOrder, isInSelection])
 
-  const renderBlock = (block: Block) => {
-    const blockChildren = block.children
-      .map((childUuid) => page.blocks[childUuid])
-      .filter(Boolean)
-    const hasChildren = block.children.length > 0
-    const isSelected = block.uuid === selectedUuid
-    const isInMultiSelection = isInSelection(block.uuid, flatBlockOrder)
-
-    // Check if block is a header
-    const headerLevel = getHeaderLevel(block.content)
-    const isHeader = headerLevel !== null
-
-    // Check if block is part of a code fence
-    const codeInfo = codeFenceMap.get(block.uuid)
-    const isCodeBlock = codeInfo?.isCodeBlock ?? false
-    const isCodeStart = codeInfo?.isStart ?? false
-    const isCodeEnd = codeInfo?.isEnd ?? false
-    const codeLanguage = codeInfo?.language ?? ''
-
-    // Check if block is a block reference (content is purely ((uuid)))
-    // Hide bullet because the chain icon replaces it
-    const isBlockRef = isBlockReference(block.content)
-
-    // Check if block is a task (TODO, DOING, DONE, NOW, LATER, NEVER)
-    const isTask = TASK_STATUS_REGEX.test(block.content)
-    const taskStatusMatch = isTask ? block.content.match(TASK_STATUS_REGEX) : null
-    const isTaskCompleted = taskStatusMatch?.[1] === 'DONE' || taskStatusMatch?.[1] === 'NEVER'
-
-    // Hide bullet for headers, code blocks, and block references
-    const hideBullet = isHeader || isCodeBlock || isBlockRef
-
-    // Build class names for the block container
-    const containerClasses = [
-      'block-container',
-      isInMultiSelection ? 'block-container--selected' : '',
-      isHeader ? 'block-container--header' : '',
-      isHeader ? `block-container--header-${headerLevel}` : '',
-      isCodeBlock ? 'block-container--code' : '',
-      isCodeStart ? 'block-container--code-start' : '',
-      isCodeEnd ? 'block-container--code-end' : '',
-      isBlockRef ? 'block-container--block-ref' : '',
-    ].filter(Boolean).join(' ')
-
-    // Code blocks need to break out of nesting indentation to be full width.
-    // Each nesting level adds 36px (ml-6=24px + pl-3=12px). Depth comes from the
-    // tree (blockDepths), not the stored block.depth, so it can't desync (EF-13).
-    const derivedDepth = blockDepths.get(block.uuid) ?? 0
-    const codeBlockStyle = isCodeBlock && derivedDepth > 0
-      ? { marginLeft: `calc(-${derivedDepth} * 36px)` }
-      : undefined
-
-    return (
-      <div
-        key={block.uuid}
-        className={containerClasses}
-        style={codeBlockStyle}
-        data-block-id={block.uuid}
-        data-code-language={isCodeBlock ? codeLanguage : undefined}
-        onClick={(e) => {
-          // Let CodeMirror handle clicks inside the editor completely
-          const target = e.target as HTMLElement
-          if (target.closest('[data-seed-editor]')) {
-            // Inside the editor - stop propagation but do NOTHING else
-            // CodeMirror handles focus and cursor placement natively
-            e.stopPropagation()
-            return
-          }
-          // Don't activate if there's an active text selection (backward drag-select)
-          const sel = window.getSelection()
-          if (sel && !sel.isCollapsed) return
-          // Outside editor (e.g., container padding) - focus at end
-          focusBlock(block.uuid, 'end')
-        }}
-      >
-        <BlockSwipeWrapper
-          onIndent={() => handleIndent(block.uuid)}
-          onOutdent={() => handleOutdent(block.uuid)}
-        >
-          <div className="block flex items-start py-0.5">
-            {/* Bullet - hidden for headers, code blocks, and block references */}
-            {!hideBullet && (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  if (hasChildren) handleToggleCollapse(block.uuid)
-                }}
-                onContextMenu={(e) => handleBulletContextMenu(e, block.uuid)}
-                className={`bullet mt-[0.55rem] ${
-                  hasChildren ? (block.collapsed ? 'bullet--collapsed' : '') : ''
-                }`}
-              />
-            )}
-
-            {/* Seed - editable content */}
-            <div className={`flex-1 ${isCodeBlock ? 'code-content' : ''} ${isTask ? 'task-block-container' : ''}`}>
-              <Seed
-                block={block}
-                isSelected={isSelected}
-                onChange={(content) => handleBlockChange(block.uuid, content)}
-                onBoundaryEvent={(event) => handleBoundaryEvent(block.uuid, event)}
-                onFocus={() => {
-                  // Update selection state when CodeMirror gets focus
-                  // This happens AFTER CodeMirror handles the click, not during
-                  setSelectedUuid(block.uuid)
-                  setFocusedBlock(block.uuid)
-                  clearSelection()
-                }}
-                readonly={readonly}
-                isCodeBlock={isCodeBlock}
-                codeLanguage={codeLanguage}
-                isActive={block.uuid === activeBlockUuid}
-                onActivate={(cursorOffset) => {
-                  setActiveBlockUuid(block.uuid)
-                  setSelectedUuid(block.uuid)
-                  setFocusedBlock(block.uuid)
-                  setLastFocusedBlockUuid(block.uuid)
-                  clearSelection()
-                  // Store cursor offset for initialCursorPosition on next render
-                  pendingCursorPositionRef.current = cursorOffset
-                }}
-                onDeactivate={(info) => {
-                  if (info) {
-                    pendingSelectionAnchorRef.current = info
-                  }
-                  setActiveBlockUuid(null)
-                }}
-                initialCursorPosition={
-                  block.uuid === activeBlockUuid
-                    ? pendingCursorPositionRef.current
-                    : undefined
-                }
-              />
-              {/* Task metadata - shown below task content */}
-              {isTask && !readonly && (
-                <TaskMetadata
-                  blockUuid={block.uuid}
-                  properties={block.properties}
-                  onPropertyChange={(key, value) => handleBlockPropertyChange(block.uuid, key, value)}
-                  isCompleted={isTaskCompleted}
-                  taskContent={block.content}
-                />
-              )}
-            </div>
-          </div>
-        </BlockSwipeWrapper>
-
-        {/* Children */}
-        {!block.collapsed && blockChildren.length > 0 && (
-          <div className="block-children ml-6 pl-3 border-l border-base-02">
-            {blockChildren.map((child) => renderBlock(child))}
-          </div>
-        )}
-      </div>
-    )
-  }
+  // Template editing has its own page (not in the store); rows read blocks from
+  // it directly. The normal store path passes undefined so rows subscribe.
+  const blocksOverride = onBlocksChange ? page.blocks : undefined
 
   // Create initial empty block if page is empty (only on initial render)
   const hasCreatedInitialBlock = useRef(false)
@@ -2391,7 +2494,22 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
         onClick={handleContainerClick}
         onKeyDown={handleContainerKeyDown}
       >
-        {rootBlocks.map((block) => renderBlock(block))}
+        {rootBlocks.map((block) => (
+          <BlockRow
+            key={block.uuid}
+            uuid={block.uuid}
+            depth={0}
+            readonly={readonly}
+            activeBlockUuid={activeBlockUuid}
+            selectedUuid={selectedUuid}
+            selectedSet={selectedSet}
+            codeFenceMap={codeFenceMap}
+            blocksOverride={blocksOverride}
+            handlersRef={handlersRef}
+            pendingCursorPositionRef={pendingCursorPositionRef}
+            pendingSelectionAnchorRef={pendingSelectionAnchorRef}
+          />
+        ))}
       </div>
 
       {/* Block context menu for copying block references */}
