@@ -102,8 +102,11 @@ export function parseContent(content: string): ContentToken[] {
     { regex: /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/, type: 'wikilink' as const },
     // Tags (#tag)
     { regex: /(?:^|\s)(#[a-zA-Z][a-zA-Z0-9_-]*)/, type: 'tag' as const },
-    // URLs (http:// or https://)
-    { regex: /(https?:\/\/[^\s<>[\]]+)/, type: 'url' as const },
+    // URLs (http:// or https://). Stop at formatting delimiters (* and `) so a
+    // URL doesn't swallow adjacent markup like **bold** or `code` (EF-18,
+    // partial — escape handling / trailing-punctuation trimming are left for the
+    // parser rewrite).
+    { regex: /(https?:\/\/[^\s<>[\]*`]+)/, type: 'url' as const },
   ]
 
   while (remaining.length > 0) {
