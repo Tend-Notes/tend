@@ -1925,13 +1925,8 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     // the editor natively so CJK / dead-key input isn't corrupted (EF-05).
     if (e.nativeEvent.isComposing || e.key === 'Process') return
 
-    // Handle Delete/Backspace with active cross-block selection
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (handleCrossBlockDelete()) {
-        e.preventDefault()
-        return
-      }
-    }
+    // (Cross-block Delete/Backspace is handled by a document-level listener
+    // below, so it works regardless of where focus landed after the selection.)
 
     // Don't intercept modifier-only keys, Tab, or Escape
     if (e.key === 'Tab' || e.key === 'Escape' || e.key === 'Shift' ||
@@ -2258,6 +2253,23 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     container.addEventListener('copy', handleCopy)
     return () => container.removeEventListener('copy', handleCopy)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cross-block Delete/Backspace, document-level so it works regardless of where
+  // focus landed. A keyboard (Shift+Arrow) selection deactivates the seed and
+  // leaves focus on <body>, not the container, so a container-scoped handler
+  // missed it (only mouse drag-select worked). This is guarded to act only when
+  // no block is being edited; handleCrossBlockDelete itself returns false unless
+  // a genuine multi-block selection exists, so ordinary Delete is untouched.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return
+      if (readonly || e.isComposing) return
+      if (activeBlockUuidRef.current !== null) return
+      if (handleCrossBlockDelete()) e.preventDefault()
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [handleCrossBlockDelete, readonly])
 
   // ─────────────────────────────────────────────────────────────────────────
   // CROSS-BLOCK SELECTION FOCUS
