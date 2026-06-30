@@ -813,6 +813,14 @@ export const usePageStore = create<PageState>()(
         saveTimeout = null
       }
 
+      // Also cancel the pending debounced draft write — otherwise it fires after
+      // this flush with a stale serverVersion and triggers a spurious draft
+      // recovery prompt on the next load (EF-12).
+      if (draftTimeout) {
+        clearTimeout(draftTimeout)
+        draftTimeout = null
+      }
+
       // If there's pending save data, save it immediately
       if (pendingSaveData) {
         const { pageName, blocks, contentType } = pendingSaveData
