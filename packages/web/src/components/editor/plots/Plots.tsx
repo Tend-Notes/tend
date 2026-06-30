@@ -1920,6 +1920,11 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     if (flatBlockOrder.length === 0) return
     if (readonly) return
 
+    // During IME composition the keydown carries a placeholder ("Process") and
+    // the composed character isn't final yet. Don't intercept it — let it reach
+    // the editor natively so CJK / dead-key input isn't corrupted (EF-05).
+    if (e.nativeEvent.isComposing || e.key === 'Process') return
+
     // Handle Delete/Backspace with active cross-block selection
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (handleCrossBlockDelete()) {
