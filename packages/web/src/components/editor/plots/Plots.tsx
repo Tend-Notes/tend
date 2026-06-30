@@ -215,6 +215,23 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
     return result
   }, [page.blocks, page.rootBlocks])
 
+  // Derived depth per block, computed from the tree (never the stored
+  // block.depth field), so layout can't desync from structure (EF-13).
+  const blockDepths = useMemo(() => {
+    const map = new Map<string, number>()
+    const traverse = (uuids: string[], depth: number) => {
+      for (const uuid of uuids) {
+        const block = page.blocks[uuid]
+        if (block) {
+          map.set(uuid, depth)
+          if (block.children.length > 0) traverse(block.children, depth + 1)
+        }
+      }
+    }
+    traverse(page.rootBlocks, 0)
+    return map
+  }, [page.blocks, page.rootBlocks])
+
   // Detect code fence regions for visual treatment
   const codeFenceMap = useMemo(() => {
     return detectCodeFences(flatBlockOrder, page.blocks)
@@ -1468,10 +1485,12 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
       isBlockRef ? 'block-container--block-ref' : '',
     ].filter(Boolean).join(' ')
 
-    // Code blocks need to break out of nesting indentation to be full width
-    // Each nesting level adds 36px (ml-6=24px + pl-3=12px)
-    const codeBlockStyle = isCodeBlock && block.depth > 0
-      ? { marginLeft: `calc(-${block.depth} * 36px)` }
+    // Code blocks need to break out of nesting indentation to be full width.
+    // Each nesting level adds 36px (ml-6=24px + pl-3=12px). Depth comes from the
+    // tree (blockDepths), not the stored block.depth, so it can't desync (EF-13).
+    const derivedDepth = blockDepths.get(block.uuid) ?? 0
+    const codeBlockStyle = isCodeBlock && derivedDepth > 0
+      ? { marginLeft: `calc(-${derivedDepth} * 36px)` }
       : undefined
 
     return (
