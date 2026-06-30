@@ -777,6 +777,11 @@ const ActiveSeed = forwardRef<SeedHandle, {
   // Create typewriter scrolling listener - keeps cursor centered when past middle of viewport
   const createTypewriterListener = useCallback(() => {
     return EditorView.updateListener.of((update) => {
+      // Only react to actual edits / caret moves, NOT to scroll-induced geometry
+      // updates — otherwise scrolling re-measures and fires more scrolls, the
+      // jiggle feedback loop (EF-06).
+      if (!update.docChanged && !update.selectionSet) return
+
       const view = update.view
       const pos = view.state.selection.main.head
 
@@ -789,23 +794,32 @@ const ActiveSeed = forwardRef<SeedHandle, {
       if (lastY !== null && Math.abs(cursorCoords.top - lastY) < 1) return
       lastCursorYRef.current = cursorCoords.top
 
-      // If cursor is below the middle of the viewport, scroll to center it
-      // CodeMirror's scroller is set to overflow: visible, so we need to scroll
-      // the parent scroll container instead of using EditorView.scrollIntoView
+      // CodeMirror's scroller is overflow: visible, so we scroll the parent
+      // container rather than using EditorView.scrollIntoView.
       const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
       if (!scrollContainer) return
 
       const containerRect = scrollContainer.getBoundingClientRect()
       const cursorRelativeToContainer = cursorCoords.top - containerRect.top
       const containerMiddle = containerRect.height / 2
-
-      // Only scroll when cursor is past the middle, with a dead zone to prevent jiggle
-      // Lock out further scrolls until the smooth animation completes
       const scrollAmount = cursorRelativeToContainer - containerMiddle
-      if (scrollAmount > 10 && !scrollingRef.current) {
+
+      // Recenter when the caret falls past the middle (down) OR rises above the
+      // container top (up). The upward case was missing, so arrow-up/merge near
+      // the top parked the caret out of view (EF-06). Dead zone prevents jiggle.
+      const aboveViewport = cursorRelativeToContainer < 0
+      if (!scrollingRef.current && (scrollAmount > 10 || aboveViewport)) {
         scrollingRef.current = true
+        // Release on the real scrollend signal, not a guessed timer (whose
+        // duration never matched the smooth-scroll animation, causing a second
+        // competing scroll). Fall back to a timeout where scrollend is missing.
+        const release = () => {
+          scrollingRef.current = false
+          scrollContainer.removeEventListener('scrollend', release)
+        }
+        scrollContainer.addEventListener('scrollend', release)
+        setTimeout(release, 700)
         scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
-        setTimeout(() => { scrollingRef.current = false }, 300)
       }
     })
   }, [])
