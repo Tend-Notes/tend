@@ -684,8 +684,11 @@ const ActiveSeed = forwardRef<SeedHandle, {
             const line = view.state.doc.lineAt(pos)
             if (line.number === 1) {
               onBoundaryEventRef.current({
+                // Send the COLUMN (offset within the line), like arrow-down, so
+                // the previous block can place the caret on its last line at the
+                // same column (EF-10).
                 type: 'arrow-up',
-                cursorOffset: pos,
+                cursorOffset: pos - line.from,
               })
               return true
             }
