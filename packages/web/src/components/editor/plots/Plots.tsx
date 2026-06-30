@@ -740,11 +740,20 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
   // NAVIGATION
   // ─────────────────────────────────────────────────────────────────────────
 
-  const navigateUp = useCallback((fromUuid: string, cursorOffset?: number) => {
+  const navigateUp = useCallback((fromUuid: string, column?: number) => {
     const currentIndex = flatBlockOrder.indexOf(fromUuid)
     if (currentIndex > 0) {
       const prevUuid = flatBlockOrder[currentIndex - 1]
-      focusBlock(prevUuid, cursorOffset !== undefined ? cursorOffset : 'end')
+      if (column === undefined) {
+        focusBlock(prevUuid, 'end')
+        return
+      }
+      // Place the caret on the previous block's LAST line at the desired column,
+      // not at an absolute offset (which would land on its first line) — EF-10.
+      const content = pageBlocksRef.current[prevUuid]?.content ?? ''
+      const lastLineStart = content.lastIndexOf('\n') + 1 // 0 when single-line
+      const lastLineLen = content.length - lastLineStart
+      focusBlock(prevUuid, lastLineStart + Math.min(column, lastLineLen))
     }
   }, [flatBlockOrder, focusBlock])
 
