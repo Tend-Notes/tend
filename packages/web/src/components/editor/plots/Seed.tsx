@@ -18,7 +18,7 @@
 
 import React, { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState, useMemo, memo } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
-import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, Prec, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Block } from '../../../types'
 import { useActions } from './Actions'
@@ -198,6 +198,15 @@ function getCaretOffsetFromClick(e: React.MouseEvent): number | undefined {
   return found ? totalOffset : undefined
 }
 
+// A double-click on a dormant block straddles the dormant→active swap: the first
+// click activates the block (DormantSeed unmounts) and the second click lands on
+// the freshly-mounted CodeMirror, which therefore only ever sees a single click
+// and never selects the word. We bridge the gap by recording the activating click
+// here; the active editor's first mouseup, if it falls within the double-click
+// threshold, selects the word at that point (EF-20). Only one block activates at
+// a time, so a single module-level slot is sufficient.
+let lastDormantActivationClick: { time: number; x: number; y: number } | null = null
+
 /**
  * DormantSeed: Static HTML rendering of block content.
  * Memoized on content to avoid unnecessary re-renders.
@@ -286,6 +295,10 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
         return
       }
     }
+
+    // Record this click so the active editor can recognise a double-click that
+    // straddled activation and select the word (EF-20).
+    lastDormantActivationClick = { time: e.timeStamp, x: e.clientX, y: e.clientY }
 
     // This was a click - activate the block with cursor at click position
     const renderedOffset = getCaretOffsetFromClick(e)
@@ -827,6 +840,23 @@ const ActiveSeed = forwardRef<SeedHandle, {
   // Create focus/blur/paste handlers
   const createEventHandlers = useCallback(() => {
     return EditorView.domEventHandlers({
+      mouseup: (event, view) => {
+        // Recognise the second click of a double-click that straddled activation
+        // and select the word at that point, so double-click-to-replace works on
+        // a dormant block (EF-20).
+        const last = lastDormantActivationClick
+        lastDormantActivationClick = null
+        if (!last) return false
+        const withinTime = event.timeStamp - last.time < 500
+        const withinDist = Math.hypot(event.clientX - last.x, event.clientY - last.y) < 6
+        if (!withinTime || !withinDist) return false
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+        if (pos === null) return false
+        const word = view.state.wordAt(pos)
+        if (!word) return false
+        view.dispatch({ selection: EditorSelection.range(word.from, word.to) })
+        return false
+      },
       focus: () => {
         onFocusRef.current?.()
         return false
