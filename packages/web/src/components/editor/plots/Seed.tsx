@@ -693,35 +693,36 @@ const ActiveSeed = forwardRef<SeedHandle, {
         {
           key: 'ArrowUp',
           run: (view) => {
-            const pos = view.state.selection.main.head
-            const line = view.state.doc.lineAt(pos)
-            if (line.number === 1) {
-              onBoundaryEventRef.current({
-                // Send the COLUMN (offset within the line), like arrow-down, so
-                // the previous block can place the caret on its last line at the
-                // same column (EF-10).
-                type: 'arrow-up',
-                cursorOffset: pos - line.from,
-              })
-              return true
-            }
-            return false
+            const range = view.state.selection.main
+            if (!range.empty) return false
+            // Only cross to the previous block from the first VISUAL line. A
+            // block can soft-wrap to several visual lines within one document
+            // line, so checking doc lines would wrongly leave the block from any
+            // wrapped row. If CodeMirror can still move up a visual line, let it.
+            if (view.moveVertically(range, false).head !== range.head) return false
+            const visualStart = view.moveToLineBoundary(range, false).head
+            onBoundaryEventRef.current({
+              // Send the VISUAL column so the previous block can place the caret
+              // at the same column on its last line (EF-10).
+              type: 'arrow-up',
+              cursorOffset: range.head - visualStart,
+            })
+            return true
           },
         },
-        // Arrow Down - navigate to next block if on last line
+        // Arrow Down - navigate to next block only from the last VISUAL line
         {
           key: 'ArrowDown',
           run: (view) => {
-            const pos = view.state.selection.main.head
-            const line = view.state.doc.lineAt(pos)
-            if (line.number === view.state.doc.lines) {
-              onBoundaryEventRef.current({
-                type: 'arrow-down',
-                cursorOffset: pos - line.from,
-              })
-              return true
-            }
-            return false
+            const range = view.state.selection.main
+            if (!range.empty) return false
+            if (view.moveVertically(range, true).head !== range.head) return false
+            const visualStart = view.moveToLineBoundary(range, false).head
+            onBoundaryEventRef.current({
+              type: 'arrow-down',
+              cursorOffset: range.head - visualStart,
+            })
+            return true
           },
         },
         // Arrow Left at start - go to previous block
