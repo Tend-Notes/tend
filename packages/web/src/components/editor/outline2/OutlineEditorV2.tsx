@@ -17,6 +17,9 @@ import { usePageStore } from '../../../stores/pageStore'
 import { pageToDoc, docToBlocks } from './pageDoc'
 import { listItemType } from './schema'
 import { uuidPlugin } from './uuidPlugin'
+// ProseMirror's required base styles — without these Firefox mis-renders the
+// contentEditable and shows no caret (Chromium tolerates their absence).
+import 'prosemirror-view/style/prosemirror.css'
 import './outline2.css'
 
 interface OutlineEditorV2Props {
