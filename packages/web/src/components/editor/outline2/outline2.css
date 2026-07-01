@@ -142,3 +142,23 @@
 /* Delimiters: dimmed on the active line, hidden elsewhere (live preview). */
 .outline2 .pm-delim { opacity: 0.35; }
 .outline2 .pm-hidden { display: none; }
+
+/* Task box (V1 .task-block-container): border + subtle bg around the task line
+   and its metadata, offset past the bullet gutter. */
+.outline2 .block-container[data-task="true"] > .block-main {
+  border: 1px solid color-mix(in srgb, var(--base03) 30%, transparent);
+  background-color: color-mix(in srgb, var(--base07) 5%, transparent);
+  border-radius: 4px;
+  padding: 8px 16px;
+  margin: 2px 0 2px 18px;
+}
+.outline2 .block-container[data-task="true"] > .block-main > .block-body > .block-content {
+  padding-left: 0;
+}
+/* Align the bullet with the task line inside the box. */
+.outline2 .block-container[data-task="true"] > .block-fold::before {
+  top: 0.75rem;
+}
+
+/* Task metadata row host. */
+.outline2 .task-meta-host:empty { display: none; }
