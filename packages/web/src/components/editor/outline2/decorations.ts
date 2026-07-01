@@ -11,13 +11,15 @@ import { EditorState, Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
+import { useTagStore } from '../../../stores/tagStore'
 
+// Reuse V1's existing formatting classes so styling matches exactly.
 const CONTENT_CLASS: Record<string, string> = {
   bold: 'pm-bold',
   italic: 'pm-italic',
   bolditalic: 'pm-bolditalic',
   strikethrough: 'pm-strike',
-  highlight: 'pm-highlight',
+  highlight: 'fmt-highlight',
   code: 'pm-code',
 }
 const DELIMITED = new Set(Object.keys(CONTENT_CLASS))
@@ -66,9 +68,13 @@ function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
           decos.push(Decoration.inline(contentFrom, contentTo, { class: 'wiki-link', 'data-target': tok.target }))
           pushDelims(from, contentFrom, contentTo, to)
           break
-        case 'tag':
-          decos.push(Decoration.inline(from, to, { class: 'tag-pill', 'data-tag': tok.name }))
+        case 'tag': {
+          // Set the per-tag color CSS vars the .tag-pill styling reads (same as V1).
+          const c = useTagStore.getState().getTagColors(tok.name)
+          const style = `--tag-hue:${c.hue};--tag-sat:${c.sat};--tag-textL:${c.textL};--tag-bgL:${c.bgL}`
+          decos.push(Decoration.inline(from, to, { class: 'tag-pill', style, 'data-tag': tok.name }))
           break
+        }
         case 'url':
           decos.push(Decoration.inline(from, to, { class: 'pm-url', 'data-href': tok.url }))
           break
