@@ -1,7 +1,10 @@
-/* Editor V2 (ProseMirror outline). Structure per list_item nodeview:
-     li.block-container > span.block-fold (chrome) + div.block-body (content)
-   block-body holds the block-content line and an optional nested block-list.
-   Bullets/folds are non-editable chrome — never text. */
+/* Editor V2 (ProseMirror outline) — ported from V1's outliner CSS.
+   V2 DOM (list_item nodeview):
+     li.block-container > span.block-fold (bullet chrome) + div.block-body
+       div.block-body > div.block-content (the line) + ul.block-list? (children)
+   V1 layout it mirrors: bullet(6px) + gap(12px) then text => text indented 18px;
+   headers are flush-left, aligning with body bullets; nested levels indent
+   24px + 12px (border-left), matching V1 .block-children. */
 
 .outline2 .ProseMirror {
   outline: none;
@@ -21,24 +24,28 @@
   list-style: none;
 }
 
-/* Nested lists indent one level (match V1 .block-children: 24px / 12px). */
+/* Nested levels: V1 .block-children = margin-left 24px, border-left, padding 12px. */
 .outline2 .block-body ul.block-list {
   margin-left: 24px;
   padding-left: 12px;
   border-left: 1px solid var(--base02, #333);
 }
 
-/* Collapsed: hide the nested child list. */
-.outline2 .block-container[data-collapsed="true"] > .block-body > ul.block-list {
-  display: none;
+/* Bullet gutter: 18px (6px dot + 12px gap) holds the bullet; text follows. */
+.outline2 .block-content {
+  position: relative;
+  padding: 2px 0 2px 18px;
+  min-height: 1.5em;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-/* Fold/bullet — a real clickable element, absolutely placed to align with the
-   first line regardless of subtree height. Bullet matches V1: 6px, base03,
-   aligned to the first line (V1 uses mt-0.55rem on a 6px dot). */
+/* Bullet/fold — clickable chrome, absolutely placed at the block's left edge so
+   it aligns with header text (V1: header text aligns with bullets). 6px base03
+   dot at the first line (V1 mt-0.55rem). */
 .outline2 .block-fold {
   position: absolute;
-  left: -18px; /* gap(12px) + dot(6px) */
+  left: 0;
   top: 0;
   width: 18px;
   height: 1.5em;
@@ -54,40 +61,34 @@
   height: 6px;
   border-radius: 50%;
   background: var(--base03, #888);
+  transition: background-color var(--duration-normal, 0.2s) var(--ease-out, ease),
+    transform var(--duration-normal, 0.2s) var(--ease-spring, ease);
 }
-/* Ring around the bullet when a collapsed block has hidden children. */
+.outline2 .block-fold:hover::before {
+  background: var(--base0D, #61afef);
+  transform: scale(1.2);
+}
+/* Collapsed with hidden children: hollow ring (V1 .bullet--collapsed). */
 .outline2 .block-container[data-collapsed="true"][data-has-children="true"] > .block-fold::before {
   background: transparent;
   box-shadow: inset 0 0 0 2px var(--base03, #888);
 }
 
-/* No bullet for headers, code fences, block references. */
-.outline2 .block-container[data-nobullet="true"] > .block-fold::before {
+/* Collapsed: hide the nested child list. */
+.outline2 .block-container[data-collapsed="true"] > .block-body > ul.block-list {
   display: none;
 }
 
-.outline2 .block-content {
-  position: relative;
-  padding: 2px 0;
-  min-height: 1.5em;
-  white-space: pre-wrap;
-  word-break: break-word;
+/* Headers, code fences, block refs: no bullet; content flush-left (V1
+   .block-container--header margin/padding-left 0, .block gap 0). */
+.outline2 .block-container[data-nobullet="true"] > .block-fold {
+  display: none;
+}
+.outline2 .block-container[data-nobullet="true"] > .block-body > .block-content {
+  padding-left: 0;
 }
 
-/* Inline formatting (source-markdown + decorations; delimiters dimmed). */
-.outline2 .pm-bold { font-weight: 700; }
-.outline2 .pm-italic { font-style: italic; }
-.outline2 .pm-bolditalic { font-weight: 700; font-style: italic; }
-.outline2 .pm-strike { text-decoration: line-through; }
-.outline2 .pm-code { font-family: ui-monospace, monospace; background: var(--base01, #333); padding: 0 3px; border-radius: 3px; }
-.outline2 .pm-delim { opacity: 0.35; }
-/* Delimiters on non-active lines are hidden (live preview). */
-.outline2 .pm-hidden { display: none; }
-.outline2 .pm-url { color: var(--base0D, #61afef); text-decoration: underline; cursor: pointer; }
-.outline2 .pm-blockref { color: var(--base0C, #56b6c2); }
-.outline2 .pm-task { font-weight: 700; }
-
-/* Headers match V1 (.block-container--header-*): weight 600, base06. */
+/* Headers — V1 .block-container--header-* : weight 600, base06, sized per level. */
 .outline2 .block-content.pm-h1,
 .outline2 .block-content.pm-h2,
 .outline2 .block-content.pm-h3,
@@ -105,3 +106,19 @@
 .outline2 .block-content.pm-h4,
 .outline2 .block-content.pm-h5,
 .outline2 .block-content.pm-h6 { font-size: 1rem; line-height: 1.4; }
+
+/* Inline formatting. Reuse V1's existing classes where they exist
+   (fmt-highlight, wiki-link, tag-pill); the pm-* ones mirror V1's element
+   semantics (<strong>/<em>/<code>). */
+.outline2 .pm-bold { font-weight: 700; }
+.outline2 .pm-italic { font-style: italic; }
+.outline2 .pm-bolditalic { font-weight: 700; font-style: italic; }
+.outline2 .pm-strike { text-decoration: line-through; }
+.outline2 .pm-code { font-family: ui-monospace, monospace; background: var(--base01, #333); padding: 0 3px; border-radius: 3px; }
+.outline2 .pm-url { color: var(--base0D, #61afef); text-decoration: underline; cursor: pointer; }
+.outline2 .pm-blockref { color: var(--base0C, #56b6c2); }
+.outline2 .pm-task { font-weight: 600; }
+
+/* Delimiters: dimmed on the active line, hidden elsewhere (live preview). */
+.outline2 .pm-delim { opacity: 0.35; }
+.outline2 .pm-hidden { display: none; }
