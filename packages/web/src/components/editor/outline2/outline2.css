@@ -1,0 +1,38 @@
+/* Editor V2 (ProseMirror outline). Bullets are non-editable ::before chrome —
+   never text. Nesting comes from the block node tree. */
+
+.outline2 .ProseMirror {
+  outline: none;
+}
+
+.outline2 .block-container {
+  position: relative;
+  list-style: none;
+}
+
+/* Children nest inside the parent block node; indent each level. */
+.outline2 .block-container .block-container {
+  margin-left: 1.5rem;
+  padding-left: 0.75rem;
+  border-left: 1px solid var(--base02, #333);
+}
+
+/* Structural bullet — pseudo-element, not editable text. */
+.outline2 .block-content::before {
+  content: '';
+  position: absolute;
+  left: -0.9rem;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--base04, #888);
+}
+
+.outline2 .block-content {
+  position: relative;
+  padding: 0.12rem 0;
+  min-height: 1.4em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
