@@ -19,6 +19,7 @@ await seedJournal(DATE, tree)
 const browser = await launch()
 try {
   const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
+  await page.addInitScript(() => localStorage.setItem('tend-settings', JSON.stringify({ state: { useLegacyEditor: true }, version: 1 })))
   await page.goto(`${APP}/journal/${DATE}`, { waitUntil: 'networkidle' })
   await page.waitForFunction(() => document.body.innerText.includes('Block number 0'), { timeout: 30000 })
 

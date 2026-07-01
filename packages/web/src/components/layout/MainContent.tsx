@@ -16,7 +16,7 @@ import { TaskManagerPage } from '../tasks/TaskManagerPage'
 export function MainContent() {
   const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore()
   const viewingTasks = usePageStore((s) => s.viewingTasks)
-  const outlineEditorV2 = useSettingsStore((s) => s.outlineEditorV2)
+  const useLegacyEditor = useSettingsStore((s) => s.useLegacyEditor)
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
 
@@ -155,7 +155,7 @@ export function MainContent() {
         {/* Key changes with page name to trigger crossfade animation */}
         {/* Mobile-first: minimal padding on mobile, constrained width on md+ */}
         {/* pb-[50vh] provides bottom padding so typewriter scroll can center the last line */}
-        <div key={`${currentPage.name}:${outlineEditorV2 ? 'v2' : 'v1'}`} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
+        <div key={`${currentPage.name}:${useLegacyEditor ? 'v1' : 'v2'}`} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
           {/* Page title with save status */}
           <div className="flex items-center gap-3 mb-8">
             <div className="relative flex items-center gap-2">
@@ -183,11 +183,12 @@ export function MainContent() {
             <SaveStatus />
           </div>
 
-          {/* Editor (V2 = experimental ProseMirror node-model editor) */}
-          {outlineEditorV2 ? (
-            <OutlineEditorV2 page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
-          ) : (
+          {/* Editor: ProseMirror node-model editor by default; legacy per-block
+              CodeMirror editor as a fallback. */}
+          {useLegacyEditor ? (
             <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
+          ) : (
+            <OutlineEditorV2 page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
           )}
 
           {/* Backlinks panel - only show for non-journal pages */}

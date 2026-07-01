@@ -13,7 +13,7 @@ await seedJournal(DATE, [{ content: 'alpha' }])
 const browser = await launch()
 try {
   const page = await browser.newPage({ viewport: { width: 900, height: 900 } })
-  await page.addInitScript(() => localStorage.setItem('tend-settings', JSON.stringify({ state: { outlineEditorV2: true }, version: 1 })))
+  await page.addInitScript(() => localStorage.setItem('tend-settings', JSON.stringify({ state: { useLegacyEditor: false }, version: 1 })))
   await page.goto(`${APP}/journal/${DATE}`, { waitUntil: 'networkidle' })
   await page.waitForFunction(() => document.body.innerText.includes('alpha'), { timeout: 15000 })
 

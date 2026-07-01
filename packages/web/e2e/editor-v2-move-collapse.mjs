@@ -15,7 +15,7 @@ await seedJournal(DATE, [
 const browser = await launch()
 try {
   const page = await browser.newPage({ viewport: { width: 900, height: 700 } })
-  await page.addInitScript(() => localStorage.setItem('tend-settings', JSON.stringify({ state: { outlineEditorV2: true }, version: 1 })))
+  await page.addInitScript(() => localStorage.setItem('tend-settings', JSON.stringify({ state: { useLegacyEditor: false }, version: 1 })))
   await page.goto(`${APP}/journal/${DATE}`, { waitUntil: 'networkidle' })
   await page.waitForFunction(() => document.body.innerText.includes('gamma'), { timeout: 15000 })
 

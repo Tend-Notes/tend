@@ -165,8 +165,8 @@ function AppearanceSection() {
     setFontSizePreset,
     customFontSize,
     setCustomFontSize,
-    outlineEditorV2,
-    setOutlineEditorV2,
+    useLegacyEditor,
+    setUseLegacyEditor,
   } = useSettingsStore()
 
   const [showCustomFontSize, setShowCustomFontSize] = useState(fontSizePreset === 'custom')
@@ -193,12 +193,12 @@ function AppearanceSection() {
 
   return (
     <div className="space-y-3">
-      {/* Experimental: node-model editor (Editor V2) */}
-      <SettingsRow label="Experimental editor">
-        <Toggle checked={outlineEditorV2} onChange={setOutlineEditorV2} />
+      {/* Fallback to the legacy CodeMirror editor (default is the new one) */}
+      <SettingsRow label="Use legacy editor">
+        <Toggle checked={useLegacyEditor} onChange={setUseLegacyEditor} />
       </SettingsRow>
       <p className="text-xs text-base-03">
-        Try the new ProseMirror-based outline editor. Flips live on the current page.
+        Fall back to the old per-block editor. Flips live on the current page.
       </p>
 
       {/* Theme mode */}

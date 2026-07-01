@@ -102,8 +102,9 @@ interface SettingsState {
   // Storage (local git repo on server)
   gardenPath: string // path to the garden directory
 
-  // Experimental: use the ProseMirror node-model editor (Editor V2)
-  outlineEditorV2: boolean
+  // Fall back to the legacy per-block CodeMirror editor (default is the
+  // ProseMirror node-model editor).
+  useLegacyEditor: boolean
 
   // Backup (remote repository)
   backupEnabled: boolean
@@ -130,7 +131,7 @@ interface SettingsState {
   setCustomFontSize: (size: number) => void
   setTaskStatusSet: (set: TaskStatusSet) => void
   setGardenPath: (path: string) => void
-  setOutlineEditorV2: (enabled: boolean) => void
+  setUseLegacyEditor: (enabled: boolean) => void
   setBackupEnabled: (enabled: boolean) => void
   setBackupRemoteUrl: (url: string) => void
   setBackupIntervalMinutes: (minutes: number) => void
@@ -170,7 +171,7 @@ export const useSettingsStore = create<SettingsState>()(
       customFontSize: 16,
       taskStatusSet: 'todo-doing-done' as TaskStatusSet,
       gardenPath: '',
-      outlineEditorV2: false,
+      useLegacyEditor: false,
       backupEnabled: false,
       backupRemoteUrl: '',
       backupIntervalMinutes: 30,
@@ -190,7 +191,7 @@ export const useSettingsStore = create<SettingsState>()(
         set({ customFontSize: Math.max(10, Math.min(32, customFontSize)) }),
       setTaskStatusSet: (taskStatusSet) => set({ taskStatusSet }),
       setGardenPath: (gardenPath) => set({ gardenPath }),
-      setOutlineEditorV2: (outlineEditorV2) => set({ outlineEditorV2 }),
+      setUseLegacyEditor: (useLegacyEditor) => set({ useLegacyEditor }),
       setBackupEnabled: (backupEnabled) => set({ backupEnabled }),
       setBackupRemoteUrl: (backupRemoteUrl) => set({ backupRemoteUrl }),
       setBackupIntervalMinutes: (backupIntervalMinutes) =>
@@ -223,7 +224,7 @@ export const useSettingsStore = create<SettingsState>()(
         customFontSize: 16,
         taskStatusSet: 'todo-doing-done' as TaskStatusSet,
         gardenPath: '',
-        outlineEditorV2: false,
+        useLegacyEditor: false,
         backupEnabled: false,
         backupRemoteUrl: '',
         backupIntervalMinutes: 30,
