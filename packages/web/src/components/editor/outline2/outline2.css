@@ -24,12 +24,23 @@
   list-style: none;
 }
 
-/* Nested levels: total indent 36px, with the guide line drawn at the child
-   bullet column (margin 36 / padding 0) so it aligns with the bullets. */
+/* Nested levels: total indent 36px. The guide line is a pseudo-element at the
+   child bullet CENTER (6px dot at 0..6 => center 3px), not a left border (which
+   would sit at the bullet's edge). */
 .outline2 .block-body ul.block-list {
   margin-left: 36px;
   padding-left: 0;
-  border-left: 1px solid var(--base02, #333);
+  position: relative;
+}
+.outline2 .block-body ul.block-list::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--base02, #333);
+  pointer-events: none;
 }
 
 /* Bullet gutter: 18px (6px dot + 12px gap) holds the bullet; text follows. */
