@@ -10,10 +10,13 @@ import { EditorState } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { history, undo, redo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
-import { baseKeymap } from 'prosemirror-commands'
+import { baseKeymap, chainCommands, deleteSelection, joinBackward } from 'prosemirror-commands'
+import { splitListItem, sinkListItem, liftListItem } from 'prosemirror-schema-list'
 import type { Block, Page } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { pageToDoc, docToBlocks } from './pageDoc'
+import { listItemType } from './schema'
+import { uuidPlugin } from './uuidPlugin'
 import './outline2.css'
 
 interface OutlineEditorV2Props {
@@ -53,7 +56,18 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
       doc: pageToDoc(page),
       plugins: [
         history(),
-        keymap({ 'Mod-z': undo, 'Mod-y': redo, 'Shift-Mod-z': redo }),
+        uuidPlugin(),
+        keymap({
+          'Mod-z': undo,
+          'Mod-y': redo,
+          'Shift-Mod-z': redo,
+          // Structural outline ops from the tested list library.
+          Enter: splitListItem(listItemType),
+          Tab: sinkListItem(listItemType),
+          'Shift-Tab': liftListItem(listItemType),
+          // Merge into the previous block at line start; else default delete.
+          Backspace: chainCommands(deleteSelection, joinBackward),
+        }),
         keymap(baseKeymap),
       ],
     })

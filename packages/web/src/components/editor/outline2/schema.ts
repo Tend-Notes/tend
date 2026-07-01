@@ -1,27 +1,35 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 //
-// ProseMirror schema for the node-model outline editor (Editor V2). The document
-// IS the block tree: a `block` node carries the uuid/collapsed/properties as
-// attrs and contains one `line` (its editable content) followed by its child
-// `block`s. Bullets/nesting are structure — rendered as non-editable nodeview
-// chrome elsewhere — never editable text. Inline formatting stays source-markdown
-// styled by a decoration plugin, so a line's text maps 1:1 to Block.content.
+// ProseMirror schema for Editor V2, shaped as a list schema so the tested
+// prosemirror-schema-list commands (split / sink / lift = Enter / Tab /
+// Shift-Tab) apply directly. The document IS the block tree:
+//   doc > bullet_list > list_item(uuid, collapsed, properties) > (line, bullet_list?)
+// `line` is a block's editable content (source markdown, styled by decorations).
+// Bullets/nesting are structure — non-editable chrome — never text.
 
 import { Schema } from 'prosemirror-model'
 
 export const outlineSchema = new Schema({
   nodes: {
-    doc: { content: 'block+' },
+    doc: { content: 'bullet_list' },
 
-    block: {
+    bullet_list: {
+      content: 'list_item+',
+      toDOM() {
+        return ['ul', { class: 'block-list' }, 0]
+      },
+      parseDOM: [{ tag: 'ul' }],
+    },
+
+    list_item: {
       attrs: {
-        // Default '' keeps the node generatable (schema requires block+); real
-        // uuids are assigned on load and in split/merge commands.
+        // Default '' keeps the node generatable; the uuid plugin mints real ones
+        // for empty/duplicate items after every structural edit.
         uuid: { default: '' },
         collapsed: { default: false },
         properties: { default: {} },
       },
-      content: 'line block*',
+      content: 'line bullet_list?',
       defining: true,
       toDOM(node) {
         return [
@@ -59,3 +67,6 @@ export const outlineSchema = new Schema({
     text: {},
   },
 })
+
+export const listItemType = outlineSchema.nodes.list_item
+export const bulletListType = outlineSchema.nodes.bullet_list
