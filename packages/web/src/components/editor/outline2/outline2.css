@@ -1,0 +1,164 @@
+/* Editor V2 (ProseMirror outline) — ported from V1's outliner CSS.
+   V2 DOM (list_item nodeview):
+     li.block-container > span.block-fold (bullet chrome) + div.block-body
+       div.block-body > div.block-content (the line) + ul.block-list? (children)
+   V1 layout it mirrors: bullet(6px) + gap(12px) then text => text indented 18px;
+   headers are flush-left, aligning with body bullets; nested levels indent
+   24px + 12px (border-left), matching V1 .block-children. */
+
+.outline2 .ProseMirror {
+  outline: none;
+  /* The app globally sets caret-color: transparent on [contenteditable] because
+     CodeMirror (V1) draws its own caret. V2 uses the native caret — restore it. */
+  caret-color: var(--base05, currentColor);
+}
+
+.outline2 ul.block-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.outline2 .block-container {
+  position: relative;
+  list-style: none;
+}
+
+/* Nested levels: total indent 36px. The guide line is a pseudo-element at the
+   child bullet CENTER (6px dot at 0..6 => center 3px), not a left border (which
+   would sit at the bullet's edge). */
+.outline2 .block-body ul.block-list {
+  margin-left: 36px;
+  padding-left: 0;
+  position: relative;
+}
+.outline2 .block-body ul.block-list::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--base02, #333);
+  pointer-events: none;
+}
+
+/* Bullet gutter: 18px (6px dot + 12px gap) holds the bullet; text follows. */
+.outline2 .block-content {
+  position: relative;
+  padding: 2px 0 2px 18px;
+  min-height: 1.5em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Bullet/fold — clickable chrome, absolutely placed at the block's left edge so
+   it aligns with header text (V1: header text aligns with bullets). 6px base03
+   dot at the first line (V1 mt-0.55rem). */
+.outline2 .block-fold {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 18px;
+  height: 1.5em;
+  cursor: pointer;
+  user-select: none;
+}
+.outline2 .block-fold::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55rem;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--base03, #888);
+  transition: background-color var(--duration-normal, 0.2s) var(--ease-out, ease),
+    transform var(--duration-normal, 0.2s) var(--ease-spring, ease);
+}
+.outline2 .block-fold:hover::before {
+  background: var(--base0D, #61afef);
+  transform: scale(1.2);
+}
+/* Collapsed with hidden children: hollow ring (V1 .bullet--collapsed). */
+.outline2 .block-container[data-collapsed="true"][data-has-children="true"] > .block-fold::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--base03, #888);
+}
+
+/* Collapsed: hide the nested child list. */
+.outline2 .block-container[data-collapsed="true"] > .block-main > .block-body > ul.block-list {
+  display: none;
+}
+
+/* Headers, code fences, block refs: no bullet; content flush-left (V1
+   .block-container--header margin/padding-left 0, .block gap 0). */
+.outline2 .block-container[data-nobullet="true"] > .block-fold {
+  display: none;
+}
+.outline2 .block-container[data-nobullet="true"] > .block-main > .block-body > .block-content {
+  padding-left: 0;
+}
+
+/* Headers — V1 .block-container--header-* : weight 600, base06, sized per level. */
+.outline2 .block-content.pm-h1,
+.outline2 .block-content.pm-h2,
+.outline2 .block-content.pm-h3,
+.outline2 .block-content.pm-h4,
+.outline2 .block-content.pm-h5,
+.outline2 .block-content.pm-h6 {
+  font-weight: 600;
+  color: var(--base06);
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+.outline2 .block-content.pm-h1 { font-size: 1.25rem; line-height: 1.3; }
+.outline2 .block-content.pm-h2 { font-size: 1.125rem; line-height: 1.35; }
+.outline2 .block-content.pm-h3,
+.outline2 .block-content.pm-h4,
+.outline2 .block-content.pm-h5,
+.outline2 .block-content.pm-h6 { font-size: 1rem; line-height: 1.4; }
+
+/* Inline formatting. Reuse V1's existing classes where they exist
+   (fmt-highlight, wiki-link, tag-pill); the pm-* ones mirror V1's element
+   semantics (<strong>/<em>/<code>). */
+.outline2 .pm-bold { font-weight: 700; }
+.outline2 .pm-italic { font-style: italic; }
+.outline2 .pm-bolditalic { font-weight: 700; font-style: italic; }
+.outline2 .pm-strike { text-decoration: line-through; }
+.outline2 .pm-code { font-family: ui-monospace, monospace; background: var(--base01, #333); padding: 0 3px; border-radius: 3px; }
+/* Fenced code block (code-highlight layer). */
+.outline2 .block-content.pm-codeblock {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--base01, #2a2a2a);
+  border-radius: 4px;
+  padding: 6px 10px;
+}
+.outline2 .pm-url { color: var(--base0D, #61afef); text-decoration: underline; cursor: pointer; }
+.outline2 .pm-blockref { color: var(--base0C, #56b6c2); }
+.outline2 .pm-task { font-weight: 600; }
+
+/* Delimiters: dimmed on the active line, hidden elsewhere (live preview). */
+.outline2 .pm-delim { opacity: 0.35; }
+.outline2 .pm-hidden { display: none; }
+
+/* Task box (V1 .task-block-container): border + subtle bg around the task line
+   and its metadata, offset past the bullet gutter. */
+.outline2 .block-container[data-task="true"] > .block-main {
+  border: 1px solid color-mix(in srgb, var(--base03) 30%, transparent);
+  background-color: color-mix(in srgb, var(--base07) 5%, transparent);
+  border-radius: 4px;
+  padding: 8px 16px;
+  margin: 2px 0 2px 18px;
+}
+.outline2 .block-container[data-task="true"] > .block-main > .block-body > .block-content {
+  padding-left: 0;
+}
+/* Align the bullet with the task line inside the box. */
+.outline2 .block-container[data-task="true"] > .block-fold::before {
+  top: 0.75rem;
+}
+
+/* Task metadata row host. */
+.outline2 .task-meta-host:empty { display: none; }

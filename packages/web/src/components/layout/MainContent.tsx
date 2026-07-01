@@ -3,6 +3,8 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { OutlinerEditor } from '../editor/OutlinerEditor'
+import { OutlineEditorV2 } from '../editor/outline2/OutlineEditorV2'
+import { useSettingsStore } from '../../stores/settingsStore'
 import { TemplateEditor } from '../editor/TemplateEditor'
 import { ImportErrorEditor } from '../editor/ImportErrorEditor'
 import { BacklinksPanel } from '../panels/BacklinksPanel'
@@ -14,6 +16,7 @@ import { TaskManagerPage } from '../tasks/TaskManagerPage'
 export function MainContent() {
   const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore()
   const viewingTasks = usePageStore((s) => s.viewingTasks)
+  const outlineEditorV2 = useSettingsStore((s) => s.outlineEditorV2)
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
 
@@ -152,7 +155,7 @@ export function MainContent() {
         {/* Key changes with page name to trigger crossfade animation */}
         {/* Mobile-first: minimal padding on mobile, constrained width on md+ */}
         {/* pb-[50vh] provides bottom padding so typewriter scroll can center the last line */}
-        <div key={currentPage.name} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
+        <div key={`${currentPage.name}:${outlineEditorV2 ? 'v2' : 'v1'}`} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
           {/* Page title with save status */}
           <div className="flex items-center gap-3 mb-8">
             <div className="relative flex items-center gap-2">
@@ -180,8 +183,12 @@ export function MainContent() {
             <SaveStatus />
           </div>
 
-          {/* Editor */}
-          <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
+          {/* Editor (V2 = experimental ProseMirror node-model editor) */}
+          {outlineEditorV2 ? (
+            <OutlineEditorV2 page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
+          ) : (
+            <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
+          )}
 
           {/* Backlinks panel - only show for non-journal pages */}
           {!currentPage.isJournal && (
