@@ -1,5 +1,7 @@
-/* Editor V2 (ProseMirror outline). Bullets are non-editable ::before chrome —
-   never text. Nesting comes from the block node tree. */
+/* Editor V2 (ProseMirror outline). Structure per list_item nodeview:
+     li.block-container > span.block-fold (chrome) + div.block-body (content)
+   block-body holds the block-content line and an optional nested block-list.
+   Bullets/folds are non-editable chrome — never text. */
 
 .outline2 .ProseMirror {
   outline: none;
@@ -8,28 +10,53 @@
   caret-color: var(--base05, currentColor);
 }
 
+.outline2 ul.block-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .outline2 .block-container {
   position: relative;
   list-style: none;
 }
 
-/* Children nest inside the parent block node; indent each level. */
-.outline2 .block-container .block-container {
+/* Nested lists indent one level. */
+.outline2 .block-body ul.block-list {
   margin-left: 1.5rem;
   padding-left: 0.75rem;
   border-left: 1px solid var(--base02, #333);
 }
 
-/* Structural bullet — pseudo-element, not editable text. */
-.outline2 .block-content::before {
+/* Collapsed: hide the nested child list. */
+.outline2 .block-container[data-collapsed="true"] > .block-body > ul.block-list {
+  display: none;
+}
+
+/* Fold/bullet — a real clickable element, absolutely placed to align with the
+   first line regardless of subtree height. */
+.outline2 .block-fold {
+  position: absolute;
+  left: -0.95rem;
+  top: 0.5em;
+  width: 0.9rem;
+  height: 1.2em;
+  cursor: pointer;
+  user-select: none;
+}
+.outline2 .block-fold::before {
   content: '';
   position: absolute;
-  left: -0.9rem;
-  top: 0.62em;
+  left: 0.25rem;
+  top: 0.15em;
   width: 5px;
   height: 5px;
   border-radius: 50%;
   background: var(--base04, #888);
+}
+/* Ring around the bullet when a collapsed block has hidden children. */
+.outline2 .block-container[data-collapsed="true"][data-has-children="true"] > .block-fold::before {
+  box-shadow: 0 0 0 3px var(--base02, #333);
 }
 
 .outline2 .block-content {
