@@ -8,22 +8,13 @@
 import { useEffect, useRef } from 'react'
 import { EditorState } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
-import { history, undo, redo } from 'prosemirror-history'
-import { keymap } from 'prosemirror-keymap'
-import { baseKeymap, chainCommands, deleteSelection, joinBackward } from 'prosemirror-commands'
-import { splitListItem, sinkListItem, liftListItem } from 'prosemirror-schema-list'
-import { moveListItem, toggleCollapse } from './commands'
 import type { Block, Page } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { useUIStore } from '../../../stores/uiStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
 import { pageToDoc, docToBlocks } from './pageDoc'
-import { listItemType } from './schema'
-import { uuidPlugin } from './uuidPlugin'
-import { formattingPlugin } from './decorations'
-import { codeHighlightPlugin } from './codeHighlight'
 import { focusBlock, blockUuidAtSelection } from './pmUtil'
-import { ListItemView } from './nodeview'
+import { textLayer, outlinerLayer, formattingLayer, composeLayers } from './layers'
 // ProseMirror's required base styles — without these Firefox mis-renders the
 // contentEditable and shows no caret (Chromium tolerates their absence).
 import 'prosemirror-view/style/prosemirror.css'
@@ -62,39 +53,18 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
       }, SAVE_DEBOUNCE_MS)
     }
 
-    const state = EditorState.create({
-      doc: pageToDoc(page),
-      plugins: [
-        history(),
-        uuidPlugin(),
-        formattingPlugin({
-          navigateToPage: (name) => usePageStore.getState().navigateToPage(name),
-          navigateToJournal: (date) => usePageStore.getState().navigateToJournal(date),
-        }),
-        codeHighlightPlugin(),
-        keymap({
-          'Mod-z': undo,
-          'Mod-y': redo,
-          'Shift-Mod-z': redo,
-          // Structural outline ops from the tested list library.
-          Enter: splitListItem(listItemType),
-          // Chain a no-op that returns true so Tab never falls through to the
-          // browser (Firefox would move focus out of the editor).
-          Tab: chainCommands(sinkListItem(listItemType), () => true),
-          'Shift-Tab': chainCommands(liftListItem(listItemType), () => true),
-          'Mod-]': chainCommands(sinkListItem(listItemType), () => true),
-          'Mod-[': chainCommands(liftListItem(listItemType), () => true),
-          // Move block (with subtree) among siblings.
-          'Alt-ArrowUp': moveListItem(-1),
-          'Alt-ArrowDown': moveListItem(1),
-          // Toggle collapse (keyboard bonus; primary affordance is the bullet).
-          'Mod-.': toggleCollapse(),
-          // Merge into the previous block at line start; else default delete.
-          Backspace: chainCommands(deleteSelection, joinBackward),
-        }),
-        keymap(baseKeymap),
-      ],
-    })
+    // Compose the functional layers (order = precedence, high → low). Removing
+    // or swapping a layer here is the only change needed to change behavior.
+    const { plugins, nodeViews } = composeLayers([
+      formattingLayer({
+        navigateToPage: (name) => usePageStore.getState().navigateToPage(name),
+        navigateToJournal: (date) => usePageStore.getState().navigateToJournal(date),
+      }),
+      outlinerLayer(),
+      textLayer(),
+    ])
+
+    const state = EditorState.create({ doc: pageToDoc(page), plugins })
 
     let lastBlockUuid: string | null = null
     const syncFocusedBlock = () => {
@@ -109,9 +79,7 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
     const view = new EditorView(mountRef.current, {
       state,
       editable: () => !readonly,
-      nodeViews: {
-        list_item: (node, v, getPos) => new ListItemView(node, v, getPos),
-      },
+      nodeViews,
       dispatchTransaction(tr) {
         const next = view.state.apply(tr)
         view.updateState(next)
