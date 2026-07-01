@@ -14,10 +14,13 @@ import { baseKeymap, chainCommands, deleteSelection, joinBackward } from 'prosem
 import { splitListItem, sinkListItem, liftListItem } from 'prosemirror-schema-list'
 import type { Block, Page } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
+import { useUIStore } from '../../../stores/uiStore'
+import { useSelectionStore } from '../../../stores/selectionStore'
 import { pageToDoc, docToBlocks } from './pageDoc'
 import { listItemType } from './schema'
 import { uuidPlugin } from './uuidPlugin'
 import { formattingPlugin } from './decorations'
+import { focusBlock, blockUuidAtSelection } from './pmUtil'
 // ProseMirror's required base styles — without these Firefox mis-renders the
 // contentEditable and shows no caret (Chromium tolerates their absence).
 import 'prosemirror-view/style/prosemirror.css'
@@ -80,6 +83,16 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
       ],
     })
 
+    let lastBlockUuid: string | null = null
+    const syncFocusedBlock = () => {
+      const uuid = blockUuidAtSelection(view.state)
+      if (uuid && uuid !== lastBlockUuid) {
+        lastBlockUuid = uuid
+        useUIStore.getState().setLastFocusedBlockUuid(uuid)
+        useSelectionStore.getState().setFocusedBlock(uuid)
+      }
+    }
+
     const view = new EditorView(mountRef.current, {
       state,
       editable: () => !readonly,
@@ -87,12 +100,49 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
         const next = view.state.apply(tr)
         view.updateState(next)
         if (tr.docChanged) scheduleSave(view)
+        if (tr.selectionSet || tr.docChanged) syncFocusedBlock()
       },
     })
     viewRef.current = view
 
+    // Wire the command surface (downstream feature reconnect):
+    // - insert text from the command palette at the caret (or last-focused block)
+    const setInsertTextAtCursor = useUIStore.getState().setInsertTextAtCursor
+    setInsertTextAtCursor((text: string) => {
+      const v = viewRef.current
+      if (!v) return
+      if (!v.hasFocus()) {
+        const uuid = useUIStore.getState().lastFocusedBlockUuid
+        if (uuid) focusBlock(v, uuid, 'end')
+      }
+      v.dispatch(v.state.tr.insertText(text).scrollIntoView())
+      v.focus()
+    })
+
+    // - honor a pending caret (template {{cursor}}) or scroll target on mount
+    requestAnimationFrame(() => {
+      const v = viewRef.current
+      if (!v) return
+      const cursor = usePageStore.getState().consumePendingCursorPosition()
+      if (cursor) {
+        focusBlock(v, cursor.blockUuid, cursor.offset)
+        return
+      }
+      const scrollTarget = usePageStore.getState().consumePendingScrollTarget()
+      if (scrollTarget) {
+        focusBlock(v, scrollTarget, 'start')
+        const el = v.dom.querySelector(`[data-block-id="${scrollTarget}"]`)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          el.classList.add('block-container--highlight')
+          setTimeout(() => el.classList.remove('block-container--highlight'), 2000)
+        }
+      }
+    })
+
     return () => {
       if (saveTimer) clearTimeout(saveTimer)
+      useUIStore.getState().setInsertTextAtCursor(null)
       view.destroy()
       viewRef.current = null
     }
