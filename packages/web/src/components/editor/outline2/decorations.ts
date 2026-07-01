@@ -12,6 +12,7 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
 import { useTagStore } from '../../../stores/tagStore'
+import { isCodeFenceText } from './codeHighlight'
 
 // Reuse V1's existing formatting classes so styling matches exactly.
 const CONTENT_CLASS: Record<string, string> = {
@@ -42,6 +43,9 @@ function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
     if (node.type.name !== 'line') return
     const text = node.textContent
     if (!text) return
+    // Fenced code blocks are handled by the code-highlight layer; don't apply
+    // inline markdown formatting inside them.
+    if (isCodeFenceText(text)) return
     const base = pos + 1
     const active = pos === activePos
     // On the active line show delimiters (dimmed); elsewhere hide them.

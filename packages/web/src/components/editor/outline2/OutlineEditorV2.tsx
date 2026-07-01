@@ -21,6 +21,7 @@ import { pageToDoc, docToBlocks } from './pageDoc'
 import { listItemType } from './schema'
 import { uuidPlugin } from './uuidPlugin'
 import { formattingPlugin } from './decorations'
+import { codeHighlightPlugin } from './codeHighlight'
 import { focusBlock, blockUuidAtSelection } from './pmUtil'
 import { ListItemView } from './nodeview'
 // ProseMirror's required base styles — without these Firefox mis-renders the
@@ -70,6 +71,7 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
           navigateToPage: (name) => usePageStore.getState().navigateToPage(name),
           navigateToJournal: (date) => usePageStore.getState().navigateToJournal(date),
         }),
+        codeHighlightPlugin(),
         keymap({
           'Mod-z': undo,
           'Mod-y': redo,

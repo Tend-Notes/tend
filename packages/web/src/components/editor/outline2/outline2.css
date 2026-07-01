@@ -127,6 +127,14 @@
 .outline2 .pm-bolditalic { font-weight: 700; font-style: italic; }
 .outline2 .pm-strike { text-decoration: line-through; }
 .outline2 .pm-code { font-family: ui-monospace, monospace; background: var(--base01, #333); padding: 0 3px; border-radius: 3px; }
+/* Fenced code block (code-highlight layer). */
+.outline2 .block-content.pm-codeblock {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--base01, #2a2a2a);
+  border-radius: 4px;
+  padding: 6px 10px;
+}
 .outline2 .pm-url { color: var(--base0D, #61afef); text-decoration: underline; cursor: pointer; }
 .outline2 .pm-blockref { color: var(--base0C, #56b6c2); }
 .outline2 .pm-task { font-weight: 600; }
