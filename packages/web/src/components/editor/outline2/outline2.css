@@ -3,6 +3,9 @@
 
 .outline2 .ProseMirror {
   outline: none;
+  /* The app globally sets caret-color: transparent on [contenteditable] because
+     CodeMirror (V1) draws its own caret. V2 uses the native caret — restore it. */
+  caret-color: var(--base05, currentColor);
 }
 
 .outline2 .block-container {
