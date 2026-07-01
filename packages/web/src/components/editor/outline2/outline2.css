@@ -39,3 +39,22 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Inline formatting (source-markdown + decorations; delimiters dimmed). */
+.outline2 .pm-bold { font-weight: 700; }
+.outline2 .pm-italic { font-style: italic; }
+.outline2 .pm-bolditalic { font-weight: 700; font-style: italic; }
+.outline2 .pm-strike { text-decoration: line-through; }
+.outline2 .pm-highlight { background: var(--base0A, #e5c07b); color: var(--base00, #000); border-radius: 2px; }
+.outline2 .pm-code { font-family: ui-monospace, monospace; background: var(--base01, #333); padding: 0 3px; border-radius: 3px; }
+.outline2 .pm-delim { opacity: 0.35; }
+.outline2 .pm-url { color: var(--base0D, #61afef); text-decoration: underline; cursor: pointer; }
+.outline2 .pm-blockref { color: var(--base0C, #56b6c2); }
+.outline2 .pm-task { font-weight: 700; }
+
+.outline2 .pm-h1 { font-size: 1.6em; font-weight: 700; }
+.outline2 .pm-h2 { font-size: 1.4em; font-weight: 700; }
+.outline2 .pm-h3 { font-size: 1.2em; font-weight: 700; }
+.outline2 .pm-h4 { font-size: 1.1em; font-weight: 700; }
+.outline2 .pm-h5 { font-size: 1.05em; font-weight: 700; }
+.outline2 .pm-h6 { font-size: 1em; font-weight: 700; }

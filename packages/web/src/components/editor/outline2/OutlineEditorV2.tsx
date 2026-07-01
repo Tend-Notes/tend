@@ -17,6 +17,7 @@ import { usePageStore } from '../../../stores/pageStore'
 import { pageToDoc, docToBlocks } from './pageDoc'
 import { listItemType } from './schema'
 import { uuidPlugin } from './uuidPlugin'
+import { formattingPlugin } from './decorations'
 // ProseMirror's required base styles — without these Firefox mis-renders the
 // contentEditable and shows no caret (Chromium tolerates their absence).
 import 'prosemirror-view/style/prosemirror.css'
@@ -60,6 +61,10 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
       plugins: [
         history(),
         uuidPlugin(),
+        formattingPlugin({
+          navigateToPage: (name) => usePageStore.getState().navigateToPage(name),
+          navigateToJournal: (date) => usePageStore.getState().navigateToJournal(date),
+        }),
         keymap({
           'Mod-z': undo,
           'Mod-y': redo,
