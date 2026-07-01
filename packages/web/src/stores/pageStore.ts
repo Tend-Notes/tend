@@ -3,6 +3,7 @@
 
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
+import type { Draft } from 'immer'
 import type { Page, Block, CursorPosition } from '../types'
 import * as api from '../lib/api'
 import { VersionConflictError } from '../lib/api'
@@ -76,6 +77,8 @@ interface PageState {
   createPage: (name: string) => Promise<void>
   deletePage: (name: string) => Promise<void>
   updateCurrentPage: (blocks: Block[], rootBlocksHint?: string[]) => Promise<void>
+  // Patch a single block's content (hot path while typing; avoids a full rebuild)
+  updateBlockContent: (uuid: string, content: string) => void
   setError: (error: string | null) => void
   initializeFromUrl: () => Promise<void>
   restoreDraft: () => void
@@ -178,10 +181,7 @@ const DRAFT_DEBOUNCE_MS = 300
 // Store pending save data so we can flush it immediately on navigation
 let pendingSaveData: {
   pageName: string
-  blocks: Block[]
   contentType: string
-  isJournal: boolean
-  journalDate: string | null
 } | null = null
 
 // Track when the last successful save completed for the current page
@@ -246,6 +246,110 @@ function recordSheetAccess(page: Page) {
     createdAt: page.createdAt,
     modifiedAt: page.modifiedAt,
   })
+}
+
+// Flatten the current page's block tree to an array in document order (roots
+// first, depth-first). Built lazily at save time so a burst of keystrokes
+// doesn't rebuild it on every edit (EF-07).
+function orderedBlocksFromPage(page: Pick<Page, 'blocks' | 'rootBlocks'>): Block[] {
+  const result: Block[] = []
+  const traverse = (uuid: string) => {
+    const b = page.blocks[uuid]
+    if (b) {
+      result.push(b)
+      b.children.forEach(traverse)
+    }
+  }
+  page.rootBlocks.forEach(traverse)
+  return result
+}
+
+type ImmerSet = (fn: (state: Draft<PageState>) => void) => void
+type StoreGet = () => PageState
+
+// Schedule the debounced draft + server saves for the current page. Shared by
+// updateCurrentPage (structural edits) and updateBlockContent (text edits). The
+// blocks array is rebuilt lazily inside each debounced callback rather than at
+// call time, so per-keystroke edits stay cheap (EF-07).
+function scheduleDebouncedSave(get: StoreGet, set: ImmerSet) {
+  const currentPage = get().currentPage
+  if (!currentPage) return
+  const pageName = currentPage.name
+  const contentType = currentPage.contentType
+  const serverVersion = currentPage.modifiedAt
+
+  // Update sync status to unsaved (single source of truth for unsaved state)
+  useSyncStatusStore.getState().setUnsaved()
+
+  // Debounced draft save (faster than server save for data loss prevention)
+  if (draftTimeout) clearTimeout(draftTimeout)
+  draftTimeout = setTimeout(async () => {
+    const page = get().currentPage
+    if (!page || page.name !== pageName) return
+    try {
+      await draftStore.saveDraft(pageName, orderedBlocksFromPage(page), page.rootBlocks, serverVersion)
+    } catch (e) {
+      // Draft save failure is not critical - log but don't show error
+      console.warn('Failed to save draft to IndexedDB:', e)
+    }
+  }, DRAFT_DEBOUNCE_MS)
+
+  // Mark a pending save so navigation/flush knows to persist.
+  pendingSaveData = { pageName, contentType }
+
+  // Debounced save to server - cancel previous pending save
+  if (saveTimeout) clearTimeout(saveTimeout)
+  saveTimeout = setTimeout(async () => {
+    const page = get().currentPage
+    if (!page || page.name !== pageName) return
+    // Build the array (and read version) at save time, not call time, so a
+    // rapid burst of edits coalesces into a single rebuild + the latest version.
+    const blocks = orderedBlocksFromPage(page)
+    const finalRoots = page.rootBlocks
+    try {
+      const version = page.version
+      const apiBlocks = blocks.map(api.blockToApiFormat)
+      let updatedPage: Page
+      const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
+      if (contentTypeObj) {
+        const sheetName = extractSheetName(contentTypeObj, pageName)
+        const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
+        updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
+      } else {
+        // Fallback for unknown content type
+        updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version)
+      }
+      // Server save succeeded - clear the draft and pending save data
+      pendingSaveData = null
+      // Record save timestamp to ignore file watcher events for our own save
+      lastSaveTimestamp = Date.now()
+      await draftStore.deleteDraft(pageName)
+      // Log the save activity and update sync status
+      useActivityLogStore.getState().addEntry('file_save', pageName)
+      useSyncStatusStore.getState().setSaved()
+      set((state) => {
+        if (state.currentPage && state.currentPage.name === pageName) {
+          state.currentPage.version = updatedPage.version
+          state.currentPage.modifiedAt = updatedPage.modifiedAt
+        }
+      })
+    } catch (e) {
+      if (e instanceof VersionConflictError) {
+        // Version conflict - store local changes and prompt user
+        set((state) => {
+          state.pendingConflict = {
+            currentVersion: e.currentVersion,
+            localBlocks: blocks,
+            localRootBlocks: finalRoots,
+          }
+        })
+      } else {
+        set((state) => {
+          state.error = e instanceof Error ? e.message : 'Failed to save changes'
+        })
+      }
+    }
+  }, SAVE_DEBOUNCE_MS)
 }
 
 export const usePageStore = create<PageState>()(
@@ -596,92 +700,25 @@ export const usePageStore = create<PageState>()(
         }
       })
 
-      // Update sync status to unsaved (single source of truth for unsaved state)
-      useSyncStatusStore.getState().setUnsaved()
+      scheduleDebouncedSave(get, set)
+    },
 
-      // Debounced draft save (faster than server save for data loss prevention)
-      if (draftTimeout) {
-        clearTimeout(draftTimeout)
-      }
+    // Single-block text edit: patch one block's content without rebuilding the
+    // whole block map / root list / ordered array. This is the hot path while
+    // typing, so it must stay cheap on large pages (EF-07). Structural edits
+    // (split/merge/indent/move) still go through updateCurrentPage.
+    updateBlockContent: (uuid: string, content: string) => {
+      const { currentPage } = get()
+      if (!currentPage) return
+      const existing = currentPage.blocks[uuid]
+      if (!existing || existing.content === content) return
 
-      const pageName = currentPage.name
-      const serverVersion = currentPage.modifiedAt
+      set((state) => {
+        const block = state.currentPage?.blocks[uuid]
+        if (block) block.content = content
+      })
 
-      draftTimeout = setTimeout(async () => {
-        try {
-          await draftStore.saveDraft(pageName, blocks, finalRoots, serverVersion)
-        } catch (e) {
-          // Draft save failure is not critical - log but don't show error
-          console.warn('Failed to save draft to IndexedDB:', e)
-        }
-      }, DRAFT_DEBOUNCE_MS)
-
-      // Debounced save to server - cancel previous pending save
-      if (saveTimeout) {
-        clearTimeout(saveTimeout)
-      }
-
-      const contentType = currentPage.contentType
-      const isJournal = currentPage.isJournal
-      const journalDate = currentPage.journalDate
-
-      // Store pending save data for flush on navigation
-      pendingSaveData = {
-        pageName,
-        blocks,
-        contentType,
-        isJournal,
-        journalDate,
-      }
-
-      saveTimeout = setTimeout(async () => {
-        try {
-          // Read version at save time, not call time, to avoid stale version after rapid edits
-          const currentState = get()
-          const version = currentState.currentPage?.version
-
-          const apiBlocks = blocks.map(api.blockToApiFormat)
-          let updatedPage: Page
-          const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
-          if (contentTypeObj) {
-            const sheetName = extractSheetName(contentTypeObj, pageName)
-            const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
-            updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
-          } else {
-            // Fallback for unknown content type
-            updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version)
-          }
-          // Server save succeeded - clear the draft and pending save data
-          pendingSaveData = null
-          // Record save timestamp to ignore file watcher events for our own save
-          lastSaveTimestamp = Date.now()
-          await draftStore.deleteDraft(pageName)
-          // Log the save activity and update sync status
-          useActivityLogStore.getState().addEntry('file_save', pageName)
-          useSyncStatusStore.getState().setSaved()
-          set((state) => {
-            if (state.currentPage && state.currentPage.name === pageName) {
-              state.currentPage.version = updatedPage.version
-              state.currentPage.modifiedAt = updatedPage.modifiedAt
-            }
-          })
-        } catch (e) {
-          if (e instanceof VersionConflictError) {
-            // Version conflict - store local changes and prompt user
-            set((state) => {
-              state.pendingConflict = {
-                currentVersion: e.currentVersion,
-                localBlocks: blocks,
-                localRootBlocks: finalRoots,
-              }
-            })
-          } else {
-            set((state) => {
-              state.error = e instanceof Error ? e.message : 'Failed to save changes'
-            })
-          }
-        }
-      }, SAVE_DEBOUNCE_MS)
+      scheduleDebouncedSave(get, set)
     },
 
     setError: (error) => {
@@ -823,12 +860,17 @@ export const usePageStore = create<PageState>()(
 
       // If there's pending save data, save it immediately
       if (pendingSaveData) {
-        const { pageName, blocks, contentType } = pendingSaveData
+        const { pageName, contentType } = pendingSaveData
         pendingSaveData = null
 
         try {
           const currentState = get()
           const version = currentState.currentPage?.version
+          // Build the blocks array from current state (still the page being
+          // saved — flush runs before navigation swaps currentPage).
+          const page = currentState.currentPage
+          if (!page || page.name !== pageName) return
+          const blocks = orderedBlocksFromPage(page)
 
           const apiBlocks = blocks.map(api.blockToApiFormat)
           let updatedPage: Page

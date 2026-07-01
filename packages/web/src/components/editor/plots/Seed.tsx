@@ -18,7 +18,7 @@
 
 import React, { useRef, useEffect, useCallback, forwardRef, useImperativeHandle, useState, useMemo, memo } from 'react'
 import { EditorView, keymap } from '@codemirror/view'
-import { Compartment, EditorState, Prec, type Extension } from '@codemirror/state'
+import { Compartment, EditorSelection, EditorState, Prec, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands'
 import type { Block } from '../../../types'
 import { useActions } from './Actions'
@@ -198,6 +198,15 @@ function getCaretOffsetFromClick(e: React.MouseEvent): number | undefined {
   return found ? totalOffset : undefined
 }
 
+// A double-click on a dormant block straddles the dormant→active swap: the first
+// click activates the block (DormantSeed unmounts) and the second click lands on
+// the freshly-mounted CodeMirror, which therefore only ever sees a single click
+// and never selects the word. We bridge the gap by recording the activating click
+// here; the active editor's first mouseup, if it falls within the double-click
+// threshold, selects the word at that point (EF-20). Only one block activates at
+// a time, so a single module-level slot is sufficient.
+let lastDormantActivationClick: { time: number; x: number; y: number } | null = null
+
 /**
  * DormantSeed: Static HTML rendering of block content.
  * Memoized on content to avoid unnecessary re-renders.
@@ -286,6 +295,10 @@ const DormantSeed = React.memo(forwardRef<SeedHandle, {
         return
       }
     }
+
+    // Record this click so the active editor can recognise a double-click that
+    // straddled activation and select the word (EF-20).
+    lastDormantActivationClick = { time: e.timeStamp, x: e.clientX, y: e.clientY }
 
     // This was a click - activate the block with cursor at click position
     const renderedOffset = getCaretOffsetFromClick(e)
@@ -680,35 +693,36 @@ const ActiveSeed = forwardRef<SeedHandle, {
         {
           key: 'ArrowUp',
           run: (view) => {
-            const pos = view.state.selection.main.head
-            const line = view.state.doc.lineAt(pos)
-            if (line.number === 1) {
-              onBoundaryEventRef.current({
-                // Send the COLUMN (offset within the line), like arrow-down, so
-                // the previous block can place the caret on its last line at the
-                // same column (EF-10).
-                type: 'arrow-up',
-                cursorOffset: pos - line.from,
-              })
-              return true
-            }
-            return false
+            const range = view.state.selection.main
+            if (!range.empty) return false
+            // Only cross to the previous block from the first VISUAL line. A
+            // block can soft-wrap to several visual lines within one document
+            // line, so checking doc lines would wrongly leave the block from any
+            // wrapped row. If CodeMirror can still move up a visual line, let it.
+            if (view.moveVertically(range, false).head !== range.head) return false
+            const visualStart = view.moveToLineBoundary(range, false).head
+            onBoundaryEventRef.current({
+              // Send the VISUAL column so the previous block can place the caret
+              // at the same column on its last line (EF-10).
+              type: 'arrow-up',
+              cursorOffset: range.head - visualStart,
+            })
+            return true
           },
         },
-        // Arrow Down - navigate to next block if on last line
+        // Arrow Down - navigate to next block only from the last VISUAL line
         {
           key: 'ArrowDown',
           run: (view) => {
-            const pos = view.state.selection.main.head
-            const line = view.state.doc.lineAt(pos)
-            if (line.number === view.state.doc.lines) {
-              onBoundaryEventRef.current({
-                type: 'arrow-down',
-                cursorOffset: pos - line.from,
-              })
-              return true
-            }
-            return false
+            const range = view.state.selection.main
+            if (!range.empty) return false
+            if (view.moveVertically(range, true).head !== range.head) return false
+            const visualStart = view.moveToLineBoundary(range, false).head
+            onBoundaryEventRef.current({
+              type: 'arrow-down',
+              cursorOffset: range.head - visualStart,
+            })
+            return true
           },
         },
         // Arrow Left at start - go to previous block
@@ -777,6 +791,11 @@ const ActiveSeed = forwardRef<SeedHandle, {
   // Create typewriter scrolling listener - keeps cursor centered when past middle of viewport
   const createTypewriterListener = useCallback(() => {
     return EditorView.updateListener.of((update) => {
+      // Only react to actual edits / caret moves, NOT to scroll-induced geometry
+      // updates — otherwise scrolling re-measures and fires more scrolls, the
+      // jiggle feedback loop (EF-06).
+      if (!update.docChanged && !update.selectionSet) return
+
       const view = update.view
       const pos = view.state.selection.main.head
 
@@ -789,23 +808,32 @@ const ActiveSeed = forwardRef<SeedHandle, {
       if (lastY !== null && Math.abs(cursorCoords.top - lastY) < 1) return
       lastCursorYRef.current = cursorCoords.top
 
-      // If cursor is below the middle of the viewport, scroll to center it
-      // CodeMirror's scroller is set to overflow: visible, so we need to scroll
-      // the parent scroll container instead of using EditorView.scrollIntoView
+      // CodeMirror's scroller is overflow: visible, so we scroll the parent
+      // container rather than using EditorView.scrollIntoView.
       const scrollContainer = view.dom.closest('.overflow-y-auto') as HTMLElement | null
       if (!scrollContainer) return
 
       const containerRect = scrollContainer.getBoundingClientRect()
       const cursorRelativeToContainer = cursorCoords.top - containerRect.top
       const containerMiddle = containerRect.height / 2
-
-      // Only scroll when cursor is past the middle, with a dead zone to prevent jiggle
-      // Lock out further scrolls until the smooth animation completes
       const scrollAmount = cursorRelativeToContainer - containerMiddle
-      if (scrollAmount > 10 && !scrollingRef.current) {
+
+      // Recenter when the caret falls past the middle (down) OR rises above the
+      // container top (up). The upward case was missing, so arrow-up/merge near
+      // the top parked the caret out of view (EF-06). Dead zone prevents jiggle.
+      const aboveViewport = cursorRelativeToContainer < 0
+      if (!scrollingRef.current && (scrollAmount > 10 || aboveViewport)) {
         scrollingRef.current = true
+        // Release on the real scrollend signal, not a guessed timer (whose
+        // duration never matched the smooth-scroll animation, causing a second
+        // competing scroll). Fall back to a timeout where scrollend is missing.
+        const release = () => {
+          scrollingRef.current = false
+          scrollContainer.removeEventListener('scrollend', release)
+        }
+        scrollContainer.addEventListener('scrollend', release)
+        setTimeout(release, 700)
         scrollContainer.scrollBy({ top: scrollAmount, behavior: 'smooth' })
-        setTimeout(() => { scrollingRef.current = false }, 300)
       }
     })
   }, [])
@@ -813,6 +841,23 @@ const ActiveSeed = forwardRef<SeedHandle, {
   // Create focus/blur/paste handlers
   const createEventHandlers = useCallback(() => {
     return EditorView.domEventHandlers({
+      mouseup: (event, view) => {
+        // Recognise the second click of a double-click that straddled activation
+        // and select the word at that point, so double-click-to-replace works on
+        // a dormant block (EF-20).
+        const last = lastDormantActivationClick
+        lastDormantActivationClick = null
+        if (!last) return false
+        const withinTime = event.timeStamp - last.time < 500
+        const withinDist = Math.hypot(event.clientX - last.x, event.clientY - last.y) < 6
+        if (!withinTime || !withinDist) return false
+        const pos = view.posAtCoords({ x: event.clientX, y: event.clientY })
+        if (pos === null) return false
+        const word = view.state.wordAt(pos)
+        if (!word) return false
+        view.dispatch({ selection: EditorSelection.range(word.from, word.to) })
+        return false
+      },
       focus: () => {
         onFocusRef.current?.()
         return false
@@ -944,18 +989,32 @@ const ActiveSeed = forwardRef<SeedHandle, {
 
     if (block.content !== contentRef.current) {
       isExternalUpdate.current = true
-      contentRef.current = block.content
+      const oldText = view.state.doc.toString()
+      const newText = block.content
+      contentRef.current = newText
 
-      const cursorPos = view.state.selection.main.head
+      // Replace only the changed middle (common prefix + suffix preserved) and
+      // let CodeMirror map the current selection through the change, so an
+      // external update (draft restore / conflict reload / another client)
+      // doesn't blow away the caret or undo history (EF-17).
+      let prefix = 0
+      const maxPrefix = Math.min(oldText.length, newText.length)
+      while (prefix < maxPrefix && oldText[prefix] === newText[prefix]) prefix++
+      let suffix = 0
+      const maxSuffix = Math.min(oldText.length - prefix, newText.length - prefix)
+      while (
+        suffix < maxSuffix &&
+        oldText[oldText.length - 1 - suffix] === newText[newText.length - 1 - suffix]
+      ) {
+        suffix++
+      }
 
-      view.dispatch({
-        changes: {
-          from: 0,
-          to: view.state.doc.length,
-          insert: block.content,
-        },
-        selection: { anchor: Math.min(cursorPos, block.content.length) },
-      })
+      const from = prefix
+      const to = oldText.length - suffix
+      const insert = newText.slice(prefix, newText.length - suffix)
+      if (from !== to || insert.length > 0) {
+        view.dispatch({ changes: { from, to, insert } })
+      }
 
       isExternalUpdate.current = false
     }
