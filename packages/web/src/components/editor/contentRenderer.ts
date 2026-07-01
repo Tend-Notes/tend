@@ -22,7 +22,7 @@ export interface TagColors {
 /**
  * Token types for parsed content
  */
-export type ContentToken =
+export type ContentTokenData =
   | { type: 'text'; content: string }
   | { type: 'bold'; content: string }
   | { type: 'italic'; content: string }
@@ -36,6 +36,22 @@ export type ContentToken =
   | { type: 'taskStatus'; keyword: string; color: string }
   | { type: 'blockReference'; uuid: string }
   | { type: 'headerPrefix'; level: number }
+
+// Source span attached to every token at parse time, so caret offset mapping is
+// a lookup instead of per-type arithmetic re-derived in three places (EF-08).
+//   srcFrom..srcFrom+srcLen  is the token's full source range (delimiters incl.)
+//   the rendered (visible) text is the source substring
+//     [srcFrom+lead, srcFrom+lead+renderedLen)
+// so a delimiter's width lives in `lead`/(srcLen-lead-renderedLen), never in the
+// maps. Zero-width rendered tokens (header prefix) have renderedLen === 0.
+export interface TokenSpan {
+  srcFrom: number
+  srcLen: number
+  lead: number
+  renderedLen: number
+}
+
+export type ContentToken = ContentTokenData & { span: TokenSpan }
 
 // UUID regex pattern for block references
 const UUID_PATTERN = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
@@ -61,24 +77,44 @@ const TASK_KEYWORD_COLORS: Record<string, string> = {
 export function parseContent(content: string): ContentToken[] {
   const tokens: ContentToken[] = []
   let remaining = content
+  // Absolute number of `content` characters already consumed, so each token can
+  // record its source span (EF-08).
+  let base = 0
+
+  const push = (
+    token: ContentTokenData,
+    srcFrom: number,
+    srcLen: number,
+    lead: number,
+    renderedLen: number,
+  ) => {
+    tokens.push({ ...token, span: { srcFrom, srcLen, lead, renderedLen } })
+  }
 
   // Check for header prefix at the very start
   const headerMatch = remaining.match(/^(#{1,6})\s/)
   if (headerMatch) {
-    tokens.push({ type: 'headerPrefix', level: headerMatch[1].length })
+    // The whole prefix (hashes + one space) is delimiter: lead === srcLen, no
+    // rendered width.
+    push({ type: 'headerPrefix', level: headerMatch[1].length }, base, headerMatch[0].length, headerMatch[0].length, 0)
     remaining = remaining.slice(headerMatch[0].length)
+    base += headerMatch[0].length
   }
 
   // Check for task status keyword at the start (after any header prefix)
   const taskMatch = remaining.match(new RegExp(`^(${TASK_KEYWORDS.join('|')})\\s`))
   if (taskMatch) {
     const keyword = taskMatch[1]
-    tokens.push({
-      type: 'taskStatus',
-      keyword,
-      color: TASK_KEYWORD_COLORS[keyword] || 'base-03',
-    })
+    // Rendered as a badge of the keyword; the trailing space is delimiter.
+    push(
+      { type: 'taskStatus', keyword, color: TASK_KEYWORD_COLORS[keyword] || 'base-03' },
+      base,
+      taskMatch[0].length,
+      0,
+      keyword.length,
+    )
     remaining = remaining.slice(taskMatch[0].length)
+    base += taskMatch[0].length
   }
 
   // Combined regex for all patterns we want to match
@@ -123,60 +159,77 @@ export function parseContent(content: string): ContentToken[] {
     if (earliestMatch === null) {
       // No more matches - add remaining as text
       if (remaining.length > 0) {
-        tokens.push({ type: 'text', content: remaining })
+        push({ type: 'text', content: remaining }, base, remaining.length, 0, remaining.length)
       }
       break
     }
 
     // Add text before the match
-    if (earliestMatch.index > 0) {
-      tokens.push({ type: 'text', content: remaining.slice(0, earliestMatch.index) })
+    const { match, pattern, index } = earliestMatch
+    if (index > 0) {
+      push({ type: 'text', content: remaining.slice(0, index) }, base, index, 0, index)
     }
 
-    // Add the matched token
-    const { match, pattern } = earliestMatch
+    // Add the matched token. srcLen is always match[0].length; `lead` is the
+    // width of the leading delimiter, so the visible text is the source
+    // substring [srcFrom+lead, srcFrom+lead+renderedLen).
+    const tokFrom = base + index
+    const srcLen = match[0].length
     switch (pattern.type) {
       case 'blockReference':
-        tokens.push({ type: 'blockReference', uuid: match[1] })
+        push({ type: 'blockReference', uuid: match[1] }, tokFrom, srcLen, 0, match[1].length + 4)
         break
       case 'bolditalic':
-        tokens.push({ type: 'bolditalic', content: match[2] })
+        push({ type: 'bolditalic', content: match[2] }, tokFrom, srcLen, 3, match[2].length)
         break
       case 'bold':
-        tokens.push({ type: 'bold', content: match[2] })
+        push({ type: 'bold', content: match[2] }, tokFrom, srcLen, 2, match[2].length)
         break
       case 'italic':
-        tokens.push({ type: 'italic', content: match[2] })
+        push({ type: 'italic', content: match[2] }, tokFrom, srcLen, 1, match[2].length)
         break
       case 'strikethrough':
-        tokens.push({ type: 'strikethrough', content: match[1] })
+        push({ type: 'strikethrough', content: match[1] }, tokFrom, srcLen, 2, match[1].length)
         break
       case 'highlight':
-        tokens.push({ type: 'highlight', content: match[1] })
+        push({ type: 'highlight', content: match[1] }, tokFrom, srcLen, 2, match[1].length)
         break
       case 'code':
-        tokens.push({ type: 'code', content: match[1] })
+        push({ type: 'code', content: match[1] }, tokFrom, srcLen, 1, match[1].length)
         break
-      case 'wikilink':
-        tokens.push({
-          type: 'wikilink',
-          target: match[1],
-          display: match[2] || match[1],
-        })
+      case 'wikilink': {
+        const target = match[1]
+        const display = match[2] || match[1]
+        // Displayed text is the part of `display` after its last slash.
+        const lastSlash = display.lastIndexOf('/')
+        const displayText = lastSlash >= 0 ? display.slice(lastSlash + 1) : display
+        // Where the visible text begins within the source: past "[[", past
+        // "target|" if aliased, then past everything up to the last slash.
+        const displayStartInSrc = match[2] ? 2 + target.length + 1 : 2
+        const lead = displayStartInSrc + (lastSlash >= 0 ? lastSlash + 1 : 0)
+        push({ type: 'wikilink', target, display }, tokFrom, srcLen, lead, displayText.length)
         break
-      case 'tag':
-        // Tag regex captures leading whitespace - preserve it
-        if (match[0].startsWith(' ') || match[0].startsWith('\t')) {
-          tokens.push({ type: 'text', content: match[0][0] })
+      }
+      case 'tag': {
+        // Tag regex captures leading whitespace - emit it as its own text token.
+        const hasLeadingSpace = match[0].startsWith(' ') || match[0].startsWith('\t')
+        let tagFrom = tokFrom
+        if (hasLeadingSpace) {
+          push({ type: 'text', content: match[0][0] }, tokFrom, 1, 0, 1)
+          tagFrom = tokFrom + 1
         }
-        tokens.push({ type: 'tag', name: match[1].slice(1) }) // Remove #
+        const name = match[1].slice(1) // Remove #
+        push({ type: 'tag', name }, tagFrom, name.length + 1, 0, name.length + 1)
         break
+      }
       case 'url':
-        tokens.push({ type: 'url', url: match[1] })
+        push({ type: 'url', url: match[1] }, tokFrom, srcLen, 0, match[1].length)
         break
     }
 
-    remaining = remaining.slice(earliestMatch.index + match[0].length)
+    const consumed = index + match[0].length
+    remaining = remaining.slice(consumed)
+    base += consumed
   }
 
   return tokens
@@ -650,143 +703,27 @@ export function mapRenderedOffsetToSource(
   renderedOffset: number
 ): number {
   let renderedPos = 0
-  let sourcePos = 0
+  let lastSourceEnd = 0
 
   for (const token of tokens) {
-    // Compute rendered length and source length for each token type
-    let renderedLen: number
-    let sourceLen: number
+    const { srcFrom, srcLen, lead, renderedLen } = token.span
+    lastSourceEnd = srcFrom + srcLen
 
-    switch (token.type) {
-      case 'text':
-        renderedLen = token.content.length
-        sourceLen = token.content.length
-        break
-      case 'bold':
-        renderedLen = token.content.length
-        // ** or __ around content
-        sourceLen = token.content.length + 4
-        break
-      case 'italic':
-        renderedLen = token.content.length
-        // * or _ around content
-        sourceLen = token.content.length + 2
-        break
-      case 'bolditalic':
-        renderedLen = token.content.length
-        // *** or ___ around content
-        sourceLen = token.content.length + 6
-        break
-      case 'strikethrough':
-        renderedLen = token.content.length
-        // ~~ around content
-        sourceLen = token.content.length + 4
-        break
-      case 'highlight':
-        renderedLen = token.content.length
-        // == around content
-        sourceLen = token.content.length + 4
-        break
-      case 'code':
-        renderedLen = token.content.length
-        // ` around content
-        sourceLen = token.content.length + 2
-        break
-      case 'wikilink': {
-        // Displayed text (after last slash for content type paths)
-        const lastSlash = token.display.lastIndexOf('/')
-        const displayText = lastSlash >= 0 ? token.display.slice(lastSlash + 1) : token.display
-        renderedLen = displayText.length
-        // Source: [[target]] or [[target|display]]
-        if (token.target === token.display) {
-          sourceLen = token.target.length + 4 // [[target]]
-        } else {
-          sourceLen = token.target.length + 1 + token.display.length + 4 // [[target|display]]
-        }
-        break
-      }
-      case 'tag':
-        // Rendered: #name, Source: #name
-        renderedLen = token.name.length + 1
-        sourceLen = token.name.length + 1
-        break
-      case 'url':
-        renderedLen = token.url.length
-        sourceLen = token.url.length
-        break
-      case 'taskStatus':
-        // Rendered: keyword badge, Source: keyword + space
-        renderedLen = token.keyword.length
-        sourceLen = token.keyword.length + 1
-        break
-      case 'blockReference':
-        // Rendered: ((uuid)), Source: ((uuid))
-        renderedLen = token.uuid.length + 4
-        sourceLen = token.uuid.length + 4
-        break
-      case 'headerPrefix':
-        // Hidden in rendered output, but present in source
-        renderedLen = 0
-        sourceLen = token.level + 1 // "## " = hashes + space (e.g., level 2 = "## " = 3 chars)
-        break
-      default:
-        renderedLen = 0
-        sourceLen = 0
-    }
-
-    // If the rendered offset falls within this token, interpolate
     if (renderedOffset <= renderedPos + renderedLen) {
-      const offsetInToken = renderedOffset - renderedPos
-      if (renderedLen === 0) {
-        // Zero-width rendered token (e.g., headerPrefix) - skip
-        return sourcePos
-      }
-      // For formatting tokens, place cursor after opening delimiter + proportional offset
-      const ratio = offsetInToken / renderedLen
-      const sourceOffset = Math.round(ratio * sourceLen)
-
-      // For tokens with delimiters, ensure we land inside the content
-      switch (token.type) {
-        case 'bold': {
-          // Source: **content** - opening delimiter is 2 chars
-          const innerOffset = Math.min(offsetInToken, token.content.length)
-          return sourcePos + 2 + innerOffset
-        }
-        case 'italic': {
-          const innerOffset = Math.min(offsetInToken, token.content.length)
-          return sourcePos + 1 + innerOffset
-        }
-        case 'bolditalic': {
-          const innerOffset = Math.min(offsetInToken, token.content.length)
-          return sourcePos + 3 + innerOffset
-        }
-        case 'strikethrough': {
-          const innerOffset = Math.min(offsetInToken, token.content.length)
-          return sourcePos + 2 + innerOffset
-        }
-        case 'highlight': {
-          const innerOffset = Math.min(offsetInToken, token.content.length)
-          return sourcePos + 2 + innerOffset
-        }
-        case 'code': {
-          const innerOffset = Math.min(offsetInToken, token.content.length)
-          return sourcePos + 1 + innerOffset
-        }
-        case 'wikilink': {
-          // Place cursor inside [[...]] at proportional position
-          return sourcePos + 2 + Math.min(offsetInToken, token.target.length)
-        }
-        default:
-          return sourcePos + sourceOffset
-      }
+      // A zero-width rendered token (e.g. the header prefix) occupies no visible
+      // space, so let the offset fall through to the next token — that maps
+      // rendered offset 0 onto the first real character, not before the hashes.
+      if (renderedLen === 0) continue
+      // The visible text is the source substring at [srcFrom+lead, ...], so the
+      // caret maps straight in — no per-type delimiter arithmetic.
+      return srcFrom + lead + (renderedOffset - renderedPos)
     }
 
     renderedPos += renderedLen
-    sourcePos += sourceLen
   }
 
   // Offset is past all tokens - return end of source
-  return sourcePos
+  return lastSourceEnd
 }
 
 /**
@@ -802,128 +739,23 @@ export function mapSourceOffsetToRendered(
   sourceOffset: number
 ): number {
   let renderedPos = 0
-  let sourcePos = 0
+  let lastRenderedEnd = 0
 
   for (const token of tokens) {
-    let renderedLen: number
-    let sourceLen: number
+    const { srcFrom, srcLen, lead, renderedLen } = token.span
+    lastRenderedEnd = renderedPos + renderedLen
 
-    switch (token.type) {
-      case 'text':
-        renderedLen = token.content.length
-        sourceLen = token.content.length
-        break
-      case 'bold':
-        renderedLen = token.content.length
-        sourceLen = token.content.length + 4
-        break
-      case 'italic':
-        renderedLen = token.content.length
-        sourceLen = token.content.length + 2
-        break
-      case 'bolditalic':
-        renderedLen = token.content.length
-        sourceLen = token.content.length + 6
-        break
-      case 'strikethrough':
-        renderedLen = token.content.length
-        sourceLen = token.content.length + 4
-        break
-      case 'highlight':
-        renderedLen = token.content.length
-        sourceLen = token.content.length + 4
-        break
-      case 'code':
-        renderedLen = token.content.length
-        sourceLen = token.content.length + 2
-        break
-      case 'wikilink': {
-        const lastSlash = token.display.lastIndexOf('/')
-        const displayText = lastSlash >= 0 ? token.display.slice(lastSlash + 1) : token.display
-        renderedLen = displayText.length
-        if (token.target === token.display) {
-          sourceLen = token.target.length + 4
-        } else {
-          sourceLen = token.target.length + 1 + token.display.length + 4
-        }
-        break
-      }
-      case 'tag':
-        renderedLen = token.name.length + 1
-        sourceLen = token.name.length + 1
-        break
-      case 'url':
-        renderedLen = token.url.length
-        sourceLen = token.url.length
-        break
-      case 'taskStatus':
-        renderedLen = token.keyword.length
-        sourceLen = token.keyword.length + 1
-        break
-      case 'blockReference':
-        renderedLen = token.uuid.length + 4
-        sourceLen = token.uuid.length + 4
-        break
-      case 'headerPrefix':
-        renderedLen = 0
-        sourceLen = token.level + 1
-        break
-      default:
-        renderedLen = 0
-        sourceLen = 0
-    }
-
-    if (sourceOffset <= sourcePos + sourceLen) {
-      const offsetInToken = sourceOffset - sourcePos
-      if (sourceLen === 0) {
-        return renderedPos
-      }
-
-      // For tokens with delimiters, map the inner content position
-      switch (token.type) {
-        case 'bold': {
-          // Source: **content** - opening delimiter is 2 chars
-          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, token.content.length))
-          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
-        }
-        case 'italic': {
-          const innerOffset = Math.max(0, Math.min(offsetInToken - 1, token.content.length))
-          return renderedPos + (offsetInToken < 1 ? 0 : innerOffset)
-        }
-        case 'bolditalic': {
-          const innerOffset = Math.max(0, Math.min(offsetInToken - 3, token.content.length))
-          return renderedPos + (offsetInToken < 3 ? 0 : innerOffset)
-        }
-        case 'strikethrough': {
-          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, token.content.length))
-          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
-        }
-        case 'highlight': {
-          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, token.content.length))
-          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
-        }
-        case 'code': {
-          const innerOffset = Math.max(0, Math.min(offsetInToken - 1, token.content.length))
-          return renderedPos + (offsetInToken < 1 ? 0 : innerOffset)
-        }
-        case 'wikilink': {
-          // Source: [[target]] or [[target|display]] -- map inside [[ to rendered start
-          const innerOffset = Math.max(0, Math.min(offsetInToken - 2, renderedLen))
-          return renderedPos + (offsetInToken < 2 ? 0 : innerOffset)
-        }
-        case 'headerPrefix':
-          return renderedPos
-        default: {
-          const ratio = offsetInToken / sourceLen
-          return renderedPos + Math.round(ratio * renderedLen)
-        }
-      }
+    if (sourceOffset <= srcFrom + srcLen) {
+      // Source before the leading delimiter clamps to the token's rendered
+      // start; source past the visible text clamps to its rendered end. Inside
+      // the visible span it maps one-to-one.
+      const within = Math.max(0, Math.min(sourceOffset - srcFrom - lead, renderedLen))
+      return renderedPos + within
     }
 
     renderedPos += renderedLen
-    sourcePos += sourceLen
   }
 
   // Offset is past all tokens - return end of rendered
-  return renderedPos
+  return lastRenderedEnd
 }
