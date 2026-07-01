@@ -34,29 +34,31 @@
 }
 
 /* Fold/bullet — a real clickable element, absolutely placed to align with the
-   first line regardless of subtree height. */
+   first line regardless of subtree height. Bullet matches V1: 6px, base03,
+   aligned to the first line (V1 uses mt-0.55rem on a 6px dot). */
 .outline2 .block-fold {
   position: absolute;
-  left: -0.95rem;
-  top: 0.5em;
-  width: 0.9rem;
-  height: 1.2em;
+  left: -18px; /* gap(12px) + dot(6px) */
+  top: 0;
+  width: 18px;
+  height: 1.5em;
   cursor: pointer;
   user-select: none;
 }
 .outline2 .block-fold::before {
   content: '';
   position: absolute;
-  left: 0.25rem;
-  top: 0.15em;
-  width: 5px;
-  height: 5px;
+  left: 0;
+  top: 0.55rem;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--base04, #888);
+  background: var(--base03, #888);
 }
 /* Ring around the bullet when a collapsed block has hidden children. */
 .outline2 .block-container[data-collapsed="true"][data-has-children="true"] > .block-fold::before {
-  box-shadow: 0 0 0 3px var(--base02, #333);
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--base03, #888);
 }
 
 /* No bullet for headers, code fences, block references. */
@@ -66,8 +68,8 @@
 
 .outline2 .block-content {
   position: relative;
-  padding: 0.12rem 0;
-  min-height: 1.4em;
+  padding: 2px 0;
+  min-height: 1.5em;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -95,7 +97,7 @@
   font-weight: 600;
   color: var(--base06);
   margin-top: 1.5rem;
-  margin-bottom: 0.25rem;
+  margin-bottom: 0.75rem;
 }
 .outline2 .block-content.pm-h1 { font-size: 1.25rem; line-height: 1.3; }
 .outline2 .block-content.pm-h2 { font-size: 1.125rem; line-height: 1.35; }

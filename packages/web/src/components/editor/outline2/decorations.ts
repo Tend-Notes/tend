@@ -59,7 +59,11 @@ function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
       const contentTo = contentFrom + renderedLen
 
       if (DELIMITED.has(tok.type)) {
-        decos.push(Decoration.inline(contentFrom, contentTo, { class: CONTENT_CLASS[tok.type] }))
+        const attrs: Record<string, string> = { class: CONTENT_CLASS[tok.type] }
+        // Highlight renders as <mark> (like V1) so the UA default gives reversed
+        // (dark) text on the yellow background.
+        if (tok.type === 'highlight') attrs.nodeName = 'mark'
+        decos.push(Decoration.inline(contentFrom, contentTo, attrs))
         pushDelims(from, contentFrom, contentTo, to)
         continue
       }
