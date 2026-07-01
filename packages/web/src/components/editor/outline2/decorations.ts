@@ -85,9 +85,15 @@ function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
         case 'blockReference':
           decos.push(Decoration.inline(from, to, { class: 'pm-blockref', 'data-ref': tok.uuid }))
           break
-        case 'taskStatus':
-          decos.push(Decoration.inline(from, contentTo, { class: `pm-task pm-task-${tok.keyword.toLowerCase()}` }))
+        case 'taskStatus': {
+          // Match V1's task-status-badge: keyword color bg, base00 text.
+          const cssColor = tok.color.replace('-', '')
+          const style = `display:inline-block;padding:1px 6px;margin-right:6px;font-size:0.75em;font-weight:600;border-radius:3px;background-color:var(--${cssColor},#666);color:var(--base00,#fff)`
+          decos.push(Decoration.inline(from, contentTo, { class: 'task-status-badge', style }))
+          // Hide the trailing space (the badge's margin-right spaces it instead).
+          if (to > contentTo) decos.push(Decoration.inline(contentTo, to, { class: delimClass }))
           break
+        }
         case 'headerPrefix':
           decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-h${tok.level}` }))
           // Hide the "# " prefix off the active line; dim it on it.
