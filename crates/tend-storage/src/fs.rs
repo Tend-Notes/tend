@@ -324,7 +324,7 @@ impl FileManager {
             let mut entries = tokio::fs::read_dir(&base_dir).await?;
             while let Some(entry) = entries.next_entry().await? {
                 let path = entry.path();
-                if !path.extension().is_some_and(|e| e == "md") {
+                if path.extension().is_none_or(|e| e != "md") {
                     continue;
                 }
                 let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
