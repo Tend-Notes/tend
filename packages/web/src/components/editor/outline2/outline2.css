@@ -59,6 +59,11 @@
   box-shadow: 0 0 0 3px var(--base02, #333);
 }
 
+/* No bullet for headers, code fences, block references. */
+.outline2 .block-container[data-nobullet="true"] > .block-fold::before {
+  display: none;
+}
+
 .outline2 .block-content {
   position: relative;
   padding: 0.12rem 0;
@@ -75,6 +80,8 @@
 .outline2 .pm-highlight { background: var(--base0A, #e5c07b); color: var(--base00, #000); border-radius: 2px; }
 .outline2 .pm-code { font-family: ui-monospace, monospace; background: var(--base01, #333); padding: 0 3px; border-radius: 3px; }
 .outline2 .pm-delim { opacity: 0.35; }
+/* Delimiters on non-active lines are hidden (live preview). */
+.outline2 .pm-hidden { display: none; }
 .outline2 .pm-url { color: var(--base0D, #61afef); text-decoration: underline; cursor: pointer; }
 .outline2 .pm-blockref { color: var(--base0C, #56b6c2); }
 .outline2 .pm-task { font-weight: 700; }

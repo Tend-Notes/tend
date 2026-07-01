@@ -46,6 +46,11 @@ export class ListItemView implements NodeView {
       if (c.type.name === 'bullet_list') hasChildren = true
     })
     this.dom.setAttribute('data-has-children', hasChildren ? 'true' : 'false')
+    // Hide the bullet for headers, code fences, and pure block references
+    // (matches V1's hideBullet).
+    const text = node.child(0).textContent
+    const noBullet = /^#{1,6}\s/.test(text) || text.startsWith('```') || /^\(\([0-9a-f-]{36}\)\)$/i.test(text.trim())
+    this.dom.setAttribute('data-nobullet', noBullet ? 'true' : 'false')
   }
 
   update(node: PMNode) {

@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 //
-// Inline formatting for Editor V2. Respects the layer split: the parse layer
-// (`parseContent` -> tokens with source spans) is reused unchanged; only the
-// paint layer is new — it maps token spans to ProseMirror inline/node
-// decorations. Formatting stays source-markdown + decorations (one renderer for
-// every block), so a line's text maps 1:1 to Block.content.
+// Inline formatting for Editor V2 (live-preview). Respects the layer split: the
+// parse layer (`parseContent` -> tokens with source spans) is reused unchanged;
+// only the paint layer is new — it maps token spans to ProseMirror decorations.
+// Markdown delimiters are HIDDEN except on the line the caret is in (and only
+// when the editor is focused), matching the "source when editing, rendered
+// otherwise" behavior.
 
-import { Plugin } from 'prosemirror-state'
+import { EditorState, Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
 
-// CSS class for the styled *content* of each inline token type.
 const CONTENT_CLASS: Record<string, string> = {
   bold: 'pm-bold',
   italic: 'pm-italic',
@@ -20,15 +20,34 @@ const CONTENT_CLASS: Record<string, string> = {
   highlight: 'pm-highlight',
   code: 'pm-code',
 }
+const DELIMITED = new Set(Object.keys(CONTENT_CLASS))
 
-function decorationsForDoc(doc: PMNode): DecorationSet {
+// Position of the `line` node containing the caret, or -1 when the editor is not
+// focused (so every line renders as "rendered", delimiters hidden).
+function activeLinePos(state: EditorState, focused: boolean): number {
+  if (!focused) return -1
+  const $h = state.selection.$head
+  for (let d = $h.depth; d > 0; d--) {
+    if ($h.node(d).type.name === 'line') return $h.before(d)
+  }
+  return -1
+}
+
+function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
   const decos: Decoration[] = []
 
   doc.descendants((node, pos) => {
     if (node.type.name !== 'line') return
     const text = node.textContent
     if (!text) return
-    const base = pos + 1 // first inline position inside the line
+    const base = pos + 1
+    const active = pos === activePos
+    // On the active line show delimiters (dimmed); elsewhere hide them.
+    const delimClass = active ? 'pm-delim' : 'pm-hidden'
+    const pushDelims = (from: number, contentFrom: number, contentTo: number, to: number) => {
+      if (contentFrom > from) decos.push(Decoration.inline(from, contentFrom, { class: delimClass }))
+      if (to > contentTo) decos.push(Decoration.inline(contentTo, to, { class: delimClass }))
+    }
 
     for (const tok of parseContent(text)) {
       const { srcFrom, srcLen, lead, renderedLen } = tok.span
@@ -37,21 +56,15 @@ function decorationsForDoc(doc: PMNode): DecorationSet {
       const contentFrom = base + srcFrom + lead
       const contentTo = contentFrom + renderedLen
 
+      if (DELIMITED.has(tok.type)) {
+        decos.push(Decoration.inline(contentFrom, contentTo, { class: CONTENT_CLASS[tok.type] }))
+        pushDelims(from, contentFrom, contentTo, to)
+        continue
+      }
       switch (tok.type) {
-        case 'bold':
-        case 'italic':
-        case 'bolditalic':
-        case 'strikethrough':
-        case 'highlight':
-        case 'code': {
-          decos.push(Decoration.inline(contentFrom, contentTo, { class: CONTENT_CLASS[tok.type] }))
-          // Dim the delimiters (the source chars outside the visible content).
-          if (contentFrom > from) decos.push(Decoration.inline(from, contentFrom, { class: 'pm-delim' }))
-          if (to > contentTo) decos.push(Decoration.inline(contentTo, to, { class: 'pm-delim' }))
-          break
-        }
         case 'wikilink':
-          decos.push(Decoration.inline(from, to, { class: 'wiki-link', 'data-target': tok.target }))
+          decos.push(Decoration.inline(contentFrom, contentTo, { class: 'wiki-link', 'data-target': tok.target }))
+          pushDelims(from, contentFrom, contentTo, to)
           break
         case 'tag':
           decos.push(Decoration.inline(from, to, { class: 'tag-pill', 'data-tag': tok.name }))
@@ -67,7 +80,8 @@ function decorationsForDoc(doc: PMNode): DecorationSet {
           break
         case 'headerPrefix':
           decos.push(Decoration.node(pos, pos + node.nodeSize, { class: `pm-h${tok.level}` }))
-          decos.push(Decoration.inline(from, to, { class: 'pm-delim' }))
+          // Hide the "# " prefix off the active line; dim it on it.
+          decos.push(Decoration.inline(from, to, { class: delimClass }))
           break
       }
     }
@@ -81,21 +95,42 @@ export interface NavHandlers {
   navigateToJournal: (date: string) => void
 }
 
-// Route a wikilink target the same way Seed does (journals/<date> -> journal).
 function navigate(target: string, nav: NavHandlers) {
   if (target.startsWith('journals/')) nav.navigateToJournal(target.slice('journals/'.length))
   else nav.navigateToPage(target)
 }
 
-export function formattingPlugin(nav: NavHandlers): Plugin {
-  return new Plugin({
+interface FmtState {
+  deco: DecorationSet
+  focused: boolean
+}
+
+export function formattingPlugin(nav: NavHandlers): Plugin<FmtState> {
+  return new Plugin<FmtState>({
     state: {
-      init: (_config, state) => decorationsForDoc(state.doc),
-      apply: (tr, old) => (tr.docChanged ? decorationsForDoc(tr.doc) : old),
+      init: (_config, state) => ({ deco: decorationsForDoc(state.doc, -1), focused: false }),
+      apply(tr, prev, _oldState, newState) {
+        const focusMeta = tr.getMeta('outline2-focus') as boolean | undefined
+        const focused = focusMeta === undefined ? prev.focused : focusMeta
+        if (!tr.docChanged && !tr.selectionSet && focusMeta === undefined) {
+          return { deco: prev.deco.map(tr.mapping, tr.doc), focused }
+        }
+        return { deco: decorationsForDoc(newState.doc, activeLinePos(newState, focused)), focused }
+      },
     },
     props: {
       decorations(state) {
-        return this.getState(state)
+        return this.getState(state)?.deco
+      },
+      handleDOMEvents: {
+        focus(view) {
+          view.dispatch(view.state.tr.setMeta('outline2-focus', true))
+          return false
+        },
+        blur(view) {
+          view.dispatch(view.state.tr.setMeta('outline2-focus', false))
+          return false
+        },
       },
       handleClickOn(_view: EditorView, _pos, _node, _nodePos, event) {
         const el = (event.target as HTMLElement)?.closest?.('[data-target],[data-tag],[data-href]') as HTMLElement | null
