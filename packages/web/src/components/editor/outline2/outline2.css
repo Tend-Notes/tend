@@ -87,7 +87,7 @@
 }
 
 /* Collapsed: hide the nested child list. */
-.outline2 .block-container[data-collapsed="true"] > .block-body > ul.block-list {
+.outline2 .block-container[data-collapsed="true"] > .block-main > .block-body > ul.block-list {
   display: none;
 }
 
@@ -96,7 +96,7 @@
 .outline2 .block-container[data-nobullet="true"] > .block-fold {
   display: none;
 }
-.outline2 .block-container[data-nobullet="true"] > .block-body > .block-content {
+.outline2 .block-container[data-nobullet="true"] > .block-main > .block-body > .block-content {
   padding-left: 0;
 }
 
