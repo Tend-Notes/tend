@@ -24,10 +24,11 @@
   list-style: none;
 }
 
-/* Nested levels: V1 .block-children = margin-left 24px, border-left, padding 12px. */
+/* Nested levels: total indent 36px, with the guide line drawn at the child
+   bullet column (margin 36 / padding 0) so it aligns with the bullets. */
 .outline2 .block-body ul.block-list {
-  margin-left: 24px;
-  padding-left: 12px;
+  margin-left: 36px;
+  padding-left: 0;
   border-left: 1px solid var(--base02, #333);
 }
 
