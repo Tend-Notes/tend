@@ -20,7 +20,6 @@ import { Toasts } from './components/ui/Toasts'
 import { useUIStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
-import { formatDateYMD } from './lib/dateUtils'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
 import { contentTypes as contentTypesApi, identity, isDemoMode } from './lib/api'
@@ -44,8 +43,6 @@ function App() {
   const initializeFromUrl = usePageStore((state) => state.initializeFromUrl)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const navigateToJournal = usePageStore((state) => state.navigateToJournal)
-  const toggleSidebar = useUIStore((state) => state.toggleSidebar)
-  const openSearch = useUIStore((state) => state.openSearch)
   const setContentTypes = useSettingsStore((state) => state.setContentTypes)
   const clearRecentSheets = useRecentSheetsStore((state) => state.clearAll)
   const clearTags = useTagStore((state) => state.reset)
@@ -184,10 +181,6 @@ function App() {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger shortcuts when typing in inputs (except for specific ones)
-      const target = e.target as HTMLElement
-      const isEditing = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
-
       // Escape - close any open overlay or reset sidebar mode
       if (e.key === 'Escape') {
         if (keyboardHelpOpen) {
@@ -202,63 +195,28 @@ function App() {
         }
       }
 
+      // Ctrl/Cmd + K - Command palette (the single global entry; works even when
+      // editing). Every other action is reachable from the palette. We use
+      // Ctrl/Cmd combos, not Alt+Shift, because Alt+Shift+<letter> is Firefox's
+      // accesskey/menu-mnemonic modifier and fires at the browser level, where
+      // the page's preventDefault can't win.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyK') {
+        e.preventDefault()
+        openCommandPalette()
+        return
+      }
+
       // Ctrl + Shift + / - Toggle keyboard help (works even when editing)
       if (e.ctrlKey && e.shiftKey && e.code === 'Slash') {
         e.preventDefault()
         setKeyboardHelpOpen((prev) => !prev)
         return
       }
-
-      // Alt + Shift + P - Command palette (works even when editing)
-      // Use e.code for physical key (macOS Alt produces special characters with e.key)
-      if (e.altKey && e.shiftKey && e.code === 'KeyP') {
-        e.preventDefault()
-        openCommandPalette()
-        return
-      }
-
-      // Alt + Shift + J - Navigate to today's journal (Home, works even when editing)
-      if (e.altKey && e.shiftKey && e.code === 'KeyJ') {
-        e.preventDefault()
-        navigateToJournal(formatDateYMD(new Date()))
-        return
-      }
-
-      // Alt + Shift + T - Open task manager (works even when editing)
-      if (e.altKey && e.shiftKey && e.code === 'KeyT') {
-        e.preventDefault()
-        usePageStore.getState().openTaskManager()
-        return
-      }
-
-      // Skip other shortcuts if we're editing
-      if (isEditing) return
-
-      // Alt + Shift + S - Toggle sidebar
-      if (e.altKey && e.shiftKey && e.code === 'KeyS') {
-        e.preventDefault()
-        toggleSidebar()
-        return
-      }
-
-      // Alt + Shift + F - Search
-      if (e.altKey && e.shiftKey && e.code === 'KeyF') {
-        e.preventDefault()
-        openSearch()
-        return
-      }
-
-      // Alt + Shift + O - Options (toggle sidebar options mode)
-      if (e.altKey && e.shiftKey && e.code === 'KeyO') {
-        e.preventDefault()
-        setSidebarMode(sidebarMode === 'options' ? 'navigation' : 'options')
-        return
-      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [keyboardHelpOpen, sidebarMode, toggleSidebar, openSearch, openCommandPalette, setSidebarMode, navigateToJournal])
+  }, [keyboardHelpOpen, sidebarMode, setSidebarMode, openCommandPalette])
 
   // Three-finger tap opens command palette (touch devices)
   useEffect(() => {

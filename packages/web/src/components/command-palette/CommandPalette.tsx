@@ -90,8 +90,8 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
-  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty } = usePageStore()
-  const { toggleSidebar, openSearch, pendingContentType, pendingLinkContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
+  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty, openTaskManager } = usePageStore()
+  const { toggleSidebar, openSearch, setSidebarMode, pendingContentType, pendingLinkContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
   const { contentTypes } = useSettingsStore()
 
   // Custom content types (excluding built-in page and journal)
@@ -576,10 +576,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
             {/* Navigation */}
             <Command.Group heading="Navigation" className="mb-2">
-              <CommandItem
-                onSelect={handleOpenSearch}
-                shortcut="Alt+Shift+F"
-              >
+              <CommandItem onSelect={handleOpenSearch}>
                 Search pages and blocks...
               </CommandItem>
               <CommandItem
@@ -587,16 +584,22 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   loadTodaysJournal()
                   onOpenChange(false)
                 }}
-                shortcut="Alt+Shift+T"
               >
                 Go to today's journal
+              </CommandItem>
+              <CommandItem
+                onSelect={() => {
+                  openTaskManager()
+                  onOpenChange(false)
+                }}
+              >
+                Open task manager
               </CommandItem>
               <CommandItem
                 onSelect={() => {
                   toggleSidebar()
                   onOpenChange(false)
                 }}
-                shortcut="Alt+Shift+S"
               >
                 Toggle sidebar
               </CommandItem>
@@ -768,8 +771,10 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 Keyboard shortcuts
               </CommandItem>
               <CommandItem
-                onSelect={() => onOpenChange(false)}
-                shortcut="Alt+Shift+O"
+                onSelect={() => {
+                  setSidebarMode('options')
+                  onOpenChange(false)
+                }}
               >
                 Options
               </CommandItem>
