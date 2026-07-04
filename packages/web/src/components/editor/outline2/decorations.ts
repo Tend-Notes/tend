@@ -12,7 +12,18 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
 import { useTagStore } from '../../../stores/tagStore'
+import { TASK_STATUS_SETS } from '../../../stores/settingsStore'
 import { isCodeFenceText } from './codeHighlight'
+
+// The next status keyword when cycling, within whichever set this keyword
+// belongs to (matches V1's getNextStatus).
+function nextStatusKeyword(keyword: string): string | null {
+  for (const set of Object.values(TASK_STATUS_SETS)) {
+    const i = set.findIndex((s) => s.keyword === keyword)
+    if (i >= 0) return set[(i + 1) % set.length].keyword
+  }
+  return null
+}
 
 // Reuse V1's existing formatting classes so styling matches exactly.
 const CONTENT_CLASS: Record<string, string> = {
@@ -92,7 +103,7 @@ function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
         case 'taskStatus': {
           // Match V1's task-status-badge: keyword color bg, base00 text.
           const cssColor = tok.color.replace('-', '')
-          const style = `display:inline-block;padding:1px 6px;margin-right:6px;font-size:0.75em;font-weight:600;border-radius:3px;background-color:var(--${cssColor},#666);color:var(--base00,#fff)`
+          const style = `display:inline-block;padding:1px 6px;margin-right:6px;font-size:0.75em;font-weight:600;border-radius:3px;background-color:var(--${cssColor},#666);color:var(--base00,#fff);cursor:pointer`
           decos.push(Decoration.inline(from, contentTo, { class: 'task-status-badge', style }))
           // Hide the trailing space (the badge's margin-right spaces it instead).
           if (to > contentTo) decos.push(Decoration.inline(contentTo, to, { class: delimClass }))
@@ -152,7 +163,28 @@ export function formattingPlugin(nav: NavHandlers): Plugin<FmtState> {
           return false
         },
       },
-      handleClickOn(_view: EditorView, _pos, _node, _nodePos, event) {
+      handleClickOn(view: EditorView, pos, _node, _nodePos, event) {
+        // Task status pill: cycle to the next status (V1 parity).
+        const badge = (event.target as HTMLElement)?.closest?.('.task-status-badge')
+        if (badge) {
+          const $p = view.state.doc.resolve(pos)
+          let d = $p.depth
+          while (d > 0 && $p.node(d).type.name !== 'line') d--
+          if (d === 0) return false
+          const line = $p.node(d)
+          const lineStart = $p.start(d)
+          const tok = parseContent(line.textContent).find((t) => t.type === 'taskStatus')
+          if (tok && tok.type === 'taskStatus') {
+            const next = nextStatusKeyword(tok.keyword)
+            if (next) {
+              const from = lineStart + tok.span.srcFrom
+              view.dispatch(view.state.tr.insertText(next, from, from + tok.keyword.length))
+              return true
+            }
+          }
+          return false
+        }
+
         const el = (event.target as HTMLElement)?.closest?.('[data-target],[data-tag],[data-href]') as HTMLElement | null
         if (!el) return false
         const target = el.getAttribute('data-target')
