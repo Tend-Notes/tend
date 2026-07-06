@@ -1,0 +1,16 @@
+# Xcode / SwiftPM
+.DS_Store
+build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcuserstate
+
+# XcodeGen output (regenerated from project.yml)
+App/Tend.xcodeproj/
+
+# SwiftPM
+TendKit/.build/
+.swiftpm/
+Package.resolved
