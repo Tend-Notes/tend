@@ -10,9 +10,9 @@ import TendStore
 ///
 /// **At-rest encryption.** The DB file is protected with iOS Data Protection
 /// (`.completeUntilFirstUserAuthentication` — readable for background sync after first
-/// unlock, encrypted at rest otherwise). The approved plan named SQLCipher; wiring SQLCipher
-/// through SwiftPM is non-trivial, so Data Protection is the baseline and the SQLCipher
-/// passphrase hook is marked below. This substitution is flagged for confirmation.
+/// unlock, encrypted at rest otherwise). This is the confirmed approach (chosen over
+/// SQLCipher for zero key-management and hardware backing); the optional SQLCipher
+/// passphrase hook below is left for future defense-in-depth.
 public final class GRDBPageStore: PageStore, @unchecked Sendable {
     private let dbQueue: DatabaseQueue
 

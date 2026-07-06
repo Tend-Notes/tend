@@ -22,6 +22,7 @@ let package = Package(
         .library(name: "TendSync", targets: ["TendSync"]),
         .library(name: "TendStore", targets: ["TendStore"]),
         .library(name: "TendStoreGRDB", targets: ["TendStoreGRDB"]),
+        .library(name: "TendAuth", targets: ["TendAuth"]),
     ],
     dependencies: [
         .package(url: "https://github.com/groue/GRDB.swift", from: "6.29.3"),
@@ -72,6 +73,14 @@ let package = Package(
                 "TendModel",
                 .product(name: "GRDB", package: "GRDB.swift"),
             ]
+        ),
+        .target(
+            name: "TendAuth",
+            dependencies: ["TendModel"]
+        ),
+        .testTarget(
+            name: "TendAuthTests",
+            dependencies: ["TendAuth", "TendModel"]
         ),
     ]
 )
