@@ -15,6 +15,7 @@ let package = Package(
     products: [
         .library(name: "TendModel", targets: ["TendModel"]),
         .library(name: "TendParser", targets: ["TendParser"]),
+        .library(name: "TendAPI", targets: ["TendAPI"]),
     ],
     targets: [
         .target(
@@ -30,6 +31,14 @@ let package = Package(
         .testTarget(
             name: "TendParserTests",
             dependencies: ["TendParser"]
+        ),
+        .target(
+            name: "TendAPI",
+            dependencies: ["TendModel"]
+        ),
+        .testTarget(
+            name: "TendAPITests",
+            dependencies: ["TendAPI", "TendModel"]
         ),
     ]
 )

@@ -124,6 +124,25 @@ public struct SearchResponse: Codable, Equatable, Sendable {
     }
 }
 
+/// A resolved block reference — `GET /blocks/{uuid}` (backend `BlockResponse`). Used to
+/// render `((uuid))` inline previews. The endpoint returns 404 when missing and 403 when
+/// the garden is encrypted (block references disabled), both handled as "no preview".
+public struct BlockRef: Codable, Equatable, Identifiable, Sendable {
+    public var uuid: String
+    public var pageName: String
+    public var content: String
+    public var hasChildren: Bool
+
+    public var id: String { uuid }
+
+    public init(uuid: String, pageName: String, content: String, hasChildren: Bool) {
+        self.uuid = uuid
+        self.pageName = pageName
+        self.content = content
+        self.hasChildren = hasChildren
+    }
+}
+
 /// How a content type lays its files out on disk (`GET/PUT /content-types`).
 public enum Organization: String, Codable, CaseIterable, Sendable {
     case flat
