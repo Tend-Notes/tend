@@ -72,7 +72,7 @@ public extension Page {
 
 /// Lightweight page listing entry (no block contents) — `GET /pages`, `/journals`,
 /// `/sheets/{type}`. Mirrors backend `PageMeta` (camelCase).
-public struct PageMeta: Codable, Equatable, Identifiable, Sendable {
+public struct PageMeta: Codable, Equatable, Hashable, Identifiable, Sendable {
     public var name: String
     public var title: String
     public var contentType: String

@@ -26,9 +26,19 @@ apps/ios/
                             TendEditor, TendFeatures added in later phases)
     Tests/
       TendModelTests/      Golden JSON round-trip tests for the wire contract
-  App/                     Xcode app + Share Extension + Widget targets (added later,
-                           generated from project.yml via XcodeGen)
+  App/                     Xcode app target (SwiftUI). Generated from project.yml via
+    project.yml            XcodeGen. Share Extension + Widget targets added later.
+    Support/               Info.plist + entitlements (Data Protection, app group)
+    Sources/               @main app, composition root (AppEnvironment), auth + home views
 ```
+
+## Current status
+
+Buildable on a Mac: the logic core (`TendModel`/`TendParser`/`TendAPI`/`TendSync`/
+`TendStore` + `TendStoreGRDB`/`TendAuth`) and a minimal app shell — server entry →
+embedded Authelia login (cookie capture) → `/whoami` → read-only journal list + page
+reader. Still to come: the native editable outliner, offline sync wiring into the UI,
+and the remaining surfaces (todos/tags/search/command palette/settings/quick capture).
 
 The heavy lifting lives in **TendKit** (a Swift Package) so each module is small,
 protocol-bounded, and unit-testable. The Xcode app target is thin composition.

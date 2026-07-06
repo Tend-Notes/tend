@@ -1,0 +1,52 @@
+# SPDX-License-Identifier: MIT WITH Commons-Clause
+# XcodeGen manifest — run `xcodegen generate` (in this dir) to produce Tend.xcodeproj.
+# The project is generated (git-ignored); this file + Sources/Support are the source of truth.
+name: Tend
+options:
+  bundleIdPrefix: com.tend
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  TendKit:
+    path: ../TendKit
+
+targets:
+  Tend:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources
+    info:
+      path: Support/Info.plist
+    entitlements:
+      path: Support/Tend.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tend.ios
+        PRODUCT_NAME: Tend
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        # iPhone + iPad
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+    dependencies:
+      - package: TendKit
+        product: TendModel
+      - package: TendKit
+        product: TendParser
+      - package: TendKit
+        product: TendAPI
+      - package: TendKit
+        product: TendSync
+      - package: TendKit
+        product: TendStore
+      - package: TendKit
+        product: TendStoreGRDB
+      - package: TendKit
+        product: TendAuth

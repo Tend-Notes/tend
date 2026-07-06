@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: MIT WITH Commons-Clause -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Shared container so the Share Extension / widgets read the same store (later). -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.tend.ios</string>
+    </array>
+    <!-- Data Protection: encrypt app data at rest by default. -->
+    <key>com.apple.developer.default-data-protection</key>
+    <string>NSFileProtectionComplete</string>
+</dict>
+</plist>
