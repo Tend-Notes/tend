@@ -6,13 +6,12 @@ interface KeyboardHelpProps {
   onClose: () => void
 }
 
+// Note: Ctrl chips also mean Cmd on macOS. Global shortcuts use Ctrl/Cmd combos
+// (interceptable in Firefox, unlike Alt+Shift); the command palette is the entry
+// point for actions without a dedicated key.
 const shortcuts = [
-  { category: 'Navigation', items: [
-    { keys: ['Alt', 'Shift', 'J'], description: 'Go to today\'s journal' },
-    { keys: ['Alt', 'Shift', 'P'], description: 'Open command palette' },
-    { keys: ['Alt', 'Shift', 'S'], description: 'Toggle sidebar' },
-    { keys: ['Alt', 'Shift', 'F'], description: 'Search' },
-    { keys: ['Alt', 'Shift', 'O'], description: 'Open options' },
+  { category: 'Global', items: [
+    { keys: ['Ctrl', 'K'], description: 'Command palette' },
     { keys: ['Ctrl', 'Shift', '/'], description: 'Show keyboard shortcuts' },
   ]},
   { category: 'Editor', items: [
@@ -20,18 +19,21 @@ const shortcuts = [
     { keys: ['Backspace'], description: 'Merge with previous (at start)' },
     { keys: ['Tab'], description: 'Indent block' },
     { keys: ['Shift', 'Tab'], description: 'Outdent block' },
+    { keys: ['Alt', '↑'], description: 'Move block up' },
+    { keys: ['Alt', '↓'], description: 'Move block down' },
+    { keys: ['Ctrl', '.'], description: 'Collapse / expand block' },
+    { keys: ['/'], description: 'Slash command menu' },
   ]},
   { category: 'Formatting', items: [
-    { keys: ['Alt', 'Shift', 'B'], description: 'Bold' },
-    { keys: ['Alt', 'Shift', 'I'], description: 'Italic' },
-    { keys: ['Alt', 'Shift', 'U'], description: 'Underline' },
-    { keys: ['Alt', 'Shift', '-'], description: 'Strikethrough' },
-    { keys: ['Alt', 'Shift', 'H'], description: 'Highlight' },
+    { keys: ['Ctrl', 'B'], description: 'Bold' },
+    { keys: ['Ctrl', 'I'], description: 'Italic' },
+    { keys: ['Ctrl', 'E'], description: 'Code' },
+    { keys: ['Ctrl', 'Shift', 'X'], description: 'Strikethrough' },
+    { keys: ['Ctrl', 'Shift', 'H'], description: 'Highlight' },
   ]},
   { category: 'Links', items: [
     { keys: ['[['], description: 'Create wiki-link' },
     { keys: ['(('], description: 'Create block reference' },
-    { keys: ['Alt', 'Shift', 'R'], description: 'Copy block reference' },
   ]},
 ]
 

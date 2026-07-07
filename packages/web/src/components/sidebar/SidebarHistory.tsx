@@ -145,7 +145,7 @@ function SidebarHistory({ onBack, pageName, isJournal }: SidebarHistoryProps) {
                 <div className="p-2 bg-base-01 border border-base-02 rounded text-xs text-base-04">
                   <p className="font-medium text-base-05 mb-1">To enable:</p>
                   <ol className="list-decimal list-inside space-y-1">
-                    <li>Open Settings (Alt+Shift+O)</li>
+                    <li>Open Settings</li>
                     <li>Go to Backup section</li>
                     <li>Toggle "Enable versions"</li>
                   </ol>

@@ -766,7 +766,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             <Command.Group heading="Help" className="mb-2">
               <CommandItem
                 onSelect={() => onOpenChange(false)}
-                shortcut="Shift+?"
+                shortcut="Ctrl+Shift+/"
               >
                 Keyboard shortcuts
               </CommandItem>
