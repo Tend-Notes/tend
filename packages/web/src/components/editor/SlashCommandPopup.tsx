@@ -2,106 +2,16 @@
 // Slash command popup - triggered by '/' at start of block or after whitespace
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { useSettingsStore, TASK_STATUS_SETS, type ContentType } from '../../stores/settingsStore'
-import { formatDateYMD } from '../../lib/dateUtils'
+import { useSettingsStore } from '../../stores/settingsStore'
+import { BASE_SLASH_COMMANDS, getTaskCommands, type SlashCommand } from './slashCommands'
 
-export interface SlashCommand {
-  id: string
-  label: string
-  description: string
-  icon?: string
-  action: (context: SlashCommandContext) => void
-  /** For content type commands, the content type to create */
-  contentType?: ContentType
-}
-
-export interface SlashCommandContext {
-  // The block content before the slash command
-  contentBefore: string
-  // The block content after the slash command query
-  contentAfter: string
-  // Function to replace the block content
-  replaceContent: (newContent: string) => void
-  // Function to insert content at the slash command position
-  insertContent: (content: string) => void
-}
+export type { SlashCommand, SlashCommandContext } from './slashCommands'
 
 interface SlashCommandPopupProps {
   query: string
   position: { top: number; left: number }
   onSelect: (command: SlashCommand) => void
   onClose: () => void
-}
-
-// Non-task slash commands
-const BASE_SLASH_COMMANDS: SlashCommand[] = [
-  {
-    id: 'h1',
-    label: 'Heading 1',
-    description: 'Large section heading',
-    action: (ctx) => ctx.insertContent('# '),
-  },
-  {
-    id: 'h2',
-    label: 'Heading 2',
-    description: 'Medium section heading',
-    action: (ctx) => ctx.insertContent('## '),
-  },
-  {
-    id: 'h3',
-    label: 'Heading 3',
-    description: 'Small section heading',
-    action: (ctx) => ctx.insertContent('### '),
-  },
-  {
-    id: 'code',
-    label: 'Code Block',
-    description: 'Insert a code block',
-    action: (ctx) => ctx.insertContent('```\n'),
-  },
-  {
-    id: 'quote',
-    label: 'Quote',
-    description: 'Insert a blockquote',
-    action: (ctx) => ctx.insertContent('> '),
-  },
-  {
-    id: 'hr',
-    label: 'Horizontal Rule',
-    description: 'Insert a divider line',
-    action: (ctx) => ctx.insertContent('---'),
-  },
-  {
-    id: 'date',
-    label: 'Today\'s Date',
-    description: 'Insert current date',
-    action: (ctx) => {
-      const today = new Date()
-      const formatted = formatDateYMD(today)
-      ctx.insertContent(`[[journal/${formatted}]]`)
-    },
-  },
-  {
-    id: 'time',
-    label: 'Current Time',
-    description: 'Insert current time',
-    action: (ctx) => {
-      const now = new Date()
-      const formatted = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      ctx.insertContent(formatted)
-    },
-  },
-]
-
-// Generate task commands based on the selected status set
-function getTaskCommands(taskStatusSet: keyof typeof TASK_STATUS_SETS): SlashCommand[] {
-  const statuses = TASK_STATUS_SETS[taskStatusSet]
-  return statuses.map((status) => ({
-    id: status.keyword.toLowerCase(),
-    label: status.keyword,
-    description: `Create a ${status.keyword} task`,
-    action: (ctx: SlashCommandContext) => ctx.insertContent(`${status.keyword} `),
-  }))
 }
 
 export function SlashCommandPopup({ query, position, onSelect, onClose }: SlashCommandPopupProps) {

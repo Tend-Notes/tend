@@ -5,7 +5,7 @@
 // debounced save round-trip. Structural commands, inline decorations, and the
 // full command surface land in follow-up commits.
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { EditorState } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import type { Block, Page } from '../../../types'
@@ -14,7 +14,9 @@ import { useUIStore } from '../../../stores/uiStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
 import { pageToDoc, docToBlocks } from './pageDoc'
 import { focusBlock, blockUuidAtSelection } from './pmUtil'
-import { textLayer, outlinerLayer, formattingLayer, composeLayers } from './layers'
+import { textLayer, outlinerLayer, formattingLayer, slashMenuLayer, composeLayers } from './layers'
+import { slashMenuKey, type SlashTrigger } from './slashMenuPlugin'
+import { SlashMenu } from './SlashMenu'
 // ProseMirror's required base styles — without these Firefox mis-renders the
 // contentEditable and shows no caret (Chromium tolerates their absence).
 import 'prosemirror-view/style/prosemirror.css'
@@ -32,6 +34,11 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
   const mountRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const updateCurrentPageStore = usePageStore((s) => s.updateCurrentPage)
+
+  // Slash-command menu trigger, lifted from the plugin state on each transaction.
+  const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null)
+  const setSlashTriggerRef = useRef(setSlashTrigger)
+  setSlashTriggerRef.current = setSlashTrigger
 
   // Keep the latest save target in a ref so the view's dispatch closure (built
   // once on mount) always calls the current one.
@@ -60,6 +67,7 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
         navigateToPage: (name) => usePageStore.getState().navigateToPage(name),
         navigateToJournal: (date) => usePageStore.getState().navigateToJournal(date),
       }),
+      slashMenuLayer(),
       outlinerLayer(),
       textLayer(),
     ])
@@ -85,6 +93,7 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
         view.updateState(next)
         if (tr.docChanged) scheduleSave(view)
         if (tr.selectionSet || tr.docChanged) syncFocusedBlock()
+        setSlashTriggerRef.current(slashMenuKey.getState(view.state) ?? null)
       },
     })
     viewRef.current = view
@@ -135,5 +144,12 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
     // only editor of this page) to avoid clobbering the caret. eslint-disable-next-line
   }, [])
 
-  return <div ref={mountRef} className="outline2" />
+  return (
+    <>
+      <div ref={mountRef} className="outline2" />
+      {slashTrigger && viewRef.current && (
+        <SlashMenu view={viewRef.current} trigger={slashTrigger} />
+      )}
+    </>
+  )
 }

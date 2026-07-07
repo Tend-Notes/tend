@@ -169,21 +169,21 @@ function createGettingStartedPage(): Page {
     ),
     [UUIDS.startShortcut1]: createBlock(
       UUIDS.startShortcut1,
-      'Alt+Shift+J - Go to today\'s journal',
+      'Ctrl+K (Cmd+K on Mac) - Open the command palette',
       UUIDS.startShortcuts,
       [],
       1
     ),
     [UUIDS.startShortcut2]: createBlock(
       UUIDS.startShortcut2,
-      'Alt+Shift+P - Open command palette',
+      'Type / in a block - Insert headings, tasks, dates and more',
       UUIDS.startShortcuts,
       [],
       1
     ),
     [UUIDS.startShortcut3]: createBlock(
       UUIDS.startShortcut3,
-      'Alt+Shift+S - Toggle sidebar',
+      'Ctrl+B / Ctrl+I - Bold or italicize the selected text',
       UUIDS.startShortcuts,
       [],
       1
@@ -197,7 +197,7 @@ function createGettingStartedPage(): Page {
     ),
     [UUIDS.startBack]: createBlock(
       UUIDS.startBack,
-      'Ready to start? Head back to [[Welcome to Tend]] or press Alt+Shift+J to open today\'s journal.',
+      'Ready to start? Head back to [[Welcome to Tend]] or press Ctrl+K to open the command palette.',
       null,
       [],
       0
