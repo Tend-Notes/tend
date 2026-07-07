@@ -26,6 +26,8 @@ import { moveListItem, toggleCollapse } from './commands'
 import { ListItemView } from './nodeview'
 import { formattingPlugin, type NavHandlers } from './decorations'
 import { codeHighlightPlugin } from './codeHighlight'
+import { slashMenuPlugin } from './slashMenuPlugin'
+import { formatKeymap } from './formatKeymap'
 
 export interface EditorLayer {
   plugins: Plugin[]
@@ -78,7 +80,15 @@ export function outlinerLayer(): EditorLayer {
 // a different L3 (e.g. a mobile/native renderer) with the same interface drops
 // in unchanged.
 export function formattingLayer(nav: NavHandlers): EditorLayer {
-  return { plugins: [formattingPlugin(nav), codeHighlightPlugin()] }
+  // The format keymap sits in L3 (inline markup) and, being highest precedence,
+  // its Mod-b/i/e/… win over the base keymap.
+  return { plugins: [keymap(formatKeymap), formattingPlugin(nav), codeHighlightPlugin()] }
+}
+
+// Slash-command trigger detection. Keyless (the React SlashMenu owns keyboard
+// selection); this only exposes the "/query" trigger state to the host.
+export function slashMenuLayer(): EditorLayer {
+  return { plugins: [slashMenuPlugin()] }
 }
 
 // Compose layers into the flat ({ plugins, nodeViews }) ProseMirror expects.
