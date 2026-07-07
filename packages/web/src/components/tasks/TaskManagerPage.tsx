@@ -12,11 +12,9 @@ import {
   selectCompleted,
   type Task,
 } from '../../stores/taskStore';
-import { formatShortDate, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils';
-import { getPriorityDisplay, PriorityPickerPopover } from '../ui/PriorityPickerPopover';
-import { DatePickerPopover } from '../ui/DatePickerPopover';
 import { renderContentWithWikilinks } from '../../lib/renderTaskContent';
 import { nextStatusKeyword, taskContentWithStatus, taskContentWithText, statusColorVar } from '../../lib/taskStatus';
+import { TaskMetadata } from '../editor/TaskMetadata';
 
 // '3' = high, '2' = medium, '1' = low, 'none' = sentinel for null priority
 type Priority = '3' | '2' | '1' | 'none';
@@ -75,26 +73,27 @@ function TaskRow({
   navigateToJournal: (date: string) => void;
 }) {
   const updateTask = useTaskStore((s) => s.updateTask);
-  const [openPopover, setOpenPopover] = useState<'priority' | 'start' | 'due' | null>(null);
   const [editingText, setEditingText] = useState(false);
   const [draft, setDraft] = useState(task.content);
 
-  const priorityInfo = getPriorityDisplay(task.priority);
-  const urgencyDate = task.startDate || task.dueDate;
-  const urgencyStyle = urgencyDate ? getUrgencyStyle(urgencyDate) : null;
-  const daysFromDue = task.dueDate ? getDaysFromDue(task.dueDate) : null;
+  const isCompleted = task.status === 'DONE' || task.status === 'NEVER';
 
   const cycleStatus = () => {
     const next = nextStatusKeyword(task.status);
     if (next) updateTask(task.uuid, { content: taskContentWithStatus(task, next) });
   };
-  const setProp = (key: 'priority' | 'start_date' | 'due_date', value: string | null) =>
-    updateTask(task.uuid, { properties: { [key]: value } });
   const startEdit = () => { setDraft(task.content); setEditingText(true); };
   const commitEdit = () => {
     setEditingText(false);
     if (draft !== task.content) updateTask(task.uuid, { content: taskContentWithText(task, draft) });
   };
+
+  // Reconstruct the block properties TaskMetadata reads — same data, off-page.
+  const properties: Record<string, string> = {};
+  if (task.dueDate) properties.due_date = task.dueDate;
+  if (task.startDate) properties.start_date = task.startDate;
+  if (task.priority) properties.priority = task.priority;
+  if (task.workLog) properties.work_log = task.workLog;
 
   return (
     <li className="px-2 py-1.5 rounded-lg hover:bg-base-01 transition-colors">
@@ -113,7 +112,7 @@ function TaskRow({
         >
           {task.status}
         </button>
-        {/* Task text — rendered (with clickable wikilinks); pencil toggles inline edit. */}
+        {/* Task text — rendered (with clickable wikilinks); double-click to edit. */}
         {editingText ? (
           <input
             autoFocus
@@ -127,99 +126,37 @@ function TaskRow({
             className="text-sm flex-1 bg-base-00 border border-base-02 rounded px-1 py-0.5 text-base-06"
           />
         ) : (
-          <span className="text-sm flex-1 text-base-05">
+          <span
+            className="text-sm flex-1 text-base-05"
+            onDoubleClick={startEdit}
+            title="Double-click to edit"
+          >
             {task.content
               ? renderContentWithWikilinks(task.content, navigateToPage, navigateToJournal)
               : <span className="italic text-base-04">(empty)</span>}
           </span>
         )}
-        <button
-          onClick={startEdit}
-          className="flex-shrink-0 text-base-03 hover:text-base-05"
-          title="Edit task text"
-          aria-label="Edit task text"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-          </svg>
-        </button>
       </div>
-      <div className="flex items-center gap-2 mt-1 ml-0.5">
-        <button
-          onClick={() => onOpen(task)}
-          className="text-xs text-base-04 hover:text-base-06 hover:underline"
-          title="Open page"
-        >
-          {task.pageTitle ?? task.pageName}
-        </button>
 
-        {/* Priority */}
-        <div className="relative">
-          <button
-            onClick={() => setOpenPopover((p) => (p === 'priority' ? null : 'priority'))}
-            className="text-xs font-bold"
-            style={{ color: task.priority ? priorityInfo.color : 'var(--base-04)' }}
-            title="Set priority"
-          >
-            {task.priority ? priorityInfo.indicator : 'Priority'}
-          </button>
-          {openPopover === 'priority' && (
-            <PriorityPickerPopover
-              value={task.priority}
-              onChange={(p) => setProp('priority', p)}
-              onClose={() => setOpenPopover(null)}
-            />
-          )}
-        </div>
+      {/* Source page — the task manager's one addition; click to open it. */}
+      <button
+        onClick={() => onOpen(task)}
+        className="mt-1 ml-0.5 text-xs text-base-04 hover:text-base-06 hover:underline"
+        title="Open page"
+      >
+        {task.pageTitle ?? task.pageName}
+      </button>
 
-        {/* Start date */}
-        <div className="relative">
-          <button
-            onClick={() => setOpenPopover((p) => (p === 'start' ? null : 'start'))}
-            className="text-xs text-base-04"
-            style={task.startDate ? urgencyStyle?.style : undefined}
-            title="Set start date"
-          >
-            {task.startDate ? `Start: ${formatShortDate(task.startDate)}` : '+ start'}
-          </button>
-          {openPopover === 'start' && (
-            <DatePickerPopover
-              value={task.startDate}
-              onChange={(d) => setProp('start_date', d)}
-              onClose={() => setOpenPopover(null)}
-              label="Start"
-            />
-          )}
-        </div>
-
-        {/* Due date */}
-        <div className="relative">
-          <button
-            onClick={() => setOpenPopover((p) => (p === 'due' ? null : 'due'))}
-            className="text-xs text-base-04"
-            style={task.dueDate && !task.startDate ? urgencyStyle?.style : undefined}
-            title={
-              task.dueDate && daysFromDue !== null
-                ? daysFromDue < 0
-                  ? `${Math.abs(daysFromDue)} day${Math.abs(daysFromDue) === 1 ? '' : 's'} overdue`
-                  : daysFromDue === 0
-                  ? 'Due today'
-                  : `Due in ${daysFromDue} day${daysFromDue === 1 ? '' : 's'}`
-                : 'Set due date'
-            }
-          >
-            {task.dueDate ? `Due: ${formatShortDate(task.dueDate)}` : '+ due'}
-          </button>
-          {openPopover === 'due' && (
-            <DatePickerPopover
-              value={task.dueDate}
-              onChange={(d) => setProp('due_date', d)}
-              onClose={() => setOpenPopover(null)}
-              label="Due"
-            />
-          )}
-        </div>
-      </div>
+      {/* The exact same task-metadata widget the editor uses (due / start /
+          priority / work timer), fed this task's own data and page. */}
+      <TaskMetadata
+        blockUuid={task.uuid}
+        properties={properties}
+        onPropertyChange={(key, value) => updateTask(task.uuid, { properties: { [key]: value } })}
+        isCompleted={isCompleted}
+        taskContent={task.content}
+        taskPage={{ name: task.pageName, contentType: task.contentType, sheetDate: task.journalDate }}
+      />
     </li>
   );
 }

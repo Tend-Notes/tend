@@ -32,9 +32,13 @@ interface TaskMetadataProps {
   onPropertyChange: (key: string, value: string | null) => void
   isCompleted?: boolean
   taskContent?: string
+  // The page this task lives on, for the work timer. Defaults to the currently
+  // open page (editor); the task manager passes the task's own page so the timer
+  // works there too.
+  taskPage?: { name: string; contentType: string; sheetDate?: string | null }
 }
 
-export function TaskMetadata({ blockUuid, properties, onPropertyChange, isCompleted, taskContent }: TaskMetadataProps) {
+export function TaskMetadata({ blockUuid, properties, onPropertyChange, isCompleted, taskContent, taskPage }: TaskMetadataProps) {
   const [showDueDatePicker, setShowDueDatePicker] = useState(false)
   const [showStartDatePicker, setShowStartDatePicker] = useState(false)
   const [showPriorityPicker, setShowPriorityPicker] = useState(false)
@@ -48,14 +52,12 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
   const hasActiveSession = activeSession !== null
 
   const handleStartTimer = () => {
-    if (!currentPage || !taskContent) return
-    startSession(
-      blockUuid,
-      currentPage.name,
-      currentPage.contentType,
-      currentPage.journalDate ?? undefined,
-      taskContent
-    )
+    // Prefer an explicitly-provided page (task manager); fall back to the open page.
+    const page = taskPage ?? (currentPage
+      ? { name: currentPage.name, contentType: currentPage.contentType, sheetDate: currentPage.journalDate }
+      : null)
+    if (!page || !taskContent) return
+    startSession(blockUuid, page.name, page.contentType, page.sheetDate ?? undefined, taskContent)
   }
 
   const dueDate = properties.due_date || null

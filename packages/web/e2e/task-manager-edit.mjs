@@ -34,14 +34,14 @@ try {
   check('status pill now shows DOING', await row.getByRole('button', { name: 'DOING', exact: true }).count() === 1)
   check('status persisted to origin page (todos = DOING)', (await todo())?.status === 'DOING')
 
-  // Set priority High -> persists.
-  await row.getByRole('button', { name: 'Priority' }).click()
+  // Set priority High via the shared TaskMetadata widget -> persists.
+  await row.getByRole('button', { name: 'Set priority' }).click()
   await row.getByRole('button', { name: 'High' }).click()
   await page.waitForTimeout(800)
   check('priority persisted (todos priority = 3)', (await todo())?.priority === '3')
 
-  // Edit the task text -> persists (status kept).
-  await row.getByRole('button', { name: 'Edit task text' }).click()
+  // Edit the task text (double-click) -> persists (status kept).
+  await row.locator('[title="Double-click to edit"]').dblclick()
   // Once editing, the text lives in the input's value (not the row's text), so the
   // hasText row filter no longer matches — grab the single editing input directly.
   const input = page.locator('main li input')
