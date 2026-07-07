@@ -162,6 +162,36 @@ export function formattingPlugin(nav: NavHandlers): Plugin<FmtState> {
           view.dispatch(view.state.tr.setMeta('outline2-focus', false))
           return false
         },
+        // Navigation (wikilink / tag / url) is resolved on mousedown, before the
+        // caret placement flips this line to "active" and re-renders the token.
+        // Handling it on click instead loses path-hidden wikilinks: revealing the
+        // hidden path rebuilds the DOM out from under the click, so the target
+        // node is gone by the time a click handler runs. Doing it here means every
+        // link navigates on the first press regardless of how it's rendered.
+        mousedown(_view, event: MouseEvent) {
+          if (event.button !== 0) return false
+          const el = (event.target as HTMLElement)?.closest?.('[data-target],[data-tag],[data-href]') as HTMLElement | null
+          if (!el) return false
+          const target = el.getAttribute('data-target')
+          const tag = el.getAttribute('data-tag')
+          const href = el.getAttribute('data-href')
+          if (target) {
+            navigate(target, nav)
+            event.preventDefault()
+            return true
+          }
+          if (tag) {
+            nav.navigateToPage(`tags/${tag}`)
+            event.preventDefault()
+            return true
+          }
+          if (href) {
+            window.open(href, '_blank', 'noopener,noreferrer')
+            event.preventDefault()
+            return true
+          }
+          return false
+        },
       },
       handleClickOn(view: EditorView, pos, _node, _nodePos, event) {
         // Task status pill: cycle to the next status (V1 parity).
@@ -185,23 +215,9 @@ export function formattingPlugin(nav: NavHandlers): Plugin<FmtState> {
           return false
         }
 
-        const el = (event.target as HTMLElement)?.closest?.('[data-target],[data-tag],[data-href]') as HTMLElement | null
-        if (!el) return false
-        const target = el.getAttribute('data-target')
-        const tag = el.getAttribute('data-tag')
-        const href = el.getAttribute('data-href')
-        if (target) {
-          navigate(target, nav)
-          return true
-        }
-        if (tag) {
-          nav.navigateToPage(`tags/${tag}`)
-          return true
-        }
-        if (href) {
-          window.open(href, '_blank', 'noopener,noreferrer')
-          return true
-        }
+        // Wikilink / tag / url navigation is handled on mousedown (see
+        // handleDOMEvents.mousedown) so path-hidden links navigate on the first
+        // press; nothing to do here.
         return false
       },
     },
