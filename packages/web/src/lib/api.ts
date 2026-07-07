@@ -21,6 +21,8 @@ import type {
   RemoteGardenInfo,
   CreateSheetResponse,
   BlockRef,
+  BlockUpdate,
+  BlockUpdateResult,
 } from '../types'
 
 // Demo mode detection
@@ -549,6 +551,14 @@ const _blocks = {
 
     return res.json()
   },
+
+  // Update a single block by uuid (status/content and/or properties) on whatever
+  // page it lives on. Used by the task manager to edit tasks off-page.
+  update: (uuid: string, patch: BlockUpdate): Promise<BlockUpdateResult> =>
+    fetchJson<BlockUpdateResult>(`${API_BASE}/blocks/${encodeURIComponent(uuid)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 }
 
 export const blocks = isDemoMode ? demoApi.blocks : _blocks

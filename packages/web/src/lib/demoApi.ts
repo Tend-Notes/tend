@@ -10,6 +10,8 @@ import type {
   GraphEdge,
   Block,
   BlockRef,
+  BlockUpdate,
+  BlockUpdateResult,
   CreateSheetResponse,
 } from '../types'
 
@@ -807,6 +809,27 @@ export const blocks = {
       pageName: page.name,
       content: block.content,
       hasChildren: block.children.length > 0,
+    }
+  },
+
+  update: async (uuid: string, patch: BlockUpdate): Promise<BlockUpdateResult> => {
+    const result = await demoStore.findBlockByUuid(uuid)
+    if (!result) throw new Error('404: block not found')
+    const { page, block } = result
+    if (patch.content !== undefined) block.content = patch.content
+    if (patch.properties) {
+      for (const [key, value] of Object.entries(patch.properties)) {
+        if (value === null) delete block.properties[key]
+        else block.properties[key] = value
+      }
+    }
+    await demoStore.savePage(page)
+    return {
+      uuid: block.uuid,
+      pageName: page.name,
+      content: block.content,
+      properties: block.properties,
+      version: page.version ?? 0,
     }
   },
 }
