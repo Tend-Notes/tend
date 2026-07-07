@@ -7,11 +7,27 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { EditorView } from '@codemirror/view'
-import { useSettingsStore, TASK_STATUS_SETS } from '../../../stores/settingsStore'
+import { useSettingsStore } from '../../../stores/settingsStore'
 import { useUIStore } from '../../../stores/uiStore'
 import type { SlashCommandState } from './slashCommand'
-import { formatDateYMD } from '../../../lib/dateUtils'
+import { BASE_SLASH_COMMANDS, getTaskCommands, type SlashCommand } from '../slashCommands'
 import { completeSlashCommand, cancelSlashCommand } from './slashCommand'
+
+// Adapt a shared SlashCommand (action writes via a context) into this popup's
+// CommandItem (action returns the string to insert). Keeps one source of truth
+// for the command set shared with Editor V2.
+function toCommandItem(cmd: SlashCommand): CommandItem {
+  return {
+    id: cmd.id,
+    label: cmd.label,
+    description: cmd.description,
+    action: () => {
+      let out = ''
+      cmd.action({ contentBefore: '', contentAfter: '', replaceContent: () => {}, insertContent: (s) => { out = s } })
+      return out
+    },
+  }
+}
 
 interface SlashCommandSuggestionsProps {
   view: EditorView
@@ -42,16 +58,8 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
   const commands = useMemo(() => {
     const items: CommandItem[] = []
 
-    // Task statuses
-    const statuses = TASK_STATUS_SETS[taskStatusSet]
-    for (const status of statuses) {
-      items.push({
-        id: status.keyword.toLowerCase(),
-        label: status.keyword,
-        description: `Create a ${status.keyword} task`,
-        action: () => `${status.keyword} `,
-      })
-    }
+    // Task statuses (shared with Editor V2)
+    items.push(...getTaskCommands(taskStatusSet).map(toCommandItem))
 
     // Content type commands
     for (const ct of customContentTypes) {
@@ -74,63 +82,8 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
       })
     }
 
-    // Standard commands
-    items.push(
-      {
-        id: 'h1',
-        label: 'Heading 1',
-        description: 'Large section heading',
-        action: () => '# ',
-      },
-      {
-        id: 'h2',
-        label: 'Heading 2',
-        description: 'Medium section heading',
-        action: () => '## ',
-      },
-      {
-        id: 'h3',
-        label: 'Heading 3',
-        description: 'Small section heading',
-        action: () => '### ',
-      },
-      {
-        id: 'code',
-        label: 'Code Block',
-        description: 'Insert a code block',
-        action: () => '```\n',
-      },
-      {
-        id: 'quote',
-        label: 'Quote',
-        description: 'Insert a blockquote',
-        action: () => '> ',
-      },
-      {
-        id: 'hr',
-        label: 'Divider',
-        description: 'Insert a horizontal rule',
-        action: () => '---\n',
-      },
-      {
-        id: 'date',
-        label: "Today's Date",
-        description: 'Insert link to today\'s journal',
-        action: () => {
-          const today = formatDateYMD(new Date())
-          return `[[journals/${today}]] `
-        },
-      },
-      {
-        id: 'time',
-        label: 'Current Time',
-        description: 'Insert current time',
-        action: () => {
-          const now = new Date()
-          return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' '
-        },
-      }
-    )
+    // Standard commands (shared with Editor V2)
+    items.push(...BASE_SLASH_COMMANDS.map(toCommandItem))
 
     return items
   }, [taskStatusSet, customContentTypes])
