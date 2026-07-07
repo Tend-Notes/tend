@@ -160,6 +160,8 @@ pub struct TaskItem {
     pub start_date: Option<String>,
     /// Priority level (1, 2, or 3)
     pub priority: Option<String>,
+    /// Work-log JSON (accumulated time entries), if any
+    pub work_log: Option<String>,
 }
 
 /// Key for identifying a page in the todo index
@@ -266,6 +268,7 @@ impl TodoIndex {
                     due_date: block.properties.get("due_date").cloned(),
                     start_date: block.properties.get("start_date").cloned(),
                     priority: block.properties.get("priority").cloned(),
+                    work_log: block.properties.get("work_log").cloned(),
                 });
             }
         }

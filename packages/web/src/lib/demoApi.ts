@@ -20,6 +20,8 @@ import { v4 as uuidv4 } from 'uuid'
 
 // Re-export types that don't change
 export { VersionConflictError } from './api'
+// Reuse the canonical task types from api.ts (single source of truth).
+import type { TaskItem, TaskList } from './api'
 
 // ============================================================================
 // Block data format for API requests (matches api.ts)
@@ -436,23 +438,6 @@ export const tags = {
 // Todos API
 // ============================================================================
 
-export interface TaskItem {
-  uuid: string
-  status: string
-  content: string
-  pageName: string
-  pageTitle: string
-  isJournal: boolean
-  journalDate: string | null
-  dueDate: string | null
-  startDate: string | null
-  priority: string | null
-}
-
-export interface TaskList {
-  tasks: TaskItem[]
-}
-
 export const todos = {
   list: async (): Promise<TaskList> => {
     const sheets = await demoStore.getAllSheets()
@@ -471,11 +456,13 @@ export const todos = {
             content: block.content.slice(match[0].length),
             pageName: sheet.name,
             pageTitle: sheet.title,
+            contentType: sheet.isJournal ? 'journal' : 'page',
             isJournal: sheet.isJournal,
             journalDate: sheet.journalDate,
-            dueDate: null, // TODO: parse from content if needed
-            startDate: null,
-            priority: null,
+            dueDate: block.properties.due_date ?? null,
+            startDate: block.properties.start_date ?? null,
+            priority: block.properties.priority ?? null,
+            workLog: block.properties.work_log ?? null,
           })
         }
       }

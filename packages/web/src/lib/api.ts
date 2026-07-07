@@ -223,11 +223,13 @@ export interface TaskItem {
   content: string
   pageName: string
   pageTitle: string
+  contentType: string
   isJournal: boolean
   journalDate: string | null
   dueDate: string | null
   startDate: string | null
   priority: string | null
+  workLog: string | null
 }
 
 export interface TaskList {
