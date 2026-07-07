@@ -47,7 +47,9 @@ function activeLinePos(state: EditorState, focused: boolean): number {
   return -1
 }
 
-function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
+// `caretHead` is the selection head's doc position when focused, else -1. It
+// gates tags between editable text (caret inside) and the collapsed pill.
+function decorationsForDoc(doc: PMNode, activePos: number, caretHead: number): DecorationSet {
   const decos: Decoration[] = []
 
   doc.descendants((node, pos) => {
@@ -88,10 +90,19 @@ function decorationsForDoc(doc: PMNode, activePos: number): DecorationSet {
           pushDelims(from, contentFrom, contentTo, to)
           break
         case 'tag': {
-          // Set the per-tag color CSS vars the .tag-pill styling reads (same as V1).
-          const c = useTagStore.getState().getTagColors(tok.name)
-          const style = `--tag-hue:${c.hue};--tag-sat:${c.sat};--tag-textL:${c.textL};--tag-bgL:${c.bgL}`
-          decos.push(Decoration.inline(from, to, { class: 'tag-pill', style, 'data-tag': tok.name }))
+          // Match V1 (tags.ts): while the caret is inside the tag, render it as
+          // plain editable text so you can type/edit it — and without data-tag so
+          // a click places the caret instead of navigating. Once the caret leaves
+          // (e.g. after typing a space), collapse it to the colored pill. Painting
+          // the inline-block, user-select:all pill under the caret is exactly what
+          // blocked editing in the regression.
+          if (caretHead >= from && caretHead <= to) {
+            decos.push(Decoration.inline(from, to, { class: 'tag' }))
+          } else {
+            const c = useTagStore.getState().getTagColors(tok.name)
+            const style = `--tag-hue:${c.hue};--tag-sat:${c.sat};--tag-textL:${c.textL};--tag-bgL:${c.bgL}`
+            decos.push(Decoration.inline(from, to, { class: 'tag-pill', style, 'data-tag': tok.name }))
+          }
           break
         }
         case 'url':
@@ -139,14 +150,15 @@ interface FmtState {
 export function formattingPlugin(nav: NavHandlers): Plugin<FmtState> {
   return new Plugin<FmtState>({
     state: {
-      init: (_config, state) => ({ deco: decorationsForDoc(state.doc, -1), focused: false }),
+      init: (_config, state) => ({ deco: decorationsForDoc(state.doc, -1, -1), focused: false }),
       apply(tr, prev, _oldState, newState) {
         const focusMeta = tr.getMeta('outline2-focus') as boolean | undefined
         const focused = focusMeta === undefined ? prev.focused : focusMeta
         if (!tr.docChanged && !tr.selectionSet && focusMeta === undefined) {
           return { deco: prev.deco.map(tr.mapping, tr.doc), focused }
         }
-        return { deco: decorationsForDoc(newState.doc, activeLinePos(newState, focused)), focused }
+        const caretHead = focused ? newState.selection.head : -1
+        return { deco: decorationsForDoc(newState.doc, activeLinePos(newState, focused), caretHead), focused }
       },
     },
     props: {
