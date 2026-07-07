@@ -179,7 +179,11 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
         </button>
         <span className="text-sm font-medium text-base-05">Tasks</span>
         <button
-          onClick={() => usePageStore.getState().openTaskManager()}
+          onClick={() => {
+            usePageStore.getState().openTaskManager()
+            // Opening the full-page manager: collapse the sidebar (it's redundant there).
+            useUIStore.getState().setSidebarOpen(false)
+          }}
           className="rounded p-1 text-base-04 hover:bg-base-01 hover:text-base-06"
           aria-label="Expand task manager to full view"
           title="Expand task manager"

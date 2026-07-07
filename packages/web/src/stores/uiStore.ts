@@ -47,6 +47,7 @@ interface UIState {
 
   // Actions
   toggleSidebar: () => void
+  setSidebarOpen: (open: boolean) => void
   setSidebarWidth: (width: number) => void
   setSidebarMode: (mode: SidebarMode) => void
   toggleBacklinks: () => void
@@ -82,6 +83,8 @@ export const useUIStore = create<UIState>()(
 
       toggleSidebar: () =>
         set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+
+      setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
       setSidebarWidth: (width) => {
         // Min: 15% smaller than default (279px), Max: 40% of viewport
