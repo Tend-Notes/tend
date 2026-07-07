@@ -194,3 +194,20 @@ export interface BlockRef {
   content: string
   hasChildren: boolean
 }
+
+// Payload for updating a single block by uuid (PATCH /blocks/{uuid}). A null
+// property value deletes that key; omitted fields are left unchanged.
+export interface BlockUpdate {
+  content?: string
+  properties?: Record<string, string | null>
+  version?: number
+}
+
+// Result of a single-block update.
+export interface BlockUpdateResult {
+  uuid: string
+  pageName: string
+  content: string
+  properties: Record<string, string>
+  version: number
+}

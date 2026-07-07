@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use serde::Serialize;
 
@@ -54,6 +54,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/blocks/status", get(blocks::status))
         .route("/blocks/rebuild", post(blocks::rebuild))
         .route("/blocks/{uuid}", get(blocks::get_block))
+        .route("/blocks/{uuid}", patch(blocks::update_block))
         // Reindex (rebuild all indices at once)
         .route("/reindex", post(reindex::reindex))
         // Stabilize (add Tend footers to files missing them, then reindex)

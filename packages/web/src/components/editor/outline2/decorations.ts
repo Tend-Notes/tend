@@ -12,18 +12,8 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
 import { useTagStore } from '../../../stores/tagStore'
-import { TASK_STATUS_SETS } from '../../../stores/settingsStore'
+import { nextStatusKeyword } from '../../../lib/taskStatus'
 import { isCodeFenceText } from './codeHighlight'
-
-// The next status keyword when cycling, within whichever set this keyword
-// belongs to (matches V1's getNextStatus).
-function nextStatusKeyword(keyword: string): string | null {
-  for (const set of Object.values(TASK_STATUS_SETS)) {
-    const i = set.findIndex((s) => s.keyword === keyword)
-    if (i >= 0) return set[(i + 1) % set.length].keyword
-  }
-  return null
-}
 
 // Reuse V1's existing formatting classes so styling matches exactly.
 const CONTENT_CLASS: Record<string, string> = {
