@@ -4,6 +4,7 @@
 //! Provides the API endpoint for looking up blocks by UUID.
 //! Used for the ((uuid)) block reference syntax.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -11,13 +12,15 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use chrono::NaiveDate;
-use serde::Serialize;
-use tend_core::Page;
+use serde::{Deserialize, Serialize};
+use tend_core::{ContentType, Page};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::routes::gardens::load_user_content_types;
-use crate::state::AppState;
+use crate::routes::helpers::{update_all_indices, update_all_indices_with_content_type};
+use crate::state::{AppState, GardenState};
+use crate::ws::{BroadcastEvent, WsEvent};
 
 /// Response for a successful block lookup
 #[derive(Debug, Serialize)]
@@ -230,4 +233,212 @@ pub async fn rebuild(
         block_count,
         message: format!("Block index rebuilt with {} blocks", block_count),
     }))
+}
+
+/// Where a block's page lives, and how to write it back.
+enum SaveTarget {
+    /// Regular page or journal — `write_page` handles both (via `page.is_journal`).
+    /// The str is the index entity-type label ("page" or "journal").
+    PageOrJournal(&'static str),
+    /// Custom content-type sheet — needs the content type + optional date to save.
+    Sheet(ContentType, Option<NaiveDate>),
+}
+
+/// Resolve a block's `page_name` to its loaded page and a save target. Mirrors the
+/// content-type detection in `get_block` (journal / sheet / page), but also carries
+/// what's needed to write the page back.
+async fn load_page_for_block(
+    garden: &GardenState,
+    username: &str,
+    page_name: &str,
+) -> Result<(Page, SaveTarget), AppError> {
+    if let Ok(date) = NaiveDate::parse_from_str(page_name, "%Y-%m-%d") {
+        let page = garden.file_manager.read_journal(date).await?;
+        return Ok((page, SaveTarget::PageOrJournal("journal")));
+    }
+
+    if page_name.contains('/') {
+        let parts: Vec<&str> = page_name.splitn(3, '/').collect();
+        if parts.len() >= 2 {
+            let directory = parts[0];
+            let content_types = load_user_content_types(username)?;
+            let content_type = content_types
+                .iter()
+                .find(|ct| ct.directory == directory && ct.id != "page" && ct.id != "journal");
+            if let Some(ct) = content_type {
+                if ct.is_date_foldered() && parts.len() == 3 {
+                    let date = NaiveDate::parse_from_str(parts[1], "%Y-%m-%d").ok();
+                    let name = parts[2];
+                    let page = garden.file_manager.read_sheet(ct, name, date).await?;
+                    return Ok((page, SaveTarget::Sheet(ct.clone(), date)));
+                }
+                let name = &page_name[directory.len() + 1..];
+                let page = garden.file_manager.read_sheet(ct, name, None).await?;
+                return Ok((page, SaveTarget::Sheet(ct.clone(), None)));
+            }
+        }
+    }
+
+    let page = garden.file_manager.read_page(page_name).await?;
+    Ok((page, SaveTarget::PageOrJournal("page")))
+}
+
+/// Request body for updating a single block by uuid.
+#[derive(Debug, Deserialize)]
+pub struct UpdateBlockRequest {
+    /// New full block content (e.g. "DONE buy milk"). Omit to leave content unchanged.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Properties to merge into the block. A `null` value deletes that key. Omit the
+    /// whole field to leave properties unchanged.
+    #[serde(default)]
+    pub properties: Option<HashMap<String, Option<String>>>,
+    /// Expected page version for optimistic concurrency. If provided and it doesn't
+    /// match, returns 409 Conflict. If omitted, applies to the current on-disk state.
+    #[serde(default)]
+    pub version: Option<u64>,
+}
+
+/// Response for a successful block update.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateBlockResponse {
+    pub uuid: String,
+    pub page_name: String,
+    pub content: String,
+    pub properties: HashMap<String, String>,
+    pub version: u64,
+}
+
+/// Update a single block by UUID, on whatever page/journal/sheet it lives on.
+///
+/// Lets the task manager change a task's status/text (via `content`) and its
+/// priority/dates (via `properties`) without loading the owning page in an editor.
+/// Performs a server-side read-modify-write of that page, then refreshes indices and
+/// broadcasts `PageUpdated` so any open editor stays in sync.
+pub async fn update_block(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+    Path(uuid): Path<String>,
+    Json(req): Json<UpdateBlockRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
+
+    // Block index (and thus lookup) is unavailable for encrypted gardens.
+    let Some(block_index) = &garden.block_index else {
+        return Ok((
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponse {
+                error: "feature_disabled".to_string(),
+                reason: Some("block_references_require_unencrypted_garden".to_string()),
+            }),
+        )
+            .into_response());
+    };
+
+    // Locate the block's page by uuid.
+    let block_ref = {
+        let index = block_index.lock().await;
+        match index.lookup(&uuid) {
+            Ok(Some(block_ref)) => block_ref,
+            Ok(None) => {
+                return Ok((
+                    StatusCode::NOT_FOUND,
+                    Json(ErrorResponse {
+                        error: "block_not_found".to_string(),
+                        reason: None,
+                    }),
+                )
+                    .into_response());
+            }
+            Err(e) => {
+                tracing::error!("Block index lookup error: {}", e);
+                return Err(AppError::Internal(format!("Block index error: {}", e)));
+            }
+        }
+    };
+
+    let (mut page, target) =
+        load_page_for_block(&garden, &user.username, &block_ref.page_name).await?;
+
+    // Optional optimistic-concurrency check.
+    if let Some(expected) = req.version {
+        if page.version != expected {
+            return Err(AppError::Conflict {
+                current_version: page.version,
+                message: format!(
+                    "Version mismatch: expected {}, current {}",
+                    expected, page.version
+                ),
+            });
+        }
+    }
+
+    let uuid_parsed = uuid
+        .parse::<uuid::Uuid>()
+        .map_err(|_| AppError::BadRequest("Invalid UUID format".to_string()))?;
+
+    {
+        let block = page
+            .blocks
+            .get_mut(&uuid_parsed)
+            .ok_or_else(|| AppError::NotFound("Block not found in page".to_string()))?;
+
+        if let Some(content) = req.content {
+            block.content = content;
+        }
+        if let Some(props) = req.properties {
+            for (key, value) in props {
+                match value {
+                    Some(v) => {
+                        block.properties.insert(key, v);
+                    }
+                    None => {
+                        block.properties.remove(&key);
+                    }
+                }
+            }
+        }
+    }
+
+    page.version += 1;
+    page.touch();
+
+    // Persist + refresh indices via the same paths the page/journal/sheet update
+    // handlers use.
+    match &target {
+        SaveTarget::PageOrJournal(entity_type) => {
+            garden.file_manager.write_page(&page).await?;
+            update_all_indices(&garden, &page, entity_type).await;
+        }
+        SaveTarget::Sheet(content_type, date) => {
+            garden
+                .file_manager
+                .write_sheet(content_type, &page, *date)
+                .await?;
+            update_all_indices_with_content_type(&garden, &page, "sheet", content_type, *date).await;
+        }
+    }
+
+    // Broadcast so any open editor of this page reloads (ignore "no receivers").
+    let _ = state.event_sender.send(BroadcastEvent {
+        username: Some(user.username.clone()),
+        event: WsEvent::PageUpdated {
+            name: page.name.clone(),
+        },
+    });
+
+    let block = page
+        .blocks
+        .get(&uuid_parsed)
+        .expect("block still present after update");
+    Ok(Json(UpdateBlockResponse {
+        uuid: block.uuid.to_string(),
+        page_name: page.name.clone(),
+        content: block.content.clone(),
+        properties: block.properties.clone(),
+        version: page.version,
+    })
+    .into_response())
 }
