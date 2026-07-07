@@ -13,8 +13,10 @@ import {
   type Task,
 } from '../../stores/taskStore';
 import { formatShortDate, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils';
-import { getPriorityDisplay } from '../ui/PriorityPickerPopover';
+import { getPriorityDisplay, PriorityPickerPopover } from '../ui/PriorityPickerPopover';
+import { DatePickerPopover } from '../ui/DatePickerPopover';
 import { renderContentWithWikilinks } from '../../lib/renderTaskContent';
+import { nextStatusKeyword, taskContentWithStatus, taskContentWithText, statusColorVar } from '../../lib/taskStatus';
 
 // '3' = high, '2' = medium, '1' = low, 'none' = sentinel for null priority
 type Priority = '3' | '2' | '1' | 'none';
@@ -72,63 +74,152 @@ function TaskRow({
   navigateToPage: (name: string) => void;
   navigateToJournal: (date: string) => void;
 }) {
-  const priorityInfo = task.priority ? getPriorityDisplay(task.priority) : null;
+  const updateTask = useTaskStore((s) => s.updateTask);
+  const [openPopover, setOpenPopover] = useState<'priority' | 'start' | 'due' | null>(null);
+  const [editingText, setEditingText] = useState(false);
+  const [draft, setDraft] = useState(task.content);
+
+  const priorityInfo = getPriorityDisplay(task.priority);
   const urgencyDate = task.startDate || task.dueDate;
   const urgencyStyle = urgencyDate ? getUrgencyStyle(urgencyDate) : null;
   const daysFromDue = task.dueDate ? getDaysFromDue(task.dueDate) : null;
 
+  const cycleStatus = () => {
+    const next = nextStatusKeyword(task.status);
+    if (next) updateTask(task.uuid, { content: taskContentWithStatus(task, next) });
+  };
+  const setProp = (key: 'priority' | 'start_date' | 'due_date', value: string | null) =>
+    updateTask(task.uuid, { properties: { [key]: value } });
+  const startEdit = () => { setDraft(task.content); setEditingText(true); };
+  const commitEdit = () => {
+    setEditingText(false);
+    if (draft !== task.content) updateTask(task.uuid, { content: taskContentWithText(task, draft) });
+  };
+
   return (
-    <li>
-      <button
-        onClick={() => onOpen(task)}
-        className="w-full text-left px-2 py-1.5 rounded-lg hover:bg-base-01 transition-colors"
-      >
-        <div className="flex items-start gap-2">
-          {priorityInfo && priorityInfo.indicator && (
-            <span
-              className="text-xs font-bold flex-shrink-0"
-              style={{ color: priorityInfo.color }}
-              title={`Priority: ${priorityInfo.label}`}
-            >
-              {priorityInfo.indicator}
-            </span>
-          )}
+    <li className="px-2 py-1.5 rounded-lg hover:bg-base-01 transition-colors">
+      <div className="flex items-start gap-2">
+        {/* Status pill — click cycles to the next status (parity with the editor badge). */}
+        <button
+          onClick={cycleStatus}
+          className="flex-shrink-0 rounded font-semibold"
+          style={{
+            padding: '1px 6px',
+            fontSize: '0.7rem',
+            backgroundColor: `var(--${statusColorVar(task.status)}, #666)`,
+            color: 'var(--base00, #fff)',
+          }}
+          title="Click to cycle status"
+        >
+          {task.status}
+        </button>
+        {/* Task text — rendered (with clickable wikilinks); pencil toggles inline edit. */}
+        {editingText ? (
+          <input
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+              else if (e.key === 'Escape') { setDraft(task.content); setEditingText(false); }
+            }}
+            className="text-sm flex-1 bg-base-00 border border-base-02 rounded px-1 py-0.5 text-base-06"
+          />
+        ) : (
           <span className="text-sm flex-1 text-base-05">
             {task.content
               ? renderContentWithWikilinks(task.content, navigateToPage, navigateToJournal)
-              : '(empty)'}
+              : <span className="italic text-base-04">(empty)</span>}
           </span>
-        </div>
-        <div className="flex items-center gap-2 mt-1 ml-0.5">
-          <span className="text-xs text-base-04">
-            {task.pageTitle ?? task.pageName}
-          </span>
-          {task.startDate && (
-            <span
-              className="text-xs"
-              style={urgencyStyle?.style}
-              title={`Start: ${task.startDate}`}
-            >
-              Start: {formatShortDate(task.startDate)}
-            </span>
+        )}
+        <button
+          onClick={startEdit}
+          className="flex-shrink-0 text-base-03 hover:text-base-05"
+          title="Edit task text"
+          aria-label="Edit task text"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+          </svg>
+        </button>
+      </div>
+      <div className="flex items-center gap-2 mt-1 ml-0.5">
+        <button
+          onClick={() => onOpen(task)}
+          className="text-xs text-base-04 hover:text-base-06 hover:underline"
+          title="Open page"
+        >
+          {task.pageTitle ?? task.pageName}
+        </button>
+
+        {/* Priority */}
+        <div className="relative">
+          <button
+            onClick={() => setOpenPopover((p) => (p === 'priority' ? null : 'priority'))}
+            className="text-xs font-bold"
+            style={{ color: task.priority ? priorityInfo.color : 'var(--base-04)' }}
+            title="Set priority"
+          >
+            {task.priority ? priorityInfo.indicator : 'Priority'}
+          </button>
+          {openPopover === 'priority' && (
+            <PriorityPickerPopover
+              value={task.priority}
+              onChange={(p) => setProp('priority', p)}
+              onClose={() => setOpenPopover(null)}
+            />
           )}
-          {task.dueDate && (
-            <span
-              className="text-xs"
-              style={!task.startDate ? urgencyStyle?.style : undefined}
-              title={
-                daysFromDue !== null && daysFromDue < 0
+        </div>
+
+        {/* Start date */}
+        <div className="relative">
+          <button
+            onClick={() => setOpenPopover((p) => (p === 'start' ? null : 'start'))}
+            className="text-xs text-base-04"
+            style={task.startDate ? urgencyStyle?.style : undefined}
+            title="Set start date"
+          >
+            {task.startDate ? `Start: ${formatShortDate(task.startDate)}` : '+ start'}
+          </button>
+          {openPopover === 'start' && (
+            <DatePickerPopover
+              value={task.startDate}
+              onChange={(d) => setProp('start_date', d)}
+              onClose={() => setOpenPopover(null)}
+              label="Start"
+            />
+          )}
+        </div>
+
+        {/* Due date */}
+        <div className="relative">
+          <button
+            onClick={() => setOpenPopover((p) => (p === 'due' ? null : 'due'))}
+            className="text-xs text-base-04"
+            style={task.dueDate && !task.startDate ? urgencyStyle?.style : undefined}
+            title={
+              task.dueDate && daysFromDue !== null
+                ? daysFromDue < 0
                   ? `${Math.abs(daysFromDue)} day${Math.abs(daysFromDue) === 1 ? '' : 's'} overdue`
                   : daysFromDue === 0
                   ? 'Due today'
                   : `Due in ${daysFromDue} day${daysFromDue === 1 ? '' : 's'}`
-              }
-            >
-              Due: {formatShortDate(task.dueDate)}
-            </span>
+                : 'Set due date'
+            }
+          >
+            {task.dueDate ? `Due: ${formatShortDate(task.dueDate)}` : '+ due'}
+          </button>
+          {openPopover === 'due' && (
+            <DatePickerPopover
+              value={task.dueDate}
+              onChange={(d) => setProp('due_date', d)}
+              onClose={() => setOpenPopover(null)}
+              label="Due"
+            />
           )}
         </div>
-      </button>
+      </div>
     </li>
   );
 }
