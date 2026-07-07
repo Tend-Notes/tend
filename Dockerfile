@@ -16,8 +16,11 @@ FROM node:22-alpine AS frontend-builder
 
 WORKDIR /app
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Install pnpm. Pin the version (do NOT use pnpm@latest): pnpm 11 turns esbuild's
+# blocked build script into a hard error (ERR_PNPM_IGNORED_BUILDS), and floating
+# on @latest silently drifted the build across a major. Keep this in sync with
+# the packageManager field and the CI pnpm/action-setup version.
+RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 
 # Copy package files for dependency caching
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
