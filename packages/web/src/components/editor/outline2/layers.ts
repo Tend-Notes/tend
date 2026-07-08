@@ -55,7 +55,11 @@ export function outlinerLayer(): EditorLayer {
     plugins: [
       uuidPlugin(),
       keymap({
-        Enter: splitListItem(listItemType),
+        // Pass explicit empty attrs: with no attrs, splitListItem copies the split
+        // node's attrs onto the new bullet — including `properties`, so a new TODO
+        // would inherit the previous one's priority/dates. The uuid plugin then
+        // mints a fresh uuid for the '' default.
+        Enter: splitListItem(listItemType, { uuid: '', collapsed: false, properties: {} }),
         // Chain a no-op returning true so structural keys never fall through to
         // the browser (focus escape).
         Tab: chainCommands(sinkListItem(listItemType), () => true),
