@@ -104,7 +104,11 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
     setInsertTextAtCursor((text: string) => {
       const v = viewRef.current
       if (!v) return
-      if (!v.hasFocus()) {
+      // The command palette takes DOM focus, but ProseMirror keeps its selection,
+      // so insert at that retained caret — NOT the block end. Only when there's no
+      // caret inside a block at all (editor never focused) fall back to the last
+      // focused block.
+      if (!blockUuidAtSelection(v.state)) {
         const uuid = useUIStore.getState().lastFocusedBlockUuid
         if (uuid) focusBlock(v, uuid, 'end')
       }
