@@ -22,33 +22,41 @@ export function MainContent() {
 
   // Scroll title visibility state
   const [showScrollTitle, setShowScrollTitle] = useState(false)
-  const titleRef = useRef<HTMLHeadingElement>(null)
-  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  // The pinned title is driven by an IntersectionObserver watching the main <h1>
+  // within the scroll container. We attach it via CALLBACK REFS rather than a
+  // name-keyed effect: the effect version ran while the title was still unmounted
+  // during the loading branch, returned early, and never re-ran once the content
+  // mounted — so the observer was frequently never created. Callback refs fire
+  // exactly when each element (un)mounts, so the observer is (re)built the moment
+  // both are present, regardless of load timing or editor/page remounts.
+  const titleElRef = useRef<HTMLHeadingElement | null>(null)
+  const scrollContainerElRef = useRef<HTMLDivElement | null>(null)
+  const observerRef = useRef<IntersectionObserver | null>(null)
 
-  // Track title visibility with IntersectionObserver
-  useEffect(() => {
-    const titleEl = titleRef.current
-    const scrollContainer = scrollContainerRef.current
-    if (!titleEl || !scrollContainer) return
-
+  const rebuildTitleObserver = useCallback(() => {
+    observerRef.current?.disconnect()
+    observerRef.current = null
+    const title = titleElRef.current
+    const scrollContainer = scrollContainerElRef.current
+    if (!title || !scrollContainer) return
     const observer = new IntersectionObserver(
-      (entries) => {
-        // Title is hidden when it's not intersecting (scrolled out of view)
-        const isVisible = entries[0]?.isIntersecting ?? true
-        setShowScrollTitle(!isVisible)
-      },
-      {
-        root: scrollContainer,
-        // Trigger when title is fully out of view (threshold 0)
-        threshold: 0,
-        // Small negative margin so title disappears just before it hits the top
-        rootMargin: '-8px 0px 0px 0px',
-      }
+      // Title hidden (pinned title shown) when it's scrolled out of the container.
+      (entries) => setShowScrollTitle(!(entries[0]?.isIntersecting ?? true)),
+      { root: scrollContainer, threshold: 0, rootMargin: '-8px 0px 0px 0px' },
     )
+    observer.observe(title)
+    observerRef.current = observer
+  }, [])
 
-    observer.observe(titleEl)
-    return () => observer.disconnect()
-  }, [currentPage?.name])
+  const setTitleRef = useCallback((el: HTMLHeadingElement | null) => {
+    titleElRef.current = el
+    rebuildTitleObserver()
+  }, [rebuildTitleObserver])
+
+  const setScrollContainerRef = useCallback((el: HTMLDivElement | null) => {
+    scrollContainerElRef.current = el
+    rebuildTitleObserver()
+  }, [rebuildTitleObserver])
 
   // Reset scroll title when page changes
   const handlePageChange = useCallback(() => {
@@ -143,7 +151,7 @@ export function MainContent() {
   return (
     <main className="flex-1 flex flex-col overflow-hidden relative">
       {/* Editor area with backlinks */}
-      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+      <div ref={setScrollContainerRef} className="flex-1 overflow-y-auto">
         {/* Scroll title - appears when main title scrolls out of view */}
         {/* Must be inside scroll container for position: sticky to work */}
         <div
@@ -171,7 +179,7 @@ export function MainContent() {
                   </svg>
                 </button>
               )}
-              <h1 ref={titleRef} className="text-xl font-semibold text-base-06">{currentPage.title}</h1>
+              <h1 ref={setTitleRef} className="text-xl font-semibold text-base-06">{currentPage.title}</h1>
               {/* Heatmap calendar popover */}
               {showCalendar && currentPage.isJournal && (
                 <HeatmapCalendar
