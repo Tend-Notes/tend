@@ -903,7 +903,7 @@ pub async fn accept_import_error(
         let sanitized = custom_name
             .trim_end_matches(".md")
             .chars()
-            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ' || *c == '/')
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
             .collect::<String>();
         if sanitized.is_empty() { name.clone() } else { sanitized }
     } else {
@@ -916,6 +916,18 @@ pub async fn accept_import_error(
             .replace(' ', "-");
         if sanitized.is_empty() { name.clone() } else { sanitized }
     };
+
+    // The destination name must be a single, safe component — never a path.
+    // (`dest_dir.join("/x")` would otherwise escape dest_dir, and a `..` would
+    // traverse up.) This also guards the fallback `name` branch.
+    if file_name.contains('/') || file_name.contains('\\') {
+        return Err(AppError::BadRequest(format!(
+            "Destination name must not contain a path separator: {}",
+            file_name
+        )));
+    }
+    tend_storage::fs::validate_safe_name(&file_name)
+        .map_err(|e| AppError::BadRequest(format!("Invalid destination name '{}': {}", file_name, e)))?;
 
     let dest_path = dest_dir.join(format!("{}.md", file_name));
 
