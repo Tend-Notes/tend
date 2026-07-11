@@ -19,6 +19,13 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 interface HeatmapCalendarProps {
   onClose: () => void
   currentDate?: string // YYYY-MM-DD format
+  // When provided, picking a day calls this instead of navigating to a journal —
+  // lets the same picker act as a date selector (e.g. the palette date filter).
+  onSelectDate?: (date: string) => void
+  // Show the journal-density heatmap shading + legend. Off for plain date picking.
+  heatmap?: boolean
+  // Which edge to anchor the popover to (relative to the offset parent).
+  align?: 'left' | 'right'
 }
 
 // Get intensity level (0-4) based on block count
@@ -30,7 +37,7 @@ function getIntensityLevel(blockCount: number): number {
   return 4
 }
 
-export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) {
+export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = true, align = 'left' }: HeatmapCalendarProps) {
   const { navigateToJournal } = usePageStore()
   const [journals, setJournals] = useState<PageMeta[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -46,8 +53,12 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
   const [viewYear, setViewYear] = useState(initialDate.year)
   const [viewMonth, setViewMonth] = useState(initialDate.month)
 
-  // Fetch journals on mount
+  // Fetch journals on mount (only needed for the heatmap shading).
   useEffect(() => {
+    if (!heatmap) {
+      setIsLoading(false)
+      return
+    }
     async function fetchJournals() {
       try {
         const data = await journalsApi.list()
@@ -59,7 +70,7 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
       }
     }
     fetchJournals()
-  }, [])
+  }, [heatmap])
 
   useClickOutside(popoverRef, onClose)
   useEscapeKey(onClose)
@@ -99,9 +110,10 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
     setViewMonth(today.month)
   }
 
-  // Handle day click
+  // Handle day click — select as a date if a handler was given, else navigate.
   const handleDayClick = (dateStr: string) => {
-    navigateToJournal(dateStr)
+    if (onSelectDate) onSelectDate(dateStr)
+    else navigateToJournal(dateStr)
     onClose()
   }
 
@@ -133,7 +145,7 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
     <div
       ref={popoverRef}
       className="absolute z-50 bg-base-00 border border-base-02 rounded-lg shadow-lg p-3 w-[280px]"
-      style={{ top: '100%', left: 0, marginTop: '4px' }}
+      style={{ top: '100%', [align]: 0, marginTop: '4px' }}
     >
       {/* Header with month navigation */}
       <div className="flex items-center justify-between mb-3">
@@ -202,14 +214,14 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
                   w-8 h-8 rounded text-xs font-medium transition-all
                   ${isToday ? 'ring-1 ring-base-0D ring-offset-1 ring-offset-base-00' : ''}
                   ${isSelected ? 'ring-2 ring-base-0E' : ''}
-                  ${hasContent ? 'hover:ring-1 hover:ring-base-04' : 'hover:bg-base-01'}
+                  ${heatmap && hasContent ? 'hover:ring-1 hover:ring-base-04' : 'hover:bg-base-01'}
                 `}
-                style={{
+                style={heatmap ? {
                   backgroundColor: intensityColors[intensity],
                   opacity: hasContent ? intensityOpacity[intensity] : 1,
                   color: hasContent && intensity >= 2 ? 'var(--base00)' : 'var(--base05)',
-                }}
-                title={hasContent ? `${blockCount} block${blockCount === 1 ? '' : 's'}` : 'No journal entry'}
+                } : { color: 'var(--base05)' }}
+                title={heatmap ? (hasContent ? `${blockCount} block${blockCount === 1 ? '' : 's'}` : 'No journal entry') : dateStr}
               >
                 {day}
               </button>
@@ -218,7 +230,8 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
         </div>
       )}
 
-      {/* Legend */}
+      {/* Legend (heatmap only) */}
+      {heatmap && (
       <div className="flex items-center justify-end gap-1 mt-3 text-xs text-base-04">
         <span>Less</span>
         {[0, 1, 2, 3, 4].map((level) => (
@@ -233,6 +246,7 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
         ))}
         <span>More</span>
       </div>
+      )}
     </div>
   )
 }
