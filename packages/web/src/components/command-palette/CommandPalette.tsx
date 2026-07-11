@@ -394,6 +394,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       currentDate={linkDate || undefined}
                       onSelectDate={(d) => setLinkDate(d)}
                       onClose={() => setShowLinkCal(false)}
+                      heatmap={false}
                     />
                   )}
                 </div>
