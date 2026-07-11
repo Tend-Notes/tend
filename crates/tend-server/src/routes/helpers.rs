@@ -129,7 +129,9 @@ pub async fn update_all_indices_with_content_type(
         let mut index = search_index.write().await;
         if let Err(e) = index.index_page(page) {
             warn!("Failed to update search index for {} {}: {}", entity_type, page.name, e);
-        } else if let Err(e) = index.commit() {
+        } else if let Err(e) = index.maybe_commit() {
+            // Deferred: a burst of saves commits once (PERF-03). Search commits
+            // any pending changes before querying, so results stay fresh.
             warn!("Failed to commit search index for {} {}: {}", entity_type, page.name, e);
         }
     }
@@ -179,7 +181,7 @@ pub async fn remove_from_all_indices(
         let mut index = search_index.write().await;
         if let Err(e) = index.remove_page(page_name) {
             warn!("Failed to remove {} {} from search index: {}", entity_type, page_name, e);
-        } else if let Err(e) = index.commit() {
+        } else if let Err(e) = index.maybe_commit() {
             warn!("Failed to commit search index after removing {} {}: {}", entity_type, page_name, e);
         }
     }
