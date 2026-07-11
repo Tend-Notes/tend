@@ -38,6 +38,16 @@ const SECTIONS: { id: SectionId; label: string; hideInDemo?: boolean; demoOnly?:
   { id: 'import', label: 'Import', hideInDemo: true },
 ]
 
+// Strip credentials (user:token@) from a git remote URL before displaying it, so
+// an embedded personal-access-token isn't shown on screen or in the tooltip.
+export function redactRemoteUrl(url: string): string {
+  // scheme://[userinfo@]host/... -> drop the userinfo entirely
+  const m = url.match(/^([a-z][a-z0-9+.-]*:\/\/)(?:[^/@]*@)?(.*)$/i)
+  if (m) return m[1] + m[2]
+  // scp-style [user@]host:path -> drop a `:password` inside the userinfo
+  return url.replace(/^([^@/:]+):[^@/]*@/, '$1@')
+}
+
 export function SidebarOptions({ onBack }: SidebarOptionsProps) {
   const { openSection, setOpenSection } = useSettingsStore()
 
@@ -1080,9 +1090,9 @@ function BackupSection() {
                     <button
                       onClick={() => setEditingRemote(true)}
                       className="text-xs text-base-05 hover:text-base-06 transition-colors text-right max-w-[130px] truncate"
-                      title={remoteUrl || 'Not configured'}
+                      title={remoteUrl ? redactRemoteUrl(remoteUrl) : 'Not configured'}
                     >
-                      {remoteUrl ? remoteUrl.replace(/^(git@|https:\/\/)/, '').replace(/\.git$/, '') : 'Not configured'}
+                      {remoteUrl ? redactRemoteUrl(remoteUrl).replace(/^(git@|https:\/\/)/, '').replace(/\.git$/, '') : 'Not configured'}
                     </button>
                   </div>
                 )}
