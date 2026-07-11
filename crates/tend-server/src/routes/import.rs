@@ -748,6 +748,9 @@ pub async fn get_import_error(
     user: AuthenticatedUser,
     AxumPath(name): AxumPath<String>,
 ) -> Result<Json<ImportError>, AppError> {
+    // Prevent path traversal: `name` is used to build the error file paths.
+    tend_storage::fs::validate_safe_name(&name)
+        .map_err(|e| AppError::BadRequest(format!("Invalid import-error name '{}': {}", name, e)))?;
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
     let errors_dir = garden.file_manager.root().join("import-errors");
@@ -784,6 +787,9 @@ pub async fn delete_import_error(
     user: AuthenticatedUser,
     AxumPath(name): AxumPath<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // Prevent path traversal: `name` is used to build the error file paths.
+    tend_storage::fs::validate_safe_name(&name)
+        .map_err(|e| AppError::BadRequest(format!("Invalid import-error name '{}': {}", name, e)))?;
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
     let errors_dir = garden.file_manager.root().join("import-errors");
@@ -840,6 +846,9 @@ pub async fn accept_import_error(
     AxumPath(name): AxumPath<String>,
     Json(req): Json<AcceptErrorRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // Prevent path traversal: `name` is used to build the error file paths.
+    tend_storage::fs::validate_safe_name(&name)
+        .map_err(|e| AppError::BadRequest(format!("Invalid import-error name '{}': {}", name, e)))?;
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
     let garden_path = garden.file_manager.root().to_path_buf();
@@ -1431,6 +1440,16 @@ pub fn transform_logseq_content(content: &str) -> TransformResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn import_error_name_guard_rejects_traversal() {
+        // get/delete/accept_import_error now guard the {name} path param with
+        // validate_safe_name before building import-errors/{name}.md/.meta.json.
+        for bad in ["../../../etc/passwd", "..", "/etc/passwd", "a/../b", "x\0y"] {
+            assert!(tend_storage::fs::validate_safe_name(bad).is_err(), "should reject {bad:?}");
+        }
+        assert!(tend_storage::fs::validate_safe_name("import-error-1").is_ok());
+    }
 
     #[test]
     fn test_transform_query_block() {
