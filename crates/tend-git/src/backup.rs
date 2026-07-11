@@ -434,6 +434,7 @@ impl BackupManager {
 
     /// Get diff for a specific commit, optionally filtered to a specific file
     pub fn diff(&self, commit_sha: &str, file_path: Option<&str>) -> Result<CommitDiff, GitError> {
+        validate_commit_sha(commit_sha)?;
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -723,6 +724,7 @@ impl BackupManager {
     /// Restore to a specific commit, optionally for a single file only
     /// If file_path is provided, only that file is restored; otherwise all files are restored.
     pub fn restore(&self, commit_sha: &str, file_path: Option<&str>) -> Result<(), GitError> {
+        validate_commit_sha(commit_sha)?;
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -1371,6 +1373,22 @@ pub fn validate_remote_url(url: &str) -> Result<(), GitError> {
     Ok(())
 }
 
+/// Validate a git commit SHA before using it as a command argument.
+///
+/// A `-`-leading value would be parsed by git as an option (e.g.
+/// `--output=/path` → arbitrary file write), and a value shorter than 7 bytes or
+/// on a non-char boundary panics the `&sha[..7]` slices. Requiring 7–40 hex
+/// characters removes both.
+pub fn validate_commit_sha(sha: &str) -> Result<(), GitError> {
+    if (7..=40).contains(&sha.len()) && sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(GitError::RepositoryError(format!(
+            "Invalid commit SHA: {sha:?} (expected 7-40 hex characters)"
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1380,6 +1398,21 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let bm = BackupManager::new(temp_dir.path(), false);
         (temp_dir, bm)
+    }
+
+    #[test]
+    fn test_validate_commit_sha() {
+        let too_long = "a".repeat(41);
+        let non_hex_40 = "z".repeat(40);
+        for bad in [
+            "", "abc", "--output=/tmp/x", "-rf", "abc123!", "  abcdef1",
+            too_long.as_str(), non_hex_40.as_str(),
+        ] {
+            assert!(validate_commit_sha(bad).is_err(), "expected rejection for {bad:?}");
+        }
+        for good in ["abcdef1", "0123456789abcdef0123456789abcdef01234567", "ABCDEF1234"] {
+            assert!(validate_commit_sha(good).is_ok(), "expected acceptance for {good:?}");
+        }
     }
 
     #[test]
