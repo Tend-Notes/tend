@@ -122,6 +122,9 @@ pub struct LinkIndex {
     target_index: HashMap<String, Vec<usize>>,
     /// Index from source_hash to entry indices for fast page removal
     source_index: HashMap<String, Vec<usize>>,
+    /// When false the index is RAM-only and `persist()` is a no-op, so page and
+    /// link names never touch the disk in plaintext (used for encrypted gardens).
+    persistent: bool,
 }
 
 impl LinkIndex {
@@ -146,10 +149,26 @@ impl LinkIndex {
             data,
             target_index: HashMap::new(),
             source_index: HashMap::new(),
+            persistent: true,
         };
 
         index.rebuild_indices();
         Ok(index)
+    }
+
+    /// Create an empty, RAM-only link index that never writes to disk.
+    ///
+    /// Used for encrypted gardens: the index is populated by rebuilding from the
+    /// decrypted pages on unlock and lives only while the garden is unlocked, so
+    /// no plaintext page/link names are ever persisted.
+    pub fn in_memory() -> Self {
+        Self {
+            path: PathBuf::new(),
+            data: LinkIndexData::new(),
+            target_index: HashMap::new(),
+            source_index: HashMap::new(),
+            persistent: false,
+        }
     }
 
     /// Rebuild the in-memory lookup indices from the entry list
@@ -171,6 +190,10 @@ impl LinkIndex {
 
     /// Persist the index to disk
     async fn persist(&self) -> Result<()> {
+        // RAM-only indices (encrypted gardens) never touch the disk.
+        if !self.persistent {
+            return Ok(());
+        }
         fs::create_dir_all(&self.path).await?;
         // Owner-only: the link index leaks page/link names in plaintext.
         #[cfg(unix)]
@@ -481,6 +504,29 @@ mod tests {
         assert_eq!(backlinks.len(), 1);
         assert_eq!(backlinks[0].link_type, LinkType::WikiLink);
         assert_eq!(backlinks[0].source_hash, hash_page_name("Source Page"));
+    }
+
+    #[tokio::test]
+    async fn test_in_memory_index_never_writes_to_disk() {
+        // Point the CWD-independent check at a temp dir: an in-memory index
+        // must not create any links.json even after indexing + a persist call.
+        let temp_dir = TempDir::new().unwrap();
+        let mut index = LinkIndex::in_memory();
+
+        let blocks = vec![Block::new("Check out [[Target Page]]")];
+        index.index_page("Source Page", &blocks).await.unwrap();
+
+        // Backlinks work in memory...
+        assert_eq!(index.len(), 1);
+        let backlinks = index.get_backlinks("Target Page");
+        assert_eq!(backlinks.len(), 1);
+        assert_eq!(backlinks[0].source_hash, hash_page_name("Source Page"));
+
+        // ...but nothing is persisted: an explicit persist() is a no-op and
+        // the temp dir stays empty.
+        index.persist().await.unwrap();
+        let entries: Vec<_> = std::fs::read_dir(temp_dir.path()).unwrap().collect();
+        assert!(entries.is_empty(), "in-memory index must not write files");
     }
 
     #[tokio::test]

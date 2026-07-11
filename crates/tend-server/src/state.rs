@@ -266,11 +266,27 @@ impl GardenState {
         // Initialize backup manager
         let backup_manager = BackupManager::new(&data_dir, git_config.auto_push);
 
-        // Initialize link index
+        // Initialize link index. Encrypted gardens use a RAM-only index (no
+        // plaintext page/link names on disk); it is populated by rebuilding
+        // from the decrypted pages on unlock (see switch_garden_encrypted).
         let link_index_path = data_dir.join(".tend").join("link_index");
-        let link_index = LinkIndex::new(link_index_path)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize link index: {}", e))?;
+        let link_index = if encrypted {
+            // Remove any legacy on-disk link index left from before RAM-only.
+            if link_index_path.exists() {
+                match std::fs::remove_dir_all(&link_index_path) {
+                    Ok(()) => info!(
+                        "Removed legacy on-disk link index for encrypted garden: {}",
+                        data_dir.display()
+                    ),
+                    Err(e) => tracing::warn!("Failed to remove legacy link index: {}", e),
+                }
+            }
+            LinkIndex::in_memory()
+        } else {
+            LinkIndex::new(link_index_path)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to initialize link index: {}", e))?
+        };
         let link_entries = link_index.len();
         let link_index = Arc::new(RwLock::new(link_index));
         info!(
@@ -320,6 +336,27 @@ impl GardenState {
                 data_dir.display()
             );
             (None, IndexStatus::Disabled)
+        } else if encrypted {
+            // Encrypted gardens never keep a plaintext search index on disk.
+            // Remove any legacy on-disk index and defer to an in-memory build
+            // on first search (see build_index/rebuild_search_index).
+            if index_path.exists() {
+                match std::fs::remove_dir_all(&index_path) {
+                    Ok(()) => info!(
+                        "Removed legacy on-disk search index for encrypted garden: {}",
+                        data_dir.display()
+                    ),
+                    Err(e) => tracing::warn!(
+                        "Failed to remove legacy on-disk search index: {}",
+                        e
+                    ),
+                }
+            }
+            info!(
+                "Search index will be built in memory for encrypted garden: {}",
+                data_dir.display()
+            );
+            (None, IndexStatus::NotBuilt)
         } else if index_exists(&index_path) {
             // Existing index found - open it without re-indexing
             info!(
@@ -444,8 +481,14 @@ impl GardenState {
             self.data_dir.display()
         );
 
-        // Create new index
-        let search_index = SearchIndex::open(&index_path)?;
+        // Create new index. Encrypted gardens use a RAM-only index so no
+        // plaintext content is ever written to disk; it lives only while the
+        // garden is unlocked and is rebuilt on the next unlock/search.
+        let search_index = if self.encrypted {
+            SearchIndex::in_memory()?
+        } else {
+            SearchIndex::open(&index_path)?
+        };
         let search_index = Arc::new(RwLock::new(search_index));
 
         // Index all content types
@@ -1069,6 +1112,18 @@ impl UserState {
         {
             let mut handle = self.watcher_handle.write().await;
             *handle = new_watcher;
+        }
+
+        // The encrypted garden's link index is RAM-only and starts empty, so
+        // populate it from the now-decrypted pages; otherwise backlinks would
+        // be blank until the first edit.
+        {
+            let content_types =
+                crate::routes::gardens::load_user_content_types(&self.username).unwrap_or_default();
+            let garden = self.garden.read().await;
+            if let Err(e) = garden.rebuild_link_index(&content_types).await {
+                tracing::warn!("Failed to build link index on unlock: {}", e);
+            }
         }
 
         info!("User {} encrypted garden switch complete: {}", self.username, garden_id);

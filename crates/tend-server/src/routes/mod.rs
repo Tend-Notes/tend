@@ -18,7 +18,7 @@ mod links;
 mod blocks;
 mod git;
 mod graph;
-mod gardens;
+pub(crate) mod gardens;
 mod helpers;
 mod sheets;
 mod tags;
