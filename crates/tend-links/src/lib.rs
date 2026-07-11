@@ -172,9 +172,20 @@ impl LinkIndex {
     /// Persist the index to disk
     async fn persist(&self) -> Result<()> {
         fs::create_dir_all(&self.path).await?;
+        // Owner-only: the link index leaks page/link names in plaintext.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o700));
+        }
         let index_file = self.path.join("links.json");
         let contents = serde_json::to_string_pretty(&self.data)?;
         fs::write(&index_file, contents).await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&index_file, std::fs::Permissions::from_mode(0o600));
+        }
         debug!(?index_file, entries = self.data.entries.len(), "Persisted link index");
         Ok(())
     }

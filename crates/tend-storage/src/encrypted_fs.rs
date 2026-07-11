@@ -46,6 +46,10 @@ impl EncryptedFileManager {
         // Ensure directories exist
         std::fs::create_dir_all(root.join("pages"))?;
         std::fs::create_dir_all(root.join("journals"))?;
+        // Restrict the garden tree so other local users can't read ciphertext.
+        crate::fs::restrict_dir(&root);
+        crate::fs::restrict_dir(&root.join("pages"));
+        crate::fs::restrict_dir(&root.join("journals"));
 
         info!("Initialized encrypted garden at: {}", root.display());
 
@@ -227,6 +231,7 @@ impl EncryptedFileManager {
             self.root.join(&content_type.directory)
         };
         tokio::fs::create_dir_all(&dir).await?;
+        crate::fs::restrict_dir(&dir);
         Ok(())
     }
 

@@ -96,6 +96,27 @@ pub struct FileManager {
     pending_writes: Arc<RwLock<HashSet<PathBuf>>>,
 }
 
+/// Restrict a directory to owner-only access (0700) on Unix; no-op elsewhere.
+///
+/// Best-effort: failure to tighten permissions must not abort garden setup, so
+/// errors are ignored (they only leave the default umask in place).
+#[cfg(unix)]
+pub(crate) fn restrict_dir(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700));
+}
+#[cfg(not(unix))]
+pub(crate) fn restrict_dir(_path: &Path) {}
+
+/// Restrict a file to owner-only read/write (0600) on Unix; no-op elsewhere.
+#[cfg(unix)]
+pub(crate) fn restrict_file(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+#[cfg(not(unix))]
+pub(crate) fn restrict_file(_path: &Path) {}
+
 impl FileManager {
     /// Create a new FileManager for the given root directory
     pub fn new(root: impl AsRef<Path>) -> Result<Self, StorageError> {
@@ -104,6 +125,10 @@ impl FileManager {
         // Ensure directories exist
         std::fs::create_dir_all(root.join("pages"))?;
         std::fs::create_dir_all(root.join("journals"))?;
+        // Restrict the garden tree so other local users can't read content.
+        restrict_dir(&root);
+        restrict_dir(&root.join("pages"));
+        restrict_dir(&root.join("journals"));
 
         info!("Initialized garden at: {}", root.display());
 
@@ -548,6 +573,18 @@ mod tests {
 
         assert!(temp_dir.path().join("pages").exists());
         assert!(temp_dir.path().join("journals").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_garden_tree_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let (temp_dir, _fm) = setup().await;
+        for dir in ["", "pages", "journals"] {
+            let path = temp_dir.path().join(dir);
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700, "{} should be 0700, got {:o}", path.display(), mode);
+        }
     }
 
     #[tokio::test]

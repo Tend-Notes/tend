@@ -84,6 +84,12 @@ impl SearchIndex {
         } else {
             info!("Creating new index at: {}", index_path.display());
             std::fs::create_dir_all(index_path)?;
+            // Owner-only: the search index holds page content in plaintext.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(index_path, std::fs::Permissions::from_mode(0o700));
+            }
             Index::create_in_dir(index_path, schema)?
         };
 
