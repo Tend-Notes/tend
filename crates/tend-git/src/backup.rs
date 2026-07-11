@@ -93,6 +93,7 @@ pub struct FileDiff {
 }
 
 /// Manages Git backup operations
+#[derive(Clone)]
 pub struct BackupManager {
     repo_path: PathBuf,
     auto_push: bool,

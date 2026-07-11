@@ -6,12 +6,26 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use serde::Deserialize;
-use tend_git::{BackupResult, CommitDiff, CommitInfo, GitStatus, ImportResult, PushResult, RemoteGardenInfo, RemoteResult};
+use tend_git::{BackupManager, BackupResult, CommitDiff, CommitInfo, GitError, GitStatus, ImportResult, PushResult, RemoteGardenInfo, RemoteResult};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
 use crate::state::AppState;
 use crate::ws::WsEvent;
+
+/// Run a blocking `BackupManager` operation on the blocking thread pool so a
+/// slow git call (network push/pull, subprocess fork) can't park a tokio worker
+/// and stall unrelated requests. `BackupManager` is a cheap `Clone` (path +
+/// flag), so we hand an owned copy to the closure.
+async fn run_git<T, F>(bm: BackupManager, f: F) -> Result<T, GitError>
+where
+    F: FnOnce(&BackupManager) -> Result<T, GitError> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || f(&bm))
+        .await
+        .map_err(|e| GitError::OperationFailed(format!("git task panicked: {e}")))?
+}
 
 #[derive(Debug, Deserialize)]
 pub struct HistoryQuery {
@@ -53,8 +67,8 @@ pub async fn status(
     user: AuthenticatedUser,
 ) -> Result<Json<GitStatus>, AppError> {
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    let status = garden.backup_manager.status()?;
+    let bm = user_state.garden.read().await.backup_manager.clone();
+    let status = run_git(bm, |b| b.status()).await?;
     Ok(Json(status))
 }
 
@@ -71,7 +85,8 @@ pub async fn backup(
     // Acquire exclusive lock on file manager
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
 
-    match garden.backup_manager.backup() {
+    let bm = garden.backup_manager.clone();
+    match run_git(bm, |b| b.backup()).await {
         Ok(result) => {
             state.broadcast_to_user(&user.username, WsEvent::BackupCompleted {
                 commit_sha: result.commit_sha.clone(),
@@ -102,7 +117,9 @@ pub async fn commit(
     // Acquire exclusive lock on file manager
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
 
-    match garden.backup_manager.commit(request.message.as_deref()) {
+    let bm = garden.backup_manager.clone();
+    let message = request.message.clone();
+    match run_git(bm, move |b| b.commit(message.as_deref())).await {
         Ok(result) => {
             state.broadcast_to_user(&user.username, WsEvent::BackupCompleted {
                 commit_sha: result.commit_sha.clone(),
@@ -126,8 +143,9 @@ pub async fn history(
     Query(query): Query<HistoryQuery>,
 ) -> Result<Json<Vec<CommitInfo>>, AppError> {
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    let commits = garden.backup_manager.history(query.limit, query.path.as_deref())?;
+    let bm = user_state.garden.read().await.backup_manager.clone();
+    let (limit, path) = (query.limit, query.path.clone());
+    let commits = run_git(bm, move |b| b.history(limit, path.as_deref())).await?;
     Ok(Json(commits))
 }
 
@@ -140,8 +158,9 @@ pub async fn diff(
 ) -> Result<Json<CommitDiff>, AppError> {
     tend_git::validate_commit_sha(&commit_sha).map_err(|e| AppError::BadRequest(e.to_string()))?;
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    let diff = garden.backup_manager.diff(&commit_sha, query.path.as_deref())?;
+    let bm = user_state.garden.read().await.backup_manager.clone();
+    let path = query.path.clone();
+    let diff = run_git(bm, move |b| b.diff(&commit_sha, path.as_deref())).await?;
     Ok(Json(diff))
 }
 
@@ -158,7 +177,9 @@ pub async fn restore(
     // Acquire exclusive lock on file manager
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
 
-    garden.backup_manager.restore(&request.commit, request.path.as_deref())?;
+    let bm = garden.backup_manager.clone();
+    let (commit, path) = (request.commit.clone(), request.path.clone());
+    run_git(bm, move |b| b.restore(&commit, path.as_deref())).await?;
 
     // Return success result
     let message = if request.path.is_some() {
@@ -182,9 +203,9 @@ pub async fn push(
     state.broadcast_to_user(&user.username, WsEvent::PushStarted);
 
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
+    let bm = user_state.garden.read().await.backup_manager.clone();
 
-    match garden.backup_manager.push() {
+    match run_git(bm, |b| b.push()).await {
         Ok(result) => {
             state.broadcast_to_user(&user.username, WsEvent::PushCompleted {
                 message: result.message.clone(),
@@ -211,7 +232,8 @@ pub async fn pull(
     // Acquire exclusive lock since pull modifies files
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
 
-    let result = garden.backup_manager.pull()?;
+    let bm = garden.backup_manager.clone();
+    let result = run_git(bm, |b| b.pull()).await?;
     Ok(Json(result))
 }
 
@@ -225,8 +247,9 @@ pub async fn set_remote(
     tend_git::validate_remote_url(&request.url)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    let result = garden.backup_manager.set_remote(&request.url)?;
+    let bm = user_state.garden.read().await.backup_manager.clone();
+    let url = request.url.clone();
+    let result = run_git(bm, move |b| b.set_remote(&url)).await?;
     Ok(Json(result))
 }
 
@@ -236,8 +259,8 @@ pub async fn test_remote(
     user: AuthenticatedUser,
 ) -> Result<Json<RemoteResult>, AppError> {
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    let result = garden.backup_manager.test_remote()?;
+    let bm = user_state.garden.read().await.backup_manager.clone();
+    let result = run_git(bm, |b| b.test_remote()).await?;
     Ok(Json(result))
 }
 
@@ -247,8 +270,8 @@ pub async fn remove_remote(
     user: AuthenticatedUser,
 ) -> Result<(), AppError> {
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    garden.backup_manager.remove_remote()?;
+    let bm = user_state.garden.read().await.backup_manager.clone();
+    run_git(bm, |b| b.remove_remote()).await?;
     Ok(())
 }
 
@@ -258,8 +281,8 @@ pub async fn check_remote_garden(
     user: AuthenticatedUser,
 ) -> Result<Json<RemoteGardenInfo>, AppError> {
     let user_state = state.get_user_state(&user.username).await?;
-    let garden = user_state.garden.read().await;
-    let garden_info = garden.backup_manager.check_remote_has_garden()?;
+    let bm = user_state.garden.read().await.backup_manager.clone();
+    let garden_info = run_git(bm, |b| b.check_remote_has_garden()).await?;
     Ok(Json(garden_info))
 }
 
@@ -274,6 +297,7 @@ pub async fn import_remote_garden(
     // Acquire exclusive lock since this modifies files
     let _lock = garden.file_manager.acquire_exclusive_lock().await;
 
-    let result = garden.backup_manager.import_remote_garden()?;
+    let bm = garden.backup_manager.clone();
+    let result = run_git(bm, |b| b.import_remote_garden()).await?;
     Ok(Json(result))
 }
