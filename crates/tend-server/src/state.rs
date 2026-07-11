@@ -237,6 +237,9 @@ pub struct GardenState {
     pub index_status: Arc<RwLock<IndexStatus>>,
     /// Last time the search index was used (for TTL tracking)
     pub last_search_use: Arc<RwLock<Option<Instant>>>,
+    /// Last time the on-disk `search_last_use` timestamp was written, to
+    /// throttle that write to at most once per minute.
+    last_search_persist: Arc<RwLock<Option<Instant>>>,
 }
 
 impl GardenState {
@@ -425,6 +428,7 @@ impl GardenState {
             search_config,
             index_status: Arc::new(RwLock::new(index_status)),
             last_search_use: Arc::new(RwLock::new(None)),
+            last_search_persist: Arc::new(RwLock::new(None)),
         };
 
         // If block index exists but is empty, populate it from existing pages
@@ -457,8 +461,28 @@ impl GardenState {
 
     /// Mark the search index as used (resets TTL timer)
     pub async fn touch_search_index(&self) {
-        let mut last_use = self.last_search_use.write().await;
-        *last_use = Some(Instant::now());
+        let now = Instant::now();
+        {
+            let mut last_use = self.last_search_use.write().await;
+            *last_use = Some(now);
+        }
+
+        // TTL disabled (ttl_hours == 0, e.g. unencrypted gardens): the GC never
+        // expires this index, so the on-disk timestamp is pure waste. Skip it —
+        // as-you-type search then does zero index-dir writes.
+        if self.search_config.ttl_hours == 0 {
+            return;
+        }
+
+        // Otherwise throttle the write to ~once/minute so a stream of queries
+        // doesn't rewrite the timestamp file on every keystroke.
+        {
+            let mut last_persist = self.last_search_persist.write().await;
+            match *last_persist {
+                Some(t) if now.duration_since(t) < Duration::from_secs(60) => return,
+                _ => *last_persist = Some(now),
+            }
+        }
 
         // Persist to disk for GC task (survives restarts, works without loading state)
         let last_use_path = self.data_dir.join(".tend").join("search_last_use");
