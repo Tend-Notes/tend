@@ -151,15 +151,64 @@ impl BackupManager {
                 .ok();
         }
 
-        // Create .gitignore
+        // Ensure .gitignore ignores all of .tend/ (see ensure_gitignore).
+        self.ensure_gitignore()?;
+
+        Ok(())
+    }
+
+    /// Ensure `.gitignore` ignores ALL of `.tend/`, and untrack any `.tend/`
+    /// files a previous (narrow) ignore let get committed.
+    ///
+    /// `.tend/` is rebuildable local index state, not source of truth. The old
+    /// ignore only listed `.tend/search_index/`, so the link index
+    /// (`.tend/link_index/links.json` — plaintext wikilink/tag names) and the
+    /// block DB (`.tend/blocks.db`) were committed and pushed to the remote. This
+    /// runs idempotently on init and on every backup/commit so existing repos are
+    /// migrated. It does NOT rewrite already-pushed history (owner's call).
+    fn ensure_gitignore(&self) -> Result<(), GitError> {
         let gitignore_path = self.repo_path.join(".gitignore");
-        if !gitignore_path.exists() {
-            std::fs::write(
-                &gitignore_path,
-                "# Tend internal files\n.tend/search_index/\n*.tmp\n",
-            )?;
+        let existing = std::fs::read_to_string(&gitignore_path).ok();
+        let ignores_all_tend = existing
+            .as_deref()
+            .map(|c| c.lines().any(|l| l.trim() == ".tend/"))
+            .unwrap_or(false);
+        if ignores_all_tend {
+            return Ok(());
         }
 
+        let content = match existing {
+            Some(existing) => {
+                // Broaden a narrow `.tend/search_index/` ignore, else append.
+                let mut out = String::new();
+                let mut replaced = false;
+                for line in existing.lines() {
+                    if line.trim() == ".tend/search_index/" {
+                        out.push_str(".tend/\n");
+                        replaced = true;
+                    } else {
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+                if !replaced {
+                    out.push_str(".tend/\n");
+                }
+                out
+            }
+            None => "# Tend internal files\n.tend/\n*.tmp\n".to_string(),
+        };
+        std::fs::write(&gitignore_path, content)?;
+
+        // Untrack any .tend/ files a prior narrow ignore let slip in (keeps them
+        // on disk; not history scrubbing — old commits are unchanged).
+        if self.is_git_repo() {
+            let _ = Command::new("git")
+                .args(["rm", "-r", "--cached", "--ignore-unmatch", ".tend"])
+                .current_dir(&self.repo_path)
+                .output();
+        }
+        info!("Ensured .gitignore ignores all of .tend/ (was leaking link/block index metadata)");
         Ok(())
     }
 
@@ -385,6 +434,7 @@ impl BackupManager {
 
     /// Get diff for a specific commit, optionally filtered to a specific file
     pub fn diff(&self, commit_sha: &str, file_path: Option<&str>) -> Result<CommitDiff, GitError> {
+        validate_commit_sha(commit_sha)?;
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -491,6 +541,8 @@ impl BackupManager {
         if !self.is_git_repo() {
             self.init_repo()?;
         }
+        // Migrate existing repos to the broad .tend/ ignore before staging.
+        self.ensure_gitignore()?;
 
         let timestamp = Utc::now();
 
@@ -559,6 +611,7 @@ impl BackupManager {
             info!("Pushing to remote...");
             let push_output = Command::new("git")
                 .args(["push"])
+                .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
                 .current_dir(&self.repo_path)
                 .output();
 
@@ -591,6 +644,8 @@ impl BackupManager {
         if !self.is_git_repo() {
             self.init_repo()?;
         }
+        // Migrate existing repos to the broad .tend/ ignore before staging.
+        self.ensure_gitignore()?;
 
         let timestamp = Utc::now();
 
@@ -669,6 +724,7 @@ impl BackupManager {
     /// Restore to a specific commit, optionally for a single file only
     /// If file_path is provided, only that file is restored; otherwise all files are restored.
     pub fn restore(&self, commit_sha: &str, file_path: Option<&str>) -> Result<(), GitError> {
+        validate_commit_sha(commit_sha)?;
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -732,6 +788,7 @@ impl BackupManager {
 
         let output = Command::new("git")
             .args(["push"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -774,6 +831,7 @@ impl BackupManager {
 
         let output = Command::new("git")
             .args(["pull", "--rebase"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -801,6 +859,9 @@ impl BackupManager {
 
     /// Set or update the remote repository URL
     pub fn set_remote(&self, url: &str) -> Result<RemoteResult, GitError> {
+        // Crate-boundary defense: never store an unvalidated remote URL.
+        validate_remote_url(url)?;
+
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -885,6 +946,7 @@ impl BackupManager {
         // Note: Don't use --exit-code as it returns 2 for empty repos (which is still a valid connection)
         let output = Command::new("git")
             .args(["ls-remote", "origin"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -976,6 +1038,7 @@ impl BackupManager {
         // Fetch from remote first to get latest refs
         let fetch_output = Command::new("git")
             .args(["fetch", "origin"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -1074,6 +1137,7 @@ impl BackupManager {
         // Fetch from remote
         let fetch_output = Command::new("git")
             .args(["fetch", "origin"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -1252,6 +1316,79 @@ pub struct PushResult {
     pub details: String,
 }
 
+/// Validate a git remote URL before it is stored or used.
+///
+/// Git honours remote-helper transports such as `ext::` and `fd::`, so a crafted
+/// remote URL (e.g. `ext::sh -c '<cmd>'`) would run arbitrary shell commands on
+/// the host during any later `push`/`pull`/`ls-remote`/`fetch`. We therefore
+/// allow ONLY ordinary transport URLs (`https`/`http`/`ssh`) and scp-style
+/// `[user@]host:path`, and reject everything else.
+pub fn validate_remote_url(url: &str) -> Result<(), GitError> {
+    let reject = |why: &str| -> Result<(), GitError> {
+        Err(GitError::RepositoryError(format!("Rejected remote URL: {why}")))
+    };
+
+    if url.is_empty() {
+        return reject("empty");
+    }
+    // A leading '-' would be parsed by git as a command-line option.
+    if url.starts_with('-') {
+        return reject("must not start with '-'");
+    }
+    // Real remote URLs never contain whitespace or control characters; rejecting
+    // them also defeats `ext::sh -c '...'`-style payloads.
+    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return reject("contains whitespace or control characters");
+    }
+
+    let lower = url.to_ascii_lowercase();
+
+    // Local-file transport is never a valid *remote*.
+    if lower.starts_with("file://") {
+        return reject("file:// is not allowed");
+    }
+
+    // Remote-helper transports use `scheme::…`. Any `::` in the segment before
+    // the first '/' means a helper (ext::, fd::, …). Standard URLs (`https://`)
+    // and scp-style (`git@host:path`) never have `::` there.
+    let before_first_slash = url.split('/').next().unwrap_or(url);
+    if before_first_slash.contains("::") {
+        return reject("remote-helper transports are not allowed");
+    }
+
+    let is_transport_url =
+        lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("ssh://");
+    // scp-style: `[user@]host:path` — a ':' with a non-empty host that has no
+    // '/' before it, and which is not a `scheme://` URL.
+    let is_scp_style = !url.contains("://")
+        && url
+            .find(':')
+            .map(|i| i > 0 && !url[..i].contains('/'))
+            .unwrap_or(false);
+
+    if !(is_transport_url || is_scp_style) {
+        return reject("only https/http/ssh URLs or scp-style host:path are allowed");
+    }
+
+    Ok(())
+}
+
+/// Validate a git commit SHA before using it as a command argument.
+///
+/// A `-`-leading value would be parsed by git as an option (e.g.
+/// `--output=/path` → arbitrary file write), and a value shorter than 7 bytes or
+/// on a non-char boundary panics the `&sha[..7]` slices. Requiring 7–40 hex
+/// characters removes both.
+pub fn validate_commit_sha(sha: &str) -> Result<(), GitError> {
+    if (7..=40).contains(&sha.len()) && sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        Ok(())
+    } else {
+        Err(GitError::RepositoryError(format!(
+            "Invalid commit SHA: {sha:?} (expected 7-40 hex characters)"
+        )))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1264,6 +1401,55 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_commit_sha() {
+        let too_long = "a".repeat(41);
+        let non_hex_40 = "z".repeat(40);
+        for bad in [
+            "", "abc", "--output=/tmp/x", "-rf", "abc123!", "  abcdef1",
+            too_long.as_str(), non_hex_40.as_str(),
+        ] {
+            assert!(validate_commit_sha(bad).is_err(), "expected rejection for {bad:?}");
+        }
+        for good in ["abcdef1", "0123456789abcdef0123456789abcdef01234567", "ABCDEF1234"] {
+            assert!(validate_commit_sha(good).is_ok(), "expected acceptance for {good:?}");
+        }
+    }
+
+    #[test]
+    fn test_validate_remote_url() {
+        // Malicious / disallowed transports and shapes are rejected.
+        for bad in [
+            "",
+            "ext::sh -c 'id'",
+            "ext::somehelper",
+            "fd::17/foo",
+            "file:///etc/passwd",
+            "-oProxyCommand=id",
+            "--upload-pack=id",
+            "git://github.com/user/repo.git", // git:// not allowed
+            "github.com/user/repo",           // schemeless, not scp-style
+        ] {
+            assert!(
+                validate_remote_url(bad).is_err(),
+                "expected rejection for {bad:?}"
+            );
+        }
+
+        // Ordinary transport + scp-style URLs are accepted.
+        for good in [
+            "https://github.com/user/repo.git",
+            "http://example.com/user/repo.git",
+            "ssh://git@github.com:22/user/repo.git",
+            "git@github.com:user/repo.git",
+        ] {
+            assert!(
+                validate_remote_url(good).is_ok(),
+                "expected acceptance for {good:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_init_repo() {
         let (temp_dir, bm) = setup();
 
@@ -1271,8 +1457,28 @@ mod tests {
         bm.init_repo().unwrap();
         assert!(bm.is_git_repo());
 
-        // Check .gitignore was created
-        assert!(temp_dir.path().join(".gitignore").exists());
+        // Check .gitignore was created and ignores ALL of .tend/ (not just the
+        // search index) so link/block index metadata is never pushed.
+        let gitignore = std::fs::read_to_string(temp_dir.path().join(".gitignore")).unwrap();
+        assert!(gitignore.lines().any(|l| l.trim() == ".tend/"), "gitignore: {gitignore:?}");
+        assert!(!gitignore.contains(".tend/search_index/"));
+    }
+
+    #[test]
+    fn test_ensure_gitignore_migrates_narrow_ignore() {
+        let (temp_dir, bm) = setup();
+        // Simulate an old repo with the narrow ignore.
+        std::fs::write(
+            temp_dir.path().join(".gitignore"),
+            "# Tend internal files\n.tend/search_index/\n*.tmp\n",
+        )
+        .unwrap();
+        bm.ensure_gitignore().unwrap();
+        let gitignore = std::fs::read_to_string(temp_dir.path().join(".gitignore")).unwrap();
+        assert!(gitignore.lines().any(|l| l.trim() == ".tend/"));
+        assert!(!gitignore.contains(".tend/search_index/"));
+        // *.tmp is preserved.
+        assert!(gitignore.contains("*.tmp"));
     }
 
     #[test]

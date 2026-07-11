@@ -14,15 +14,21 @@ services:
     container_name: tend
     restart: unless-stopped
     ports:
-      - "${TEND_PORT:-3000}:3000"
+      # Bind to loopback by default: Tend must sit behind a reverse proxy that
+      # terminates TLS and enforces auth. Change to 0.0.0.0 only behind such a proxy.
+      - "127.0.0.1:${TEND_PORT:-3000}:3000"
     volumes:
       - ${TEND_GARDEN_PATH:-./data}:/data
     environment:
       - TEND_HOST=0.0.0.0
       - TEND_PORT=3000
-      - TEND_GARDEN_PATH=/data
+      # The server reads TEND_BASE_DIR (not TEND_GARDEN_PATH) for its data root.
+      - TEND_BASE_DIR=/data
       - TEND_STATIC_DIR=/app/static
       - RUST_LOG=${RUST_LOG:-info}
+      # REQUIRED for production: the reverse proxy's forward-auth verify endpoint.
+      # Without it the server refuses to start (WebSocket auth would be bypassed).
+      # - TEND_AUTH_VERIFY_URL=https://your-auth-proxy/api/verify
       # Git configuration (optional)
       - GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-Tend}
       - GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-tend@localhost}

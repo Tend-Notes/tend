@@ -24,6 +24,7 @@ import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
 import { contentTypes as contentTypesApi, identity, isDemoMode } from './lib/api'
 import { initUserSync } from './lib/userSync'
+import { clearUserScopedContent } from './lib/cacheReset'
 
 // Demo mode imports (only loaded in demo mode)
 import { initializeDemoContent, resetDemoContent } from './lib/demoContent'
@@ -129,6 +130,9 @@ function App() {
             usePageStore.getState().reset()
             useUIStore.getState().reset()
             useSettingsStore.getState().resetAll()
+            // Also purge the service-worker content caches and unsaved drafts
+            // so User B is never served User A's page/journal content.
+            void clearUserScopedContent()
             // Redirect to home - current path may not exist for new user
             window.history.replaceState(null, '', '/')
           }

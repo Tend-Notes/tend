@@ -38,6 +38,16 @@ const SECTIONS: { id: SectionId; label: string; hideInDemo?: boolean; demoOnly?:
   { id: 'import', label: 'Import', hideInDemo: true },
 ]
 
+// Strip credentials (user:token@) from a git remote URL before displaying it, so
+// an embedded personal-access-token isn't shown on screen or in the tooltip.
+export function redactRemoteUrl(url: string): string {
+  // scheme://[userinfo@]host/... -> drop the userinfo entirely
+  const m = url.match(/^([a-z][a-z0-9+.-]*:\/\/)(?:[^/@]*@)?(.*)$/i)
+  if (m) return m[1] + m[2]
+  // scp-style [user@]host:path -> drop a `:password` inside the userinfo
+  return url.replace(/^([^@/:]+):[^@/]*@/, '$1@')
+}
+
 export function SidebarOptions({ onBack }: SidebarOptionsProps) {
   const { openSection, setOpenSection } = useSettingsStore()
 
@@ -1080,9 +1090,9 @@ function BackupSection() {
                     <button
                       onClick={() => setEditingRemote(true)}
                       className="text-xs text-base-05 hover:text-base-06 transition-colors text-right max-w-[130px] truncate"
-                      title={remoteUrl || 'Not configured'}
+                      title={remoteUrl ? redactRemoteUrl(remoteUrl) : 'Not configured'}
                     >
-                      {remoteUrl ? remoteUrl.replace(/^(git@|https:\/\/)/, '').replace(/\.git$/, '') : 'Not configured'}
+                      {remoteUrl ? redactRemoteUrl(remoteUrl).replace(/^(git@|https:\/\/)/, '').replace(/\.git$/, '') : 'Not configured'}
                     </button>
                   </div>
                 )}
@@ -1569,6 +1579,10 @@ function GardensSection() {
       // Load the new garden's content types
       const types = await contentTypesApi.list()
       useSettingsStore.getState().setContentTypes(types)
+      // Reset the URL to home first: a stale /page/<name> from the previous
+      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
+      // leaking the page across gardens.
+      window.history.replaceState(null, '', '/')
       // Load the new garden's default page
       await usePageStore.getState().initializeFromUrl()
     } catch (err) {
@@ -1617,6 +1631,10 @@ function GardensSection() {
       // Load the new garden's content types
       const types = await contentTypesApi.list()
       useSettingsStore.getState().setContentTypes(types)
+      // Reset the URL to home first: a stale /page/<name> from the previous
+      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
+      // leaking the page across gardens.
+      window.history.replaceState(null, '', '/')
       // Load the new garden's default page
       await usePageStore.getState().initializeFromUrl()
     } catch (err) {
@@ -1948,8 +1966,8 @@ function GardensSection() {
                       />
                       <div>
                         <span className="text-xs text-base-04">Enable full-text search</span>
-                        <p className="text-[10px] text-base-0A leading-tight">
-                          Creates a plaintext index in .tend/ for search. This exposes your note contents on disk.
+                        <p className="text-[10px] text-base-03 leading-tight">
+                          The search index is built in memory only while the garden is unlocked and is never written to disk.
                         </p>
                       </div>
                     </label>
@@ -1970,13 +1988,13 @@ function GardensSection() {
                           <span className="text-xs text-base-03">hours of non-use</span>
                         </div>
                         <p className="text-[10px] text-base-03 leading-tight">
-                          When you enable index expiration, the index will be recreated when it is next used. This may impact performance and will create a plaintext index until it auto-deletes. To keep the index indefinitely without deleting, set expiration to 0.
+                          The in-memory index is dropped after this many hours of non-use and rebuilt when search is next used, which may briefly impact performance. Set to 0 to keep it in memory for as long as the garden stays unlocked.
                         </p>
                       </div>
                     )}
 
                     <p className="text-[10px] text-base-08 leading-tight">
-                      Note: Filenames are NOT encrypted and remain visible on disk.
+                      Note: Note content and link/tag metadata are encrypted or kept in memory only, and nothing under .tend/ is ever pushed to a remote. Filenames are the only thing NOT encrypted — they remain visible on disk.
                     </p>
                   </div>
                 </div>

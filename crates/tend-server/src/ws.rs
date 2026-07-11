@@ -101,6 +101,17 @@ fn extract_username(headers: &HeaderMap, config: &crate::config::Config) -> Opti
     None
 }
 
+/// Outcome of verifying a WebSocket handshake against the auth service.
+enum AuthOutcome {
+    /// The auth service rejected the session.
+    Rejected,
+    /// The session is valid and the auth service reported this identity.
+    Verified(String),
+    /// The session is valid but the auth service did not return an identity
+    /// (some proxy setups omit the user header on the verify response).
+    VerifiedNoIdentity,
+}
+
 /// Verify authentication by forwarding cookies to the auth service (e.g., Authelia)
 ///
 /// Authelia's /api/verify endpoint requires specific headers to verify the request:
@@ -110,7 +121,15 @@ fn extract_username(headers: &HeaderMap, config: &crate::config::Config) -> Opti
 /// - X-Forwarded-Uri: The URI path
 /// - X-Forwarded-Method: The HTTP method
 /// - Cookie: Session cookies
-async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
+///
+/// On success the auth service echoes the authenticated identity back in its
+/// user header (e.g. `Remote-User`); we route events by *that*, never the
+/// client-supplied header, so a proxy-bypassing client can't impersonate.
+async fn verify_auth(
+    verify_url: &str,
+    headers: &HeaderMap,
+    config: &crate::config::Config,
+) -> AuthOutcome {
     // Extract cookie header to forward
     let cookie_header = headers
         .get("cookie")
@@ -144,7 +163,7 @@ async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
         Ok(c) => c,
         Err(e) => {
             warn!("Failed to create HTTP client for auth verification: {}", e);
-            return false;
+            return AuthOutcome::Rejected;
         }
     };
 
@@ -169,22 +188,61 @@ async fn verify_auth(verify_url: &str, headers: &HeaderMap) -> bool {
     match request.send().await {
         Ok(response) => {
             let status = response.status();
-            if status.is_success() {
-                debug!("WebSocket auth verification succeeded");
-                true
-            } else {
+            if !status.is_success() {
                 info!(
                     "WebSocket auth verification failed: status {} for {}",
                     status, original_url
                 );
-                false
+                return AuthOutcome::Rejected;
+            }
+            // Read the authenticated identity the auth service echoes back.
+            let identity = response
+                .headers()
+                .get(&config.auth.user_header)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            match identity {
+                Some(user) => {
+                    debug!("WebSocket auth verification succeeded for {}", user);
+                    AuthOutcome::Verified(user)
+                }
+                None => {
+                    debug!("WebSocket auth verification succeeded (no identity header)");
+                    AuthOutcome::VerifiedNoIdentity
+                }
             }
         }
         Err(e) => {
             warn!("WebSocket auth verification request failed: {}", e);
-            false
+            AuthOutcome::Rejected
         }
     }
+}
+
+/// Reject cross-origin WebSocket handshakes (WS bypasses CORS, so a malicious
+/// web page could otherwise open `ws://host/ws` on the user's ambient cookies).
+///
+/// A same-origin browser sends `Origin` matching the request host. Non-browser
+/// clients that send no `Origin` are allowed (they carry no ambient cookies to
+/// abuse); a present-but-mismatched `Origin` is refused.
+fn origin_allowed(headers: &HeaderMap) -> bool {
+    let origin = match headers.get("origin").and_then(|v| v.to_str().ok()) {
+        Some(o) => o,
+        None => return true, // no Origin: not a browser cross-site request
+    };
+    // Host the client actually reached (proxy-forwarded first, then Host).
+    let expected_host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    // Compare only the host[:port] authority, ignoring the scheme.
+    let origin_host = origin
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(origin);
+    !expected_host.is_empty() && origin_host == expected_host
 }
 
 /// WebSocket upgrade handler
@@ -193,18 +251,58 @@ pub async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    // Check authentication if verify_url is configured
-    if let Some(verify_url) = &state.config.auth.verify_url {
-        if !verify_auth(verify_url, &headers).await {
-            info!("WebSocket connection rejected: authentication failed");
-            return Err(StatusCode::UNAUTHORIZED);
-        }
+    // Reject cross-origin handshakes before doing any auth work.
+    if !origin_allowed(&headers) {
+        info!("WebSocket connection rejected: disallowed Origin");
+        return Err(StatusCode::FORBIDDEN);
     }
 
-    // Extract username for per-user event filtering
-    let username = extract_username(&headers, &state.config);
+    // Resolve the username to route events by. When an auth service is
+    // configured, trust the identity *it* returns, not the client's header.
+    let username = if let Some(verify_url) = &state.config.auth.verify_url {
+        match verify_auth(verify_url, &headers, &state.config).await {
+            AuthOutcome::Rejected => {
+                info!("WebSocket connection rejected: authentication failed");
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+            AuthOutcome::Verified(verified) => {
+                // Refuse if the client claims a different Remote-User than the
+                // one the auth service verified (proxy-bypass impersonation).
+                if let Some(claimed) = extract_username(&headers, &state.config) {
+                    if claimed != verified {
+                        warn!(
+                            "WebSocket connection rejected: claimed user does not match verified session"
+                        );
+                        return Err(StatusCode::FORBIDDEN);
+                    }
+                }
+                verified
+            }
+            AuthOutcome::VerifiedNoIdentity => {
+                // Session is valid but the proxy gave us no identity; fall back
+                // to the client header (best available) and validate it below.
+                warn!("WebSocket auth returned no identity; routing by client header");
+                match extract_username(&headers, &state.config) {
+                    Some(u) => u,
+                    None => return Err(StatusCode::UNAUTHORIZED),
+                }
+            }
+        }
+    } else {
+        // No auth service (dev mode): use the header/default-user logic.
+        match extract_username(&headers, &state.config) {
+            Some(u) => u,
+            None => return Err(StatusCode::UNAUTHORIZED),
+        }
+    };
 
-    // Check connection limit before upgrading
+    // Reject usernames unsafe for filesystem paths.
+    if crate::auth::validate_username(&username).is_err() {
+        warn!("WebSocket connection rejected: invalid username");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    // Check the server-wide connection limit before upgrading.
     let current = state.ws_connection_count.load(Ordering::Relaxed);
     if current >= MAX_WS_CONNECTIONS {
         warn!(
@@ -214,7 +312,13 @@ pub async fn ws_handler(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, username)))
+    // Reserve a per-user slot so one identity can't exhaust every slot.
+    if !state.try_acquire_ws_slot(&username) {
+        warn!("WebSocket per-user connection limit reached");
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, Some(username))))
 }
 
 /// Handle a WebSocket connection
@@ -227,9 +331,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, my_username: Opt
         my_username.as_deref().unwrap_or("anonymous")
     );
 
-    // Ensure we decrement on exit
-    let _guard = scopeguard::guard(Arc::clone(&state), |s| {
+    // Ensure we decrement the global and per-user counts on exit
+    let _guard = scopeguard::guard((Arc::clone(&state), my_username.clone()), |(s, user)| {
         let remaining = s.ws_connection_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        if let Some(user) = user {
+            s.release_ws_slot(&user);
+        }
         debug!("WebSocket client disconnected ({} active)", remaining);
     });
 
@@ -297,4 +404,51 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, my_username: Opt
         }
     }
     // _guard drop will log disconnect and decrement counter
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::header::HeaderName;
+    use axum::http::HeaderValue;
+
+    fn hm(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn origin_allowed_permits_same_origin() {
+        let h = hm(&[("host", "tend.example"), ("origin", "https://tend.example")]);
+        assert!(origin_allowed(&h));
+    }
+
+    #[test]
+    fn origin_allowed_refuses_cross_origin() {
+        let h = hm(&[("host", "tend.example"), ("origin", "https://evil.example")]);
+        assert!(!origin_allowed(&h));
+    }
+
+    #[test]
+    fn origin_allowed_permits_missing_origin() {
+        // Non-browser clients send no Origin and carry no ambient cookies.
+        let h = hm(&[("host", "tend.example")]);
+        assert!(origin_allowed(&h));
+    }
+
+    #[test]
+    fn origin_allowed_prefers_forwarded_host() {
+        let h = hm(&[
+            ("host", "internal:3000"),
+            ("x-forwarded-host", "tend.example"),
+            ("origin", "https://tend.example"),
+        ]);
+        assert!(origin_allowed(&h));
+    }
 }

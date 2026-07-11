@@ -52,7 +52,7 @@ governor = "0.10"
 tantivy = "0.22"
 
 # Git
-gix = { version = "0.68", default-features = false, features = ["blocking-network-client"] }
+gix = { version = "0.71", default-features = false, features = ["blocking-network-client"] }
 
 # File watching
 notify = "8"

@@ -8,6 +8,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 import { useRecentSheetsStore } from '../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi, isDemoMode } from '../lib/api'
+import { clearUserScopedContent } from '../lib/cacheReset'
 
 // WebSocket event types (must match server-side WsEvent enum)
 interface WsEventBase {
@@ -197,6 +198,15 @@ export function useWebSocket() {
               useUIStore.getState().reset()
               useSyncStatusStore.getState().reset()
               useRecentSheetsStore.getState().reset()
+              // Purge content caches + drafts: the previous garden (possibly a
+              // now-locked encrypted one) must not leak into the new one.
+              void clearUserScopedContent()
+              // Reset the URL to home BEFORE re-initializing. Otherwise the URL
+              // still points at the previous garden's page (e.g. /page/Bobbins)
+              // and initializeFromUrl -> navigateToPage would 404 in the new
+              // garden and AUTO-CREATE that page there, leaking its name/content
+              // across gardens. (App.tsx does the same on user switch.)
+              window.history.replaceState(null, '', '/')
               // Load the new garden's content types and default page
               contentTypesApi.list()
                 .then((types) => {

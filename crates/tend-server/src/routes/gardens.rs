@@ -311,18 +311,22 @@ pub async fn list_gardens(
     }))
 }
 
-/// Expand ~ to home directory in paths
-fn expand_tilde(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join(rest);
-        }
-    } else if path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home);
-        }
+/// Reject a garden-creation path that could escape the user's gardens root:
+/// empty, absolute, `~`-rooted, or containing a `..` component.
+fn validate_garden_relative_path(path: &str) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("Garden path must not be empty".into());
     }
-    PathBuf::from(path)
+    if path.starts_with('/') || path.starts_with('\\') || path.starts_with('~') {
+        return Err("Garden path must be relative to the gardens directory".into());
+    }
+    if std::path::Path::new(path)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err("Garden path must not contain '..'".into());
+    }
+    Ok(())
 }
 
 /// Create a new garden
@@ -345,14 +349,36 @@ pub async fn create_garden(
         return Err(AppError::BadRequest(format!("Garden '{}' already exists", req.name)));
     }
 
-    // Determine garden path:
-    // - If path starts with / or ~, use it as-is (expand ~ to home)
-    // - Otherwise, treat as relative to user's gardens directory
-    let garden_path = if req.path.starts_with('/') || req.path.starts_with('~') {
-        expand_tilde(&req.path)
-    } else {
-        user_gardens_root(&user.username).join(&req.path)
-    };
+    // Garden path is ALWAYS relative to the user's gardens root; reject anything
+    // that could escape it (absolute, ~, ..) so an authenticated user can't root
+    // a garden at an arbitrary process-writable directory and drop .md files there.
+    validate_garden_relative_path(&req.path).map_err(AppError::BadRequest)?;
+
+    let gardens_root = user_gardens_root(&user.username);
+    let garden_path = gardens_root.join(&req.path);
+
+    // Defense-in-depth: the deepest existing ancestor of the target must still be
+    // inside the gardens root (catches a symlinked prefix escaping the root).
+    {
+        let root_canonical = gardens_root
+            .canonicalize()
+            .unwrap_or_else(|_| gardens_root.clone());
+        let mut probe = garden_path.clone();
+        let inside = loop {
+            match probe.canonicalize() {
+                Ok(c) => break c.starts_with(&root_canonical),
+                Err(_) => match probe.parent() {
+                    Some(p) if p != probe => probe = p.to_path_buf(),
+                    _ => break true, // nothing existing to check; the join is already safe
+                },
+            }
+        };
+        if !inside {
+            return Err(AppError::BadRequest(
+                "Garden path escapes the gardens directory".into(),
+            ));
+        }
+    }
     if !garden_path.exists() {
         std::fs::create_dir_all(&garden_path)
             .map_err(|e| AppError::Internal(format!("Failed to create garden directory: {}", e)))?;
@@ -924,4 +950,25 @@ pub async fn update_content_types(
         .map_err(|e| AppError::Internal(format!("Failed to save gardens config: {}", e)))?;
 
     Ok(Json(result))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_garden_relative_path;
+
+    #[test]
+    fn rejects_escaping_garden_paths() {
+        for bad in ["/tmp/evil", "~/x", "~", "../../x", "a/../../b", "", "  ", "\\abs"] {
+            assert!(
+                validate_garden_relative_path(bad).is_err(),
+                "should reject {bad:?}"
+            );
+        }
+        for good in ["notes", "team/notes", "My Garden"] {
+            assert!(
+                validate_garden_relative_path(good).is_ok(),
+                "should accept {good:?}"
+            );
+        }
+    }
 }

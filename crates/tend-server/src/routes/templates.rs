@@ -27,6 +27,10 @@ pub async fn get_template(
     user: AuthenticatedUser,
     Path(content_type_id): Path<String>,
 ) -> Result<Json<Page>, AppError> {
+    // Prevent path traversal: content_type_id is used in the template file path.
+    tend_storage::fs::validate_safe_name(&content_type_id)
+        .map_err(|e| AppError::BadRequest(format!("Invalid content type id '{}': {}", content_type_id, e)))?;
+
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
@@ -64,6 +68,10 @@ pub async fn update_template(
     Path(content_type_id): Path<String>,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<Json<Page>, AppError> {
+    // Prevent path traversal: content_type_id is used in the template file path.
+    tend_storage::fs::validate_safe_name(&content_type_id)
+        .map_err(|e| AppError::BadRequest(format!("Invalid content type id '{}': {}", content_type_id, e)))?;
+
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
@@ -120,6 +128,10 @@ pub async fn delete_template(
     user: AuthenticatedUser,
     Path(content_type_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    // Prevent path traversal: content_type_id is used in the template file path.
+    tend_storage::fs::validate_safe_name(&content_type_id)
+        .map_err(|e| AppError::BadRequest(format!("Invalid content type id '{}': {}", content_type_id, e)))?;
+
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
@@ -145,4 +157,20 @@ pub async fn delete_template(
     Ok(Json(serde_json::json!({
         "deleted": content_type_id
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    // The template routes build `.tend/templates/{content_type_id}.md` from the
+    // path param and now guard it with validate_safe_name. Assert that guard
+    // rejects the traversal payloads those routes would otherwise write/read.
+    use tend_storage::fs::validate_safe_name;
+
+    #[test]
+    fn rejects_path_traversal_content_type_ids() {
+        for bad in ["../../../etc/passwd", "..", "/etc/passwd", "foo/../bar", "a\0b"] {
+            assert!(validate_safe_name(bad).is_err(), "should reject {bad:?}");
+        }
+        assert!(validate_safe_name("meeting").is_ok());
+    }
 }

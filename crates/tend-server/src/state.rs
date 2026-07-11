@@ -14,7 +14,7 @@ use tend_links::LinkIndex;
 use tend_search::{index_exists, SearchIndex};
 use tend_storage::{EncryptedFileManager, FileManager, StorageError};
 use tokio::sync::{Mutex, RwLock};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
 use crate::indices::{TagIndex, TodoIndex};
@@ -168,6 +168,27 @@ impl UnifiedFileManager {
         }
     }
 
+    /// Load every sheet of a content type as a fully decrypted `Page`, in a
+    /// single decrypt pass. For encrypted gardens this decrypts each file once
+    /// (vs. `list_sheets` + `read_sheet`, which decrypts it twice); for plain
+    /// gardens reads are cheap so it reuses `list_sheets` + `read_sheet`.
+    pub async fn load_all_sheets(&self, content_type: &ContentType) -> Result<Vec<Page>, StorageError> {
+        match self {
+            Self::Encrypted(efm) => efm.load_all_sheets(content_type).await,
+            Self::Plain(fm) => {
+                let metas = fm.list_sheets(content_type).await?;
+                let mut pages = Vec::with_capacity(metas.len());
+                for meta in &metas {
+                    let (bare, _) = tend_core::split_name(content_type, &meta.name);
+                    if let Ok(page) = fm.read_sheet(content_type, bare, meta.journal_date).await {
+                        pages.push(page);
+                    }
+                }
+                Ok(pages)
+            }
+        }
+    }
+
     /// Write a sheet for a content type
     pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
         match self {
@@ -239,12 +260,18 @@ impl GardenState {
         git_config: &GitConfig,
         search_config: SearchConfig,
     ) -> anyhow::Result<Self> {
-        // Verify passphrase first
-        if !EncryptedFileManager::verify_passphrase(&data_dir, &passphrase)? {
-            return Err(anyhow::anyhow!("Invalid passphrase for encrypted garden"));
+        // Constructing the manager unwraps the garden's X25519 identity with the
+        // passphrase (scrypt runs once here); a wrong passphrase fails with an
+        // "Invalid passphrase" error, so no separate verify step is needed.
+        let file_manager = EncryptedFileManager::new(&data_dir, passphrase)?;
+
+        // Eager migration (SEC-25 Part B): re-encrypt any legacy
+        // passphrase-scrypt files to the identity so future reads run no scrypt.
+        // One-time; a no-op once the garden is migrated.
+        if let Err(e) = file_manager.migrate_to_identity().await {
+            tracing::warn!("Encrypted garden identity migration incomplete: {}", e);
         }
 
-        let file_manager = EncryptedFileManager::new(&data_dir, passphrase)?;
         Self::new_with_file_manager(
             data_dir,
             UnifiedFileManager::Encrypted(file_manager),
@@ -266,11 +293,27 @@ impl GardenState {
         // Initialize backup manager
         let backup_manager = BackupManager::new(&data_dir, git_config.auto_push);
 
-        // Initialize link index
+        // Initialize link index. Encrypted gardens use a RAM-only index (no
+        // plaintext page/link names on disk); it is populated by rebuilding
+        // from the decrypted pages on unlock (see switch_garden_encrypted).
         let link_index_path = data_dir.join(".tend").join("link_index");
-        let link_index = LinkIndex::new(link_index_path)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize link index: {}", e))?;
+        let link_index = if encrypted {
+            // Remove any legacy on-disk link index left from before RAM-only.
+            if link_index_path.exists() {
+                match std::fs::remove_dir_all(&link_index_path) {
+                    Ok(()) => info!(
+                        "Removed legacy on-disk link index for encrypted garden: {}",
+                        data_dir.display()
+                    ),
+                    Err(e) => tracing::warn!("Failed to remove legacy link index: {}", e),
+                }
+            }
+            LinkIndex::in_memory()
+        } else {
+            LinkIndex::new(link_index_path)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to initialize link index: {}", e))?
+        };
         let link_entries = link_index.len();
         let link_index = Arc::new(RwLock::new(link_index));
         info!(
@@ -320,6 +363,27 @@ impl GardenState {
                 data_dir.display()
             );
             (None, IndexStatus::Disabled)
+        } else if encrypted {
+            // Encrypted gardens never keep a plaintext search index on disk.
+            // Remove any legacy on-disk index and defer to an in-memory build
+            // on first search (see build_index/rebuild_search_index).
+            if index_path.exists() {
+                match std::fs::remove_dir_all(&index_path) {
+                    Ok(()) => info!(
+                        "Removed legacy on-disk search index for encrypted garden: {}",
+                        data_dir.display()
+                    ),
+                    Err(e) => tracing::warn!(
+                        "Failed to remove legacy on-disk search index: {}",
+                        e
+                    ),
+                }
+            }
+            info!(
+                "Search index will be built in memory for encrypted garden: {}",
+                data_dir.display()
+            );
+            (None, IndexStatus::NotBuilt)
         } else if index_exists(&index_path) {
             // Existing index found - open it without re-indexing
             info!(
@@ -444,8 +508,14 @@ impl GardenState {
             self.data_dir.display()
         );
 
-        // Create new index
-        let search_index = SearchIndex::open(&index_path)?;
+        // Create new index. Encrypted gardens use a RAM-only index so no
+        // plaintext content is ever written to disk; it lives only while the
+        // garden is unlocked and is rebuilt on the next unlock/search.
+        let search_index = if self.encrypted {
+            SearchIndex::in_memory()?
+        } else {
+            SearchIndex::open(&index_path)?
+        };
         let search_index = Arc::new(RwLock::new(search_index));
 
         // Index all content types
@@ -654,6 +724,95 @@ impl GardenState {
         Ok(())
     }
 
+    /// Load every sheet a single time (one decrypt pass) and (re)build the
+    /// link, tag, todo, and search indices from that shared set.
+    ///
+    /// For encrypted gardens each file decrypt runs the scrypt KDF (~1s), so
+    /// decrypting a page once and feeding every index from it — instead of each
+    /// index re-listing and re-decrypting — cuts unlock-time decryptions ~4x.
+    /// (SEC-25 Part A. The per-decrypt scrypt cost itself is Part B.)
+    pub async fn rebuild_indices_single_pass(
+        &mut self,
+        content_types: &[ContentType],
+    ) -> anyhow::Result<()> {
+        // Single decrypt pass over every sheet (load_all_sheets decrypts each
+        // file exactly once and returns the page bodies).
+        let mut loaded: Vec<(&ContentType, Option<NaiveDate>, Page)> = Vec::new();
+        for ct in content_types {
+            for page in self.file_manager.load_all_sheets(ct).await? {
+                let journal_date = PageMeta::from(&page).journal_date;
+                loaded.push((ct, journal_date, page));
+            }
+        }
+
+        // Link index (backlinks).
+        {
+            let pages_for_links: Vec<(String, Vec<tend_core::Block>)> = loaded
+                .iter()
+                .map(|(_, _, p)| (p.name.clone(), p.blocks.values().cloned().collect()))
+                .collect();
+            let mut link_index = self.link_index.write().await;
+            link_index
+                .rebuild_all(pages_for_links.into_iter())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to rebuild link index: {}", e))?;
+        }
+
+        // Tag index.
+        {
+            let mut tag_index = self.tag_index.write().await;
+            tag_index.clear();
+            for (_, _, page) in &loaded {
+                tag_index.index_page(page);
+            }
+        }
+
+        // Todo index.
+        {
+            let mut todo_index = self.todo_index.write().await;
+            todo_index.clear();
+            for (ct, date, page) in &loaded {
+                todo_index.index_page(page, ct, *date);
+            }
+        }
+
+        // Search index (if enabled): a fresh index populated from the shared
+        // pages. Encrypted gardens use a RAM-only index; plain gardens on disk.
+        if self.search_config.enabled {
+            {
+                let mut status = self.index_status.write().await;
+                *status = IndexStatus::Building;
+            }
+            let index_path = self.data_dir.join(".tend").join("search_index");
+            let search_index = if self.encrypted {
+                SearchIndex::in_memory()?
+            } else {
+                SearchIndex::open(&index_path)?
+            };
+            let search_index = Arc::new(RwLock::new(search_index));
+            {
+                let mut index = search_index.write().await;
+                for (_, _, page) in &loaded {
+                    if let Err(e) = index.index_page(page) {
+                        tracing::warn!("Failed to index {} in search: {}", page.name, e);
+                    }
+                }
+                index.commit()?;
+            }
+            self.search_index = Some(search_index);
+            {
+                let mut status = self.index_status.write().await;
+                *status = IndexStatus::Ready;
+            }
+        }
+
+        info!(
+            "Rebuilt link/tag/todo/search indices from a single decrypt pass ({} sheets)",
+            loaded.len()
+        );
+        Ok(())
+    }
+
     /// Check if tag index is populated
     pub async fn is_tag_index_populated(&self) -> bool {
         let index = self.tag_index.read().await;
@@ -667,8 +826,52 @@ impl GardenState {
     }
 }
 
-/// Maximum number of concurrent WebSocket connections
+/// Maximum number of concurrent WebSocket connections (server-wide)
 pub const MAX_WS_CONNECTIONS: usize = 100;
+
+/// Maximum number of concurrent WebSocket connections a single user may hold,
+/// so one identity can't exhaust every server-wide slot.
+pub const MAX_WS_CONNECTIONS_PER_USER: usize = 10;
+
+/// Maximum number of per-user states cached in memory. Bounds the map so a
+/// flood of distinct usernames can't grow it without limit; the
+/// least-recently-used entry is evicted when a new user exceeds the cap.
+pub const MAX_USER_STATES: usize = 1000;
+
+/// Reserve a per-user WebSocket slot, incrementing the count if under `cap`.
+/// Returns false (without incrementing) when the user is already at the cap.
+fn acquire_ws_slot(map: &mut std::collections::HashMap<String, usize>, user: &str, cap: usize) -> bool {
+    let count = map.entry(user.to_string()).or_insert(0);
+    if *count >= cap {
+        return false;
+    }
+    *count += 1;
+    true
+}
+
+/// Release a per-user WebSocket slot, removing the entry when it reaches zero.
+fn release_ws_slot(map: &mut std::collections::HashMap<String, usize>, user: &str) {
+    if let Some(count) = map.get_mut(user) {
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            map.remove(user);
+        }
+    }
+}
+
+/// Pick the least-recently-used key for eviction. A key missing from `access`
+/// is treated as the oldest (evicted first).
+fn pick_lru_user(
+    keys: &[String],
+    access: &std::collections::HashMap<String, std::time::Instant>,
+    now: std::time::Instant,
+) -> Option<String> {
+    keys.iter()
+        // A missing timestamp sorts oldest: pair (present, instant) so that
+        // `false` (missing) orders before any `true`.
+        .min_by_key(|k| (access.contains_key(*k), access.get(*k).copied().unwrap_or(now)))
+        .cloned()
+}
 
 // ========== User State (Per-User Gardens) ==========
 
@@ -1027,6 +1230,21 @@ impl UserState {
             *handle = new_watcher;
         }
 
+        // The encrypted garden's search and link indices are RAM-only and start
+        // empty, so build them from the now-decrypted pages on unlock; otherwise
+        // search would sit at "needs to be built" and backlinks would be blank.
+        // SEC-25 Part A: decrypt each page once and feed every index from that
+        // single pass (link/tag/todo/search), instead of one decrypt pass per
+        // index — each decrypt runs the scrypt KDF, so this cuts unlock cost ~4x.
+        {
+            let content_types =
+                crate::routes::gardens::load_user_content_types(&self.username).unwrap_or_default();
+            let mut garden = self.garden.write().await;
+            if let Err(e) = garden.rebuild_indices_single_pass(&content_types).await {
+                tracing::warn!("Failed to build indices on unlock: {}", e);
+            }
+        }
+
         info!("User {} encrypted garden switch complete: {}", self.username, garden_id);
 
         Ok(new_data_dir)
@@ -1126,8 +1344,12 @@ pub struct AppState {
     user_states: RwLock<std::collections::HashMap<String, Arc<UserState>>>,
     /// Broadcast channel for WebSocket events
     pub event_sender: EventSender,
-    /// Current WebSocket connection count
+    /// Current WebSocket connection count (server-wide)
     pub ws_connection_count: std::sync::atomic::AtomicUsize,
+    /// Active WebSocket connections per user, for the per-user cap.
+    ws_user_connections: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// Last-access time per user, for LRU eviction of `user_states`.
+    user_last_access: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
 }
 
 impl AppState {
@@ -1154,7 +1376,31 @@ impl AppState {
             user_states: RwLock::new(std::collections::HashMap::new()),
             event_sender,
             ws_connection_count: std::sync::atomic::AtomicUsize::new(0),
+            ws_user_connections: std::sync::Mutex::new(std::collections::HashMap::new()),
+            user_last_access: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// Try to reserve a WebSocket slot for `username`, honoring the per-user
+    /// cap. Returns false if the user already holds the maximum. Release with
+    /// [`AppState::release_ws_slot`] when the connection closes.
+    pub fn try_acquire_ws_slot(&self, username: &str) -> bool {
+        let mut map = self.ws_user_connections.lock().unwrap();
+        acquire_ws_slot(&mut map, username, MAX_WS_CONNECTIONS_PER_USER)
+    }
+
+    /// Release a previously reserved per-user WebSocket slot.
+    pub fn release_ws_slot(&self, username: &str) {
+        let mut map = self.ws_user_connections.lock().unwrap();
+        release_ws_slot(&mut map, username);
+    }
+
+    /// Record that `username` was just accessed (for LRU eviction).
+    fn touch_user_access(&self, username: &str) {
+        self.user_last_access
+            .lock()
+            .unwrap()
+            .insert(username.to_string(), std::time::Instant::now());
     }
 
     /// Get or create user state for the given username
@@ -1163,6 +1409,7 @@ impl AppState {
         {
             let states = self.user_states.read().await;
             if let Some(state) = states.get(username) {
+                self.touch_user_access(username);
                 return Ok(Arc::clone(state));
             }
         }
@@ -1170,7 +1417,23 @@ impl AppState {
         // Not cached -- take write lock and check again to prevent double-init race
         let mut states = self.user_states.write().await;
         if let Some(state) = states.get(username) {
+            self.touch_user_access(username);
             return Ok(Arc::clone(state));
+        }
+
+        // Bound the map: evict the least-recently-used user before inserting a
+        // new one so a flood of distinct usernames can't grow it unbounded.
+        if states.len() >= MAX_USER_STATES {
+            let keys: Vec<String> = states.keys().cloned().collect();
+            let evict = {
+                let access = self.user_last_access.lock().unwrap();
+                pick_lru_user(&keys, &access, std::time::Instant::now())
+            };
+            if let Some(evict) = evict {
+                states.remove(&evict);
+                self.user_last_access.lock().unwrap().remove(&evict);
+                warn!("user_states cap ({}) reached; evicted LRU user state", MAX_USER_STATES);
+            }
         }
 
         // Create new user state while holding write lock
@@ -1186,6 +1449,7 @@ impl AppState {
 
         // Cache it
         states.insert(username.to_string(), Arc::clone(&user_state));
+        self.touch_user_access(username);
 
         Ok(user_state)
     }
@@ -1274,12 +1538,15 @@ async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Resu
     let content = tokio::fs::read_to_string(&gardens_json).await?;
     let config: serde_json::Value = serde_json::from_str(&content)?;
 
-    let gardens = config.get("gardens").and_then(|g| g.as_object());
-    let Some(gardens) = gardens else {
+    // gardens.json stores `gardens` as an ARRAY of garden objects (Vec<Garden>).
+    // (The previous code read it as an object, so the GC loop never ran at all.)
+    let Some(gardens) = config.get("gardens").and_then(|g| g.as_array()) else {
         return Ok(());
     };
 
-    for (garden_id, garden_info) in gardens {
+    for garden_info in gardens {
+        let garden_id = garden_info.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
         // Only check encrypted gardens with search enabled and TTL > 0
         let encrypted = garden_info.get("encrypted").and_then(|v| v.as_bool()).unwrap_or(false);
         let search_enabled = garden_info.get("search_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1289,7 +1556,17 @@ async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Resu
             continue;
         }
 
-        let garden_path = user_dir.join("Gardens").join(garden_id);
+        // Use the garden's real stored path, not a reconstructed Gardens/<id>:
+        // the id is a slugified/lowercased name, so on a case-sensitive FS it may
+        // not match the actual directory (e.g. Gardens/notes vs Gardens/Notes) and
+        // GC would scan the wrong path, so the index would never be expired.
+        let Some(garden_path) = garden_info
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+        else {
+            continue;
+        };
         let index_path = garden_path.join(".tend").join("search_index");
         let last_use_path = garden_path.join(".tend").join("search_last_use");
 
@@ -1342,4 +1619,94 @@ async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Resu
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod resource_cap_tests {
+    use super::{acquire_ws_slot, pick_lru_user, release_ws_slot};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn per_user_ws_slots_are_capped() {
+        let mut map = HashMap::new();
+        // Cap of 2: the third acquire for the same user is refused.
+        assert!(acquire_ws_slot(&mut map, "alice", 2));
+        assert!(acquire_ws_slot(&mut map, "alice", 2));
+        assert!(!acquire_ws_slot(&mut map, "alice", 2));
+        // A different user is unaffected by alice's usage.
+        assert!(acquire_ws_slot(&mut map, "bob", 2));
+        // Releasing frees a slot back up, and draining removes the entry.
+        release_ws_slot(&mut map, "alice");
+        assert!(acquire_ws_slot(&mut map, "alice", 2));
+        release_ws_slot(&mut map, "bob");
+        assert!(!map.contains_key("bob"));
+    }
+
+    #[test]
+    fn lru_pick_evicts_oldest_access() {
+        let now = Instant::now();
+        let mut access = HashMap::new();
+        access.insert("old".to_string(), now - Duration::from_secs(100));
+        access.insert("mid".to_string(), now - Duration::from_secs(50));
+        access.insert("new".to_string(), now);
+        let keys = vec!["old".to_string(), "mid".to_string(), "new".to_string()];
+        assert_eq!(pick_lru_user(&keys, &access, now).as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn lru_pick_treats_missing_timestamp_as_oldest() {
+        let now = Instant::now();
+        let mut access = HashMap::new();
+        access.insert("known".to_string(), now - Duration::from_secs(10));
+        let keys = vec!["known".to_string(), "untracked".to_string()];
+        assert_eq!(pick_lru_user(&keys, &access, now).as_deref(), Some("untracked"));
+    }
+}
+
+#[cfg(test)]
+mod gc_tests {
+    use super::gc_user_search_indices;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn gc_uses_stored_garden_path_and_array_format() {
+        let temp = TempDir::new().unwrap();
+        let user_dir = temp.path().join("users").join("testuser");
+        // Real garden dir is "Notes" (capital N); the id is the lowercased slug —
+        // the old reconstruct-Gardens/<id> code would look at Gardens/notes.
+        let garden_dir = user_dir.join("Gardens").join("Notes");
+        let index_path: PathBuf = garden_dir.join(".tend").join("search_index");
+        tokio::fs::create_dir_all(&index_path).await.unwrap();
+        tokio::fs::write(index_path.join("meta.json"), "{}").await.unwrap();
+
+        // last-use stamp well past a 1h TTL.
+        let old = chrono::Utc::now().timestamp() - 100 * 3600;
+        tokio::fs::write(garden_dir.join(".tend").join("search_last_use"), old.to_string())
+            .await
+            .unwrap();
+
+        // gardens.json: `gardens` is an ARRAY; path points at the real dir.
+        let gardens_json = serde_json::json!({
+            "gardens": [{
+                "id": "notes",
+                "path": garden_dir.to_string_lossy(),
+                "encrypted": true,
+                "search_enabled": true,
+                "index_ttl_hours": 1
+            }],
+            "active": "notes"
+        });
+        tokio::fs::write(user_dir.join("gardens.json"), gardens_json.to_string())
+            .await
+            .unwrap();
+
+        gc_user_search_indices(&user_dir, "testuser").await.unwrap();
+
+        assert!(
+            !index_path.exists(),
+            "expired search index should have been deleted"
+        );
+    }
 }

@@ -569,26 +569,6 @@ export const blocks = isDemoMode ? demoApi.blocks : _blocks
 // Import API
 // ============================================================================
 
-export interface ImportLogseqRequest {
-  sourcePath: string
-  overwrite?: boolean
-  dryRun?: boolean
-}
-
-export interface BrokenLink {
-  sourceFile: string
-  target: string
-}
-
-export interface ImportResult {
-  pagesImported: number
-  journalsImported: number
-  skipped: number
-  brokenLinks: BrokenLink[]
-  warnings: string[]
-  dryRun: boolean
-}
-
 export type ImportProgress =
   | { type: 'started'; message: string }
   | { type: 'extracting'; message: string }
@@ -626,12 +606,6 @@ export interface AcceptErrorRequest {
 }
 
 const _importApi = {
-  logseq: (req: ImportLogseqRequest) =>
-    fetchJson<ImportResult>(`${API_BASE}/import/logseq`, {
-      method: 'POST',
-      body: JSON.stringify(req),
-    }),
-
   uploadLogseqZip: async (
     file: File,
     options: { overwrite?: boolean; importAssets?: boolean },

@@ -59,7 +59,7 @@ impl IntoResponse for AuthError {
 
 /// Validates that a username is safe for use in filesystem paths.
 /// This is a security-critical function to prevent path traversal attacks.
-fn validate_username(username: &str) -> Result<(), AuthError> {
+pub(crate) fn validate_username(username: &str) -> Result<(), AuthError> {
     if username.is_empty() {
         return Err(AuthError::InvalidUsername("Username cannot be empty".into()));
     }

@@ -84,6 +84,12 @@ impl SearchIndex {
         } else {
             info!("Creating new index at: {}", index_path.display());
             std::fs::create_dir_all(index_path)?;
+            // Owner-only: the search index holds page content in plaintext.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(index_path, std::fs::Permissions::from_mode(0o700));
+            }
             Index::create_in_dir(index_path, schema)?
         };
 
@@ -186,6 +192,10 @@ impl SearchIndex {
 
     /// Search for blocks matching the query
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchResult>, SearchError> {
+        // Bound the limit: TopDocs::with_limit(0) panics, and a huge value forces
+        // a large allocation. Clamp to a sane 1..=200.
+        let limit = limit.clamp(1, 200);
+
         let schema = self.index.schema();
         let content_field = schema.get_field("content").unwrap();
         let page_title_field = schema.get_field("page_title").unwrap();
@@ -274,6 +284,20 @@ mod tests {
         let results = index.search("hello", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].content.contains("Hello"));
+    }
+
+    #[test]
+    fn test_search_limit_is_bounded() {
+        let mut index = SearchIndex::in_memory().unwrap();
+        let mut page = Page::new("Test Page");
+        page.add_block(Block::new("hello world"));
+        index.index_page(&page).unwrap();
+        index.commit().unwrap();
+
+        // limit=0 must not panic (TopDocs::with_limit(0) would); a huge value is
+        // clamped rather than allocating unboundedly.
+        assert!(index.search("hello", 0).is_ok());
+        assert!(index.search("hello", usize::MAX).is_ok());
     }
 
     #[test]
