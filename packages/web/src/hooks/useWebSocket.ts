@@ -8,6 +8,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 import { useRecentSheetsStore } from '../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi, isDemoMode } from '../lib/api'
+import { clearUserScopedContent } from '../lib/cacheReset'
 
 // WebSocket event types (must match server-side WsEvent enum)
 interface WsEventBase {
@@ -197,6 +198,9 @@ export function useWebSocket() {
               useUIStore.getState().reset()
               useSyncStatusStore.getState().reset()
               useRecentSheetsStore.getState().reset()
+              // Purge content caches + drafts: the previous garden (possibly a
+              // now-locked encrypted one) must not leak into the new one.
+              void clearUserScopedContent()
               // Load the new garden's content types and default page
               contentTypesApi.list()
                 .then((types) => {
