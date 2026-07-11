@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -228,6 +229,11 @@ pub struct GardenState {
     pub tag_index: Arc<RwLock<TagIndex>>,
     /// Todo index for efficient todo lookups
     pub todo_index: Arc<RwLock<TodoIndex>>,
+    /// Whether the tag/todo indices have been built at least once this session.
+    /// Tracked explicitly (not via emptiness) so a garden with zero tags/todos
+    /// doesn't re-scan on every /tags or /todos request.
+    tag_index_built: Arc<AtomicBool>,
+    todo_index_built: Arc<AtomicBool>,
     pub backup_manager: BackupManager,
     /// Whether this garden is encrypted
     pub encrypted: bool,
@@ -423,6 +429,8 @@ impl GardenState {
             block_index,
             tag_index,
             todo_index,
+            tag_index_built: Arc::new(AtomicBool::new(false)),
+            todo_index_built: Arc::new(AtomicBool::new(false)),
             backup_manager,
             encrypted,
             search_config,
@@ -719,6 +727,7 @@ impl GardenState {
         }
 
         info!("Tag index rebuilt with {} tags", tag_index.len());
+        self.tag_index_built.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -744,6 +753,7 @@ impl GardenState {
         }
 
         info!("Todo index rebuilt with {} tasks", todo_index.len());
+        self.todo_index_built.store(true, Ordering::Relaxed);
 
         Ok(())
     }
@@ -790,6 +800,7 @@ impl GardenState {
                 tag_index.index_page(page);
             }
         }
+        self.tag_index_built.store(true, Ordering::Relaxed);
 
         // Todo index.
         {
@@ -799,6 +810,7 @@ impl GardenState {
                 todo_index.index_page(page, ct, *date);
             }
         }
+        self.todo_index_built.store(true, Ordering::Relaxed);
 
         // Search index (if enabled): a fresh index populated from the shared
         // pages. Encrypted gardens use a RAM-only index; plain gardens on disk.
@@ -839,14 +851,12 @@ impl GardenState {
 
     /// Check if tag index is populated
     pub async fn is_tag_index_populated(&self) -> bool {
-        let index = self.tag_index.read().await;
-        !index.is_empty()
+        self.tag_index_built.load(Ordering::Relaxed)
     }
 
     /// Check if todo index is populated
     pub async fn is_todo_index_populated(&self) -> bool {
-        let index = self.todo_index.read().await;
-        !index.is_empty()
+        self.todo_index_built.load(Ordering::Relaxed)
     }
 }
 
