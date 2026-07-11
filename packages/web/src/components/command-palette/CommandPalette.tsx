@@ -3,11 +3,10 @@ import { Command } from 'cmdk'
 import { useEffect, useState, useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
-import { useSettingsStore, usesDateFolder, type ContentType } from '../../stores/settingsStore'
+import { useSettingsStore, usesDate, type ContentType } from '../../stores/settingsStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useToastStore } from '../../stores/toastStore'
 import * as api from '../../lib/api'
-import { formatDateYMD } from '../../lib/dateUtils'
 import { qualifyName } from '../../lib/name'
 import type { PageMeta } from '../../types'
 
@@ -77,16 +76,13 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [gitStatus, setGitStatus] = useState<string | null>(null)
   const [commitMessage, setCommitMessage] = useState('')
   const [showCommitInput, setShowCommitInput] = useState(false)
-  const [creatingSheet, setCreatingSheet] = useState<ContentType | null>(null)
   const [linkingSheet, setLinkingSheet] = useState<{
     contentType: ContentType
     sheets: PageMeta[]
   } | null>(null)
-  const [sheetName, setSheetName] = useState('')
-  const [useToday, setUseToday] = useState(true)
-  const [sheetDate, setSheetDate] = useState('')
-  const [sheetError, setSheetError] = useState<string | null>(null)
-  const [existingSheets, setExistingSheets] = useState<string[]>([])
+  // Optional second-layer filter on the Link panel: narrows results to a sheet
+  // date (journalDate) for date-organized content types. '' = no date filter.
+  const [linkDate, setLinkDate] = useState('')
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
@@ -105,105 +101,35 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setGitStatus(null)
       setCommitMessage('')
       setShowCommitInput(false)
-      setCreatingSheet(null)
       setLinkingSheet(null)
-      setSheetName('')
-      setUseToday(true)
-      setSheetDate('')
-      setSheetError(null)
-      setExistingSheets([])
+      setLinkDate('')
       setReindexing(false)
       clearPendingContentType()
     }
   }, [open, clearPendingContentType])
 
-  // If opened with a pending content type (e.g., from slash command), start creating that sheet
-  useEffect(() => {
-    if (open && pendingContentType) {
-      const ct = pendingContentType
-      setCreatingSheet(ct)
-      setSheetName('')
-      setUseToday(true)
-      setSheetDate(formatDateYMD(new Date()))
-      setSheetError(null)
-      clearPendingContentType()
-
-      // Load existing sheets for collision detection
-      api.sheets.list(ct.id)
-        .then(sheets => setExistingSheets(sheets.map(s => s.name.toLowerCase())))
-        .catch(() => setExistingSheets([]))
-    }
-  }, [open, pendingContentType, clearPendingContentType])
-
-  // Start creating a sheet - show the name input form
-  const handleStartCreateSheet = useCallback(async (contentType: ContentType) => {
-    setSearch('') // Clear search so the form shows properly
-    setCreatingSheet(contentType)
-    setSheetName('')
-    setUseToday(true)
-    setSheetDate(formatDateYMD(new Date()))
-    setSheetError(null)
-
-    // Load existing sheets for collision detection
-    try {
-      const sheets = await api.sheets.list(contentType.id)
-      // Extract just the names (lowercase for case-insensitive comparison)
-      setExistingSheets(sheets.map(s => s.name.toLowerCase()))
-    } catch {
-      // If we can't load sheets, just continue without collision detection
-      setExistingSheets([])
-    }
-  }, [])
-
   const handleStartLinkSheet = useCallback(async (ct: ContentType) => {
+    setSearch('')
+    setLinkDate('')
     try {
       const sheets = await api.sheets.list(ct.id)
       setLinkingSheet({ contentType: ct, sheets })
-      setSearch('')
     } catch {
       setLinkingSheet({ contentType: ct, sheets: [] })
-      setSearch('')
     }
   }, [])
 
-  // If opened with a pending link content type (from slash command), start linking
+  // Opened with a pending content type (from a slash command) — whether the
+  // "link" or the (now-removed) "create" entry, both land in the Link panel,
+  // which handles linking AND creation.
   useEffect(() => {
-    if (open && pendingLinkContentType) {
-      const ct = pendingLinkContentType
+    const ct = pendingLinkContentType || pendingContentType
+    if (open && ct) {
       clearPendingContentType()
       handleStartLinkSheet(ct)
     }
-  }, [open, pendingLinkContentType, clearPendingContentType, handleStartLinkSheet])
+  }, [open, pendingLinkContentType, pendingContentType, clearPendingContentType, handleStartLinkSheet])
 
-  // Insert wikilink for the sheet (lazy creation happens when link is clicked)
-  const handleCreateSheet = useCallback(() => {
-    if (!creatingSheet || !sheetName.trim()) return
-
-    // Check for name collision (case-insensitive)
-    const normalizedName = sheetName.trim().toLowerCase()
-    if (existingSheets.includes(normalizedName)) {
-      setSheetError(`A ${creatingSheet.name.toLowerCase()} named "${sheetName.trim()}" already exists`)
-      return
-    }
-
-    // Build the canonical wiki link path via the shared name authority.
-    const dateOption = usesDateFolder(creatingSheet)
-      ? (useToday ? formatDateYMD(new Date()) : sheetDate)
-      : undefined
-    const linkPath = qualifyName(creatingSheet, sheetName.trim(), dateOption)
-    const wikiLink = `[[${linkPath}]]`
-
-    // Close dialog first, then invoke callback after dialog has closed
-    // This ensures view.focus() in the callback runs after dialog is removed from DOM
-    onOpenChange(false)
-    setTimeout(() => {
-      if (onSheetCreated) {
-        onSheetCreated(wikiLink)
-      } else if (insertTextAtCursor) {
-        insertTextAtCursor(wikiLink + ' ')
-      }
-    }, 0)
-  }, [creatingSheet, sheetName, useToday, sheetDate, onOpenChange, onSheetCreated, existingSheets, insertTextAtCursor])
 
   // Git: Commit now (auto-generated message)
   const handleGitCommitNow = useCallback(async () => {
@@ -388,7 +314,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
       {/* Dialog */}
       <div className="relative z-10 w-full max-w-lg mx-4 bg-base-01 rounded-lg shadow-2xl border border-base-02 overflow-hidden">
-        {!creatingSheet && !linkingSheet && (
+        {!linkingSheet && (
           <Command.Input
             value={search}
             onValueChange={setSearch}
@@ -401,14 +327,15 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           // Link to existing sheet UI
           (() => {
             const query = search.toLowerCase().trim()
+            const isDated = usesDate(linkingSheet.contentType)
             const filtered = linkingSheet.sheets
               .filter(s => s.title.toLowerCase().includes(query) || s.name.toLowerCase().includes(query))
+              // Second-layer filter: narrow to the picked sheet date, if any.
+              .filter(s => !linkDate || s.journalDate === linkDate)
               .slice(0, 15)
-            const newSheetPath = qualifyName(
-              linkingSheet.contentType,
-              search.trim(),
-              usesDateFolder(linkingSheet.contentType) ? new Date().toISOString().slice(0, 10) : undefined
-            )
+            // Create on the picked date if set, else today (date-organized types only).
+            const createDate = isDated ? (linkDate || new Date().toISOString().slice(0, 10)) : undefined
+            const newSheetPath = qualifyName(linkingSheet.contentType, search.trim(), createDate)
             return (
               <>
                 <Command.Input
@@ -421,10 +348,24 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     if (e.key === 'Escape') setLinkingSheet(null)
                   }}
                 />
+                {isDated && (
+                  <div className="flex items-center gap-2 px-4 py-2 border-b border-base-02 text-xs text-base-04">
+                    <span>Date</span>
+                    <input
+                      type="date"
+                      value={linkDate}
+                      onChange={(e) => setLinkDate(e.target.value)}
+                      className="px-2 py-1 bg-base-00 border border-base-02 rounded text-base-05 focus:outline-none focus:border-base-04"
+                    />
+                    {linkDate && (
+                      <button onClick={() => setLinkDate('')} className="hover:text-base-05">Clear</button>
+                    )}
+                  </div>
+                )}
                 <Command.List className="max-h-80 overflow-y-auto p-2">
                   {filtered.length === 0 && !search.trim() && (
                     <Command.Empty className="py-6 text-center text-sm text-base-04">
-                      No {linkingSheet.contentType.name.toLowerCase()}s found. Type to create new.
+                      No {linkingSheet.contentType.name.toLowerCase()}s found{linkDate ? ` on ${linkDate}` : ''}. Type to create new.
                     </Command.Empty>
                   )}
                   {filtered.length > 0 && (
@@ -478,7 +419,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                         }}
                         className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
                       >
-                        <span>Create "{search.trim()}" ({linkingSheet.contentType.name})</span>
+                        <span>Create "{search.trim()}" ({linkingSheet.contentType.name}){isDated && linkDate ? ` on ${linkDate}` : ''}</span>
                       </Command.Item>
                     </Command.Group>
                   )}
@@ -486,80 +427,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               </>
             )
           })()
-        ) : creatingSheet ? (
-          // Modal sheet creation form - hides all other command palette content
-          <div className="p-4 space-y-4">
-            <div className="text-sm font-medium text-base-05">
-              New {creatingSheet.name}
-            </div>
-            <input
-              type="text"
-              value={sheetName}
-              onChange={(e) => {
-                setSheetName(e.target.value)
-                setSheetError(null) // Clear error when typing
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && sheetName.trim()) {
-                  e.preventDefault()
-                  handleCreateSheet()
-                } else if (e.key === 'Escape') {
-                  setCreatingSheet(null)
-                }
-              }}
-              placeholder={`Enter ${creatingSheet.name.toLowerCase()} name...`}
-              className={`w-full px-3 py-2 text-sm bg-base-00 border rounded focus:outline-none ${
-                sheetError ? 'border-base-08 focus:border-base-08' : 'border-base-02 focus:border-base-04'
-              }`}
-              autoFocus
-            />
-            {sheetError && (
-              <div className="text-xs text-base-08">{sheetError}</div>
-            )}
-            {/* Date options for date-foldered content types */}
-            {usesDateFolder(creatingSheet) && (
-              <div className="space-y-2">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useToday}
-                    onChange={(e) => setUseToday(e.target.checked)}
-                    className="w-4 h-4 accent-base-0D"
-                  />
-                  <span className="text-sm text-base-05">Today</span>
-                </label>
-                {!useToday && (
-                  <input
-                    type="date"
-                    value={sheetDate}
-                    onChange={(e) => setSheetDate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-base-00 border border-base-02 rounded focus:outline-none focus:border-base-04"
-                  />
-                )}
-              </div>
-            )}
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={handleCreateSheet}
-                disabled={!sheetName.trim()}
-                className="px-4 py-2 text-sm bg-base-0D text-base-00 hover:bg-base-0C rounded disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                Create
-              </button>
-              <button
-                onClick={() => {
-                  setCreatingSheet(null)
-                  // If opened from slash command, close the palette entirely
-                  if (pendingContentType) {
-                    onOpenChange(false)
-                  }
-                }}
-                className="px-4 py-2 text-sm text-base-04 hover:text-base-05"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
         ) : (
           <Command.List className="max-h-80 overflow-y-auto p-2">
             <Command.Empty className="py-6 text-center text-sm text-base-04">
@@ -616,24 +483,14 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   Create new page...
                 </CommandItem>
               )}
-              {/* Custom content type link commands */}
+              {/* Custom content type: one entry that links to existing OR creates new */}
               {customContentTypes.map((ct) => (
                 <CommandItem
                   key={`link-${ct.id}`}
                   onSelect={() => handleStartLinkSheet(ct)}
-                  value={`link to ${ct.name.toLowerCase()}`}
+                  value={`link or create ${ct.name.toLowerCase()} new`}
                 >
-                  Link to {ct.name}...
-                </CommandItem>
-              ))}
-              {/* Custom content type create commands */}
-              {customContentTypes.map((ct) => (
-                <CommandItem
-                  key={ct.id}
-                  onSelect={() => handleStartCreateSheet(ct)}
-                  value={`create new ${ct.name.toLowerCase()}`}
-                >
-                  New {ct.name}...
+                  Link or create {ct.name}...
                 </CommandItem>
               ))}
               {currentPageName && !currentPage?.isJournal && (
