@@ -8,7 +8,11 @@ import { useTagStore } from '../../stores/tagStore'
 import { isDemoMode } from '../../lib/api'
 import { formatDateYMD } from '../../lib/dateUtils'
 import { useTaskStore, selectBadgeCount } from '../../stores/taskStore'
-import { SidebarOptions } from './SidebarOptions'
+// Lazy: the options panel (and its framer-motion dependency) is only shown when
+// the user opens settings, so keep it out of the initial chunk.
+const SidebarOptions = lazy(() =>
+  import('./SidebarOptions').then((m) => ({ default: m.SidebarOptions }))
+)
 import { SidebarTags } from './SidebarTags'
 import { SidebarTodos } from './SidebarTodos'
 
@@ -159,7 +163,9 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
 
       case 'options':
         return (
-          <SidebarOptions onBack={() => onModeChange('navigation')} />
+          <Suspense fallback={null}>
+            <SidebarOptions onBack={() => onModeChange('navigation')} />
+          </Suspense>
         )
 
       case 'tags':
