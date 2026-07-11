@@ -398,7 +398,13 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     />
                   )}
                 </div>
-                <Command.List className="max-h-80 overflow-y-auto p-2">
+                <Command.List
+                  className="max-h-80 overflow-y-auto p-2"
+                  // The calendar is an absolute popover inside the dialog's
+                  // overflow-hidden box; reserve height so it isn't clipped when
+                  // the results list is short.
+                  style={showLinkCal ? { minHeight: '320px' } : undefined}
+                >
                   {filtered.length === 0 && !search.trim() && (
                     <Command.Empty className="py-6 text-center text-sm text-base-04">
                       No {linkingSheet.contentType.name.toLowerCase()}s found{linkDate ? ` on ${linkDate}` : ''}. Type to create new.
