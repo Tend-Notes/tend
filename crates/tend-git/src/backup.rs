@@ -151,15 +151,64 @@ impl BackupManager {
                 .ok();
         }
 
-        // Create .gitignore
+        // Ensure .gitignore ignores all of .tend/ (see ensure_gitignore).
+        self.ensure_gitignore()?;
+
+        Ok(())
+    }
+
+    /// Ensure `.gitignore` ignores ALL of `.tend/`, and untrack any `.tend/`
+    /// files a previous (narrow) ignore let get committed.
+    ///
+    /// `.tend/` is rebuildable local index state, not source of truth. The old
+    /// ignore only listed `.tend/search_index/`, so the link index
+    /// (`.tend/link_index/links.json` — plaintext wikilink/tag names) and the
+    /// block DB (`.tend/blocks.db`) were committed and pushed to the remote. This
+    /// runs idempotently on init and on every backup/commit so existing repos are
+    /// migrated. It does NOT rewrite already-pushed history (owner's call).
+    fn ensure_gitignore(&self) -> Result<(), GitError> {
         let gitignore_path = self.repo_path.join(".gitignore");
-        if !gitignore_path.exists() {
-            std::fs::write(
-                &gitignore_path,
-                "# Tend internal files\n.tend/search_index/\n*.tmp\n",
-            )?;
+        let existing = std::fs::read_to_string(&gitignore_path).ok();
+        let ignores_all_tend = existing
+            .as_deref()
+            .map(|c| c.lines().any(|l| l.trim() == ".tend/"))
+            .unwrap_or(false);
+        if ignores_all_tend {
+            return Ok(());
         }
 
+        let content = match existing {
+            Some(existing) => {
+                // Broaden a narrow `.tend/search_index/` ignore, else append.
+                let mut out = String::new();
+                let mut replaced = false;
+                for line in existing.lines() {
+                    if line.trim() == ".tend/search_index/" {
+                        out.push_str(".tend/\n");
+                        replaced = true;
+                    } else {
+                        out.push_str(line);
+                        out.push('\n');
+                    }
+                }
+                if !replaced {
+                    out.push_str(".tend/\n");
+                }
+                out
+            }
+            None => "# Tend internal files\n.tend/\n*.tmp\n".to_string(),
+        };
+        std::fs::write(&gitignore_path, content)?;
+
+        // Untrack any .tend/ files a prior narrow ignore let slip in (keeps them
+        // on disk; not history scrubbing — old commits are unchanged).
+        if self.is_git_repo() {
+            let _ = Command::new("git")
+                .args(["rm", "-r", "--cached", "--ignore-unmatch", ".tend"])
+                .current_dir(&self.repo_path)
+                .output();
+        }
+        info!("Ensured .gitignore ignores all of .tend/ (was leaking link/block index metadata)");
         Ok(())
     }
 
@@ -491,6 +540,8 @@ impl BackupManager {
         if !self.is_git_repo() {
             self.init_repo()?;
         }
+        // Migrate existing repos to the broad .tend/ ignore before staging.
+        self.ensure_gitignore()?;
 
         let timestamp = Utc::now();
 
@@ -592,6 +643,8 @@ impl BackupManager {
         if !self.is_git_repo() {
             self.init_repo()?;
         }
+        // Migrate existing repos to the broad .tend/ ignore before staging.
+        self.ensure_gitignore()?;
 
         let timestamp = Utc::now();
 
@@ -1371,8 +1424,28 @@ mod tests {
         bm.init_repo().unwrap();
         assert!(bm.is_git_repo());
 
-        // Check .gitignore was created
-        assert!(temp_dir.path().join(".gitignore").exists());
+        // Check .gitignore was created and ignores ALL of .tend/ (not just the
+        // search index) so link/block index metadata is never pushed.
+        let gitignore = std::fs::read_to_string(temp_dir.path().join(".gitignore")).unwrap();
+        assert!(gitignore.lines().any(|l| l.trim() == ".tend/"), "gitignore: {gitignore:?}");
+        assert!(!gitignore.contains(".tend/search_index/"));
+    }
+
+    #[test]
+    fn test_ensure_gitignore_migrates_narrow_ignore() {
+        let (temp_dir, bm) = setup();
+        // Simulate an old repo with the narrow ignore.
+        std::fs::write(
+            temp_dir.path().join(".gitignore"),
+            "# Tend internal files\n.tend/search_index/\n*.tmp\n",
+        )
+        .unwrap();
+        bm.ensure_gitignore().unwrap();
+        let gitignore = std::fs::read_to_string(temp_dir.path().join(".gitignore")).unwrap();
+        assert!(gitignore.lines().any(|l| l.trim() == ".tend/"));
+        assert!(!gitignore.contains(".tend/search_index/"));
+        // *.tmp is preserved.
+        assert!(gitignore.contains("*.tmp"));
     }
 
     #[test]
