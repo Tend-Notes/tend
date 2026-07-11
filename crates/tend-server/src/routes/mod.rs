@@ -111,8 +111,6 @@ pub fn api_router() -> Router<Arc<AppState>> {
         .route("/import/errors/{name}", get(import::get_import_error))
         .route("/import/errors/{name}", delete(import::delete_import_error))
         .route("/import/errors/{name}/accept", post(import::accept_import_error))
-        // Import (legacy path-based API - for backward compatibility)
-        .route("/import/logseq", post(import::import_logseq))
         // Identity
         .route("/whoami", get(whoami))
         // User preferences and state (multi-tenant)
