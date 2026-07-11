@@ -14,7 +14,9 @@ services:
     container_name: tend
     restart: unless-stopped
     ports:
-      - "${TEND_PORT:-3000}:3000"
+      # Bind to loopback by default: Tend must sit behind a reverse proxy that
+      # terminates TLS and enforces auth. Change to 0.0.0.0 only behind such a proxy.
+      - "127.0.0.1:${TEND_PORT:-3000}:3000"
     volumes:
       - ${TEND_GARDEN_PATH:-./data}:/data
     environment:
