@@ -1274,12 +1274,15 @@ async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Resu
     let content = tokio::fs::read_to_string(&gardens_json).await?;
     let config: serde_json::Value = serde_json::from_str(&content)?;
 
-    let gardens = config.get("gardens").and_then(|g| g.as_object());
-    let Some(gardens) = gardens else {
+    // gardens.json stores `gardens` as an ARRAY of garden objects (Vec<Garden>).
+    // (The previous code read it as an object, so the GC loop never ran at all.)
+    let Some(gardens) = config.get("gardens").and_then(|g| g.as_array()) else {
         return Ok(());
     };
 
-    for (garden_id, garden_info) in gardens {
+    for garden_info in gardens {
+        let garden_id = garden_info.get("id").and_then(|v| v.as_str()).unwrap_or("");
+
         // Only check encrypted gardens with search enabled and TTL > 0
         let encrypted = garden_info.get("encrypted").and_then(|v| v.as_bool()).unwrap_or(false);
         let search_enabled = garden_info.get("search_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -1289,7 +1292,17 @@ async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Resu
             continue;
         }
 
-        let garden_path = user_dir.join("Gardens").join(garden_id);
+        // Use the garden's real stored path, not a reconstructed Gardens/<id>:
+        // the id is a slugified/lowercased name, so on a case-sensitive FS it may
+        // not match the actual directory (e.g. Gardens/notes vs Gardens/Notes) and
+        // GC would scan the wrong path, so the index would never be expired.
+        let Some(garden_path) = garden_info
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+        else {
+            continue;
+        };
         let index_path = garden_path.join(".tend").join("search_index");
         let last_use_path = garden_path.join(".tend").join("search_last_use");
 
@@ -1342,4 +1355,51 @@ async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Resu
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod gc_tests {
+    use super::gc_user_search_indices;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn gc_uses_stored_garden_path_and_array_format() {
+        let temp = TempDir::new().unwrap();
+        let user_dir = temp.path().join("users").join("testuser");
+        // Real garden dir is "Notes" (capital N); the id is the lowercased slug —
+        // the old reconstruct-Gardens/<id> code would look at Gardens/notes.
+        let garden_dir = user_dir.join("Gardens").join("Notes");
+        let index_path: PathBuf = garden_dir.join(".tend").join("search_index");
+        tokio::fs::create_dir_all(&index_path).await.unwrap();
+        tokio::fs::write(index_path.join("meta.json"), "{}").await.unwrap();
+
+        // last-use stamp well past a 1h TTL.
+        let old = chrono::Utc::now().timestamp() - 100 * 3600;
+        tokio::fs::write(garden_dir.join(".tend").join("search_last_use"), old.to_string())
+            .await
+            .unwrap();
+
+        // gardens.json: `gardens` is an ARRAY; path points at the real dir.
+        let gardens_json = serde_json::json!({
+            "gardens": [{
+                "id": "notes",
+                "path": garden_dir.to_string_lossy(),
+                "encrypted": true,
+                "search_enabled": true,
+                "index_ttl_hours": 1
+            }],
+            "active": "notes"
+        });
+        tokio::fs::write(user_dir.join("gardens.json"), gardens_json.to_string())
+            .await
+            .unwrap();
+
+        gc_user_search_indices(&user_dir, "testuser").await.unwrap();
+
+        assert!(
+            !index_path.exists(),
+            "expired search index should have been deleted"
+        );
+    }
 }
