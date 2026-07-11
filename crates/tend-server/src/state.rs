@@ -1114,15 +1114,25 @@ impl UserState {
             *handle = new_watcher;
         }
 
-        // The encrypted garden's link index is RAM-only and starts empty, so
-        // populate it from the now-decrypted pages; otherwise backlinks would
-        // be blank until the first edit.
+        // The encrypted garden's search and link indices are RAM-only and start
+        // empty, so build them from the now-decrypted pages on unlock; otherwise
+        // search would sit at "needs to be built" and backlinks would be blank.
         {
             let content_types =
                 crate::routes::gardens::load_user_content_types(&self.username).unwrap_or_default();
-            let garden = self.garden.read().await;
-            if let Err(e) = garden.rebuild_link_index(&content_types).await {
-                tracing::warn!("Failed to build link index on unlock: {}", e);
+            {
+                let garden = self.garden.read().await;
+                if let Err(e) = garden.rebuild_link_index(&content_types).await {
+                    tracing::warn!("Failed to build link index on unlock: {}", e);
+                }
+            }
+            {
+                let mut garden = self.garden.write().await;
+                if garden.search_config.enabled {
+                    if let Err(e) = garden.build_index(&content_types).await {
+                        tracing::warn!("Failed to build search index on unlock: {}", e);
+                    }
+                }
             }
         }
 
