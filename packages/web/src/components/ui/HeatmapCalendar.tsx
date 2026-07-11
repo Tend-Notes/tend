@@ -24,6 +24,8 @@ interface HeatmapCalendarProps {
   onSelectDate?: (date: string) => void
   // Show the journal-density heatmap shading + legend. Off for plain date picking.
   heatmap?: boolean
+  // Which edge to anchor the popover to (relative to the offset parent).
+  align?: 'left' | 'right'
 }
 
 // Get intensity level (0-4) based on block count
@@ -35,7 +37,7 @@ function getIntensityLevel(blockCount: number): number {
   return 4
 }
 
-export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = true }: HeatmapCalendarProps) {
+export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = true, align = 'left' }: HeatmapCalendarProps) {
   const { navigateToJournal } = usePageStore()
   const [journals, setJournals] = useState<PageMeta[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -143,7 +145,7 @@ export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = 
     <div
       ref={popoverRef}
       className="absolute z-50 bg-base-00 border border-base-02 rounded-lg shadow-lg p-3 w-[280px]"
-      style={{ top: '100%', left: 0, marginTop: '4px' }}
+      style={{ top: '100%', [align]: 0, marginTop: '4px' }}
     >
       {/* Header with month navigation */}
       <div className="flex items-center justify-between mb-3">

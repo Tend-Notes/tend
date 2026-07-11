@@ -352,7 +352,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             const newSheetPath = qualifyName(linkingSheet.contentType, search.trim(), createDate)
             return (
               <>
-                <div className="relative flex items-center border-b border-base-02">
+                <div className="flex items-center border-b border-base-02">
                   <Command.Input
                     autoFocus
                     value={search}
@@ -364,7 +364,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     }}
                   />
                   {isDated && (
-                    <div className="flex items-center gap-1 pr-3">
+                    <div className="relative flex items-center gap-1 pr-3">
                       {linkDate && (
                         <span className="text-xs text-base-05">
                           {linkDate}
@@ -387,15 +387,16 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                         </svg>
                       </button>
+                      {showLinkCal && (
+                        <HeatmapCalendar
+                          currentDate={linkDate || undefined}
+                          onSelectDate={(d) => setLinkDate(d)}
+                          onClose={() => setShowLinkCal(false)}
+                          heatmap={false}
+                          align="right"
+                        />
+                      )}
                     </div>
-                  )}
-                  {isDated && showLinkCal && (
-                    <HeatmapCalendar
-                      currentDate={linkDate || undefined}
-                      onSelectDate={(d) => setLinkDate(d)}
-                      onClose={() => setShowLinkCal(false)}
-                      heatmap={false}
-                    />
                   )}
                 </div>
                 <Command.List
