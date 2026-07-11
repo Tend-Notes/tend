@@ -14,7 +14,7 @@ use tend_links::LinkIndex;
 use tend_search::{index_exists, SearchIndex};
 use tend_storage::{EncryptedFileManager, FileManager, StorageError};
 use tokio::sync::{Mutex, RwLock};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
 use crate::indices::{TagIndex, TodoIndex};
@@ -667,8 +667,52 @@ impl GardenState {
     }
 }
 
-/// Maximum number of concurrent WebSocket connections
+/// Maximum number of concurrent WebSocket connections (server-wide)
 pub const MAX_WS_CONNECTIONS: usize = 100;
+
+/// Maximum number of concurrent WebSocket connections a single user may hold,
+/// so one identity can't exhaust every server-wide slot.
+pub const MAX_WS_CONNECTIONS_PER_USER: usize = 10;
+
+/// Maximum number of per-user states cached in memory. Bounds the map so a
+/// flood of distinct usernames can't grow it without limit; the
+/// least-recently-used entry is evicted when a new user exceeds the cap.
+pub const MAX_USER_STATES: usize = 1000;
+
+/// Reserve a per-user WebSocket slot, incrementing the count if under `cap`.
+/// Returns false (without incrementing) when the user is already at the cap.
+fn acquire_ws_slot(map: &mut std::collections::HashMap<String, usize>, user: &str, cap: usize) -> bool {
+    let count = map.entry(user.to_string()).or_insert(0);
+    if *count >= cap {
+        return false;
+    }
+    *count += 1;
+    true
+}
+
+/// Release a per-user WebSocket slot, removing the entry when it reaches zero.
+fn release_ws_slot(map: &mut std::collections::HashMap<String, usize>, user: &str) {
+    if let Some(count) = map.get_mut(user) {
+        *count = count.saturating_sub(1);
+        if *count == 0 {
+            map.remove(user);
+        }
+    }
+}
+
+/// Pick the least-recently-used key for eviction. A key missing from `access`
+/// is treated as the oldest (evicted first).
+fn pick_lru_user(
+    keys: &[String],
+    access: &std::collections::HashMap<String, std::time::Instant>,
+    now: std::time::Instant,
+) -> Option<String> {
+    keys.iter()
+        // A missing timestamp sorts oldest: pair (present, instant) so that
+        // `false` (missing) orders before any `true`.
+        .min_by_key(|k| (access.contains_key(*k), access.get(*k).copied().unwrap_or(now)))
+        .cloned()
+}
 
 // ========== User State (Per-User Gardens) ==========
 
@@ -1126,8 +1170,12 @@ pub struct AppState {
     user_states: RwLock<std::collections::HashMap<String, Arc<UserState>>>,
     /// Broadcast channel for WebSocket events
     pub event_sender: EventSender,
-    /// Current WebSocket connection count
+    /// Current WebSocket connection count (server-wide)
     pub ws_connection_count: std::sync::atomic::AtomicUsize,
+    /// Active WebSocket connections per user, for the per-user cap.
+    ws_user_connections: std::sync::Mutex<std::collections::HashMap<String, usize>>,
+    /// Last-access time per user, for LRU eviction of `user_states`.
+    user_last_access: std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
 }
 
 impl AppState {
@@ -1154,7 +1202,31 @@ impl AppState {
             user_states: RwLock::new(std::collections::HashMap::new()),
             event_sender,
             ws_connection_count: std::sync::atomic::AtomicUsize::new(0),
+            ws_user_connections: std::sync::Mutex::new(std::collections::HashMap::new()),
+            user_last_access: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
+    }
+
+    /// Try to reserve a WebSocket slot for `username`, honoring the per-user
+    /// cap. Returns false if the user already holds the maximum. Release with
+    /// [`AppState::release_ws_slot`] when the connection closes.
+    pub fn try_acquire_ws_slot(&self, username: &str) -> bool {
+        let mut map = self.ws_user_connections.lock().unwrap();
+        acquire_ws_slot(&mut map, username, MAX_WS_CONNECTIONS_PER_USER)
+    }
+
+    /// Release a previously reserved per-user WebSocket slot.
+    pub fn release_ws_slot(&self, username: &str) {
+        let mut map = self.ws_user_connections.lock().unwrap();
+        release_ws_slot(&mut map, username);
+    }
+
+    /// Record that `username` was just accessed (for LRU eviction).
+    fn touch_user_access(&self, username: &str) {
+        self.user_last_access
+            .lock()
+            .unwrap()
+            .insert(username.to_string(), std::time::Instant::now());
     }
 
     /// Get or create user state for the given username
@@ -1163,6 +1235,7 @@ impl AppState {
         {
             let states = self.user_states.read().await;
             if let Some(state) = states.get(username) {
+                self.touch_user_access(username);
                 return Ok(Arc::clone(state));
             }
         }
@@ -1170,7 +1243,23 @@ impl AppState {
         // Not cached -- take write lock and check again to prevent double-init race
         let mut states = self.user_states.write().await;
         if let Some(state) = states.get(username) {
+            self.touch_user_access(username);
             return Ok(Arc::clone(state));
+        }
+
+        // Bound the map: evict the least-recently-used user before inserting a
+        // new one so a flood of distinct usernames can't grow it unbounded.
+        if states.len() >= MAX_USER_STATES {
+            let keys: Vec<String> = states.keys().cloned().collect();
+            let evict = {
+                let access = self.user_last_access.lock().unwrap();
+                pick_lru_user(&keys, &access, std::time::Instant::now())
+            };
+            if let Some(evict) = evict {
+                states.remove(&evict);
+                self.user_last_access.lock().unwrap().remove(&evict);
+                warn!("user_states cap ({}) reached; evicted LRU user state", MAX_USER_STATES);
+            }
         }
 
         // Create new user state while holding write lock
@@ -1186,6 +1275,7 @@ impl AppState {
 
         // Cache it
         states.insert(username.to_string(), Arc::clone(&user_state));
+        self.touch_user_access(username);
 
         Ok(user_state)
     }
@@ -1355,6 +1445,49 @@ async fn gc_user_search_indices(user_dir: &Path, username: &str) -> anyhow::Resu
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod resource_cap_tests {
+    use super::{acquire_ws_slot, pick_lru_user, release_ws_slot};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn per_user_ws_slots_are_capped() {
+        let mut map = HashMap::new();
+        // Cap of 2: the third acquire for the same user is refused.
+        assert!(acquire_ws_slot(&mut map, "alice", 2));
+        assert!(acquire_ws_slot(&mut map, "alice", 2));
+        assert!(!acquire_ws_slot(&mut map, "alice", 2));
+        // A different user is unaffected by alice's usage.
+        assert!(acquire_ws_slot(&mut map, "bob", 2));
+        // Releasing frees a slot back up, and draining removes the entry.
+        release_ws_slot(&mut map, "alice");
+        assert!(acquire_ws_slot(&mut map, "alice", 2));
+        release_ws_slot(&mut map, "bob");
+        assert!(!map.contains_key("bob"));
+    }
+
+    #[test]
+    fn lru_pick_evicts_oldest_access() {
+        let now = Instant::now();
+        let mut access = HashMap::new();
+        access.insert("old".to_string(), now - Duration::from_secs(100));
+        access.insert("mid".to_string(), now - Duration::from_secs(50));
+        access.insert("new".to_string(), now);
+        let keys = vec!["old".to_string(), "mid".to_string(), "new".to_string()];
+        assert_eq!(pick_lru_user(&keys, &access, now).as_deref(), Some("old"));
+    }
+
+    #[test]
+    fn lru_pick_treats_missing_timestamp_as_oldest() {
+        let now = Instant::now();
+        let mut access = HashMap::new();
+        access.insert("known".to_string(), now - Duration::from_secs(10));
+        let keys = vec!["known".to_string(), "untracked".to_string()];
+        assert_eq!(pick_lru_user(&keys, &access, now).as_deref(), Some("untracked"));
+    }
 }
 
 #[cfg(test)]

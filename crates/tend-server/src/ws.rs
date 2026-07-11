@@ -301,9 +301,8 @@ pub async fn ws_handler(
         warn!("WebSocket connection rejected: invalid username");
         return Err(StatusCode::BAD_REQUEST);
     }
-    let username = Some(username);
 
-    // Check connection limit before upgrading
+    // Check the server-wide connection limit before upgrading.
     let current = state.ws_connection_count.load(Ordering::Relaxed);
     if current >= MAX_WS_CONNECTIONS {
         warn!(
@@ -313,7 +312,13 @@ pub async fn ws_handler(
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, username)))
+    // Reserve a per-user slot so one identity can't exhaust every slot.
+    if !state.try_acquire_ws_slot(&username) {
+        warn!("WebSocket per-user connection limit reached");
+        return Err(StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, state, Some(username))))
 }
 
 /// Handle a WebSocket connection
@@ -326,9 +331,12 @@ async fn handle_socket(socket: WebSocket, state: Arc<AppState>, my_username: Opt
         my_username.as_deref().unwrap_or("anonymous")
     );
 
-    // Ensure we decrement on exit
-    let _guard = scopeguard::guard(Arc::clone(&state), |s| {
+    // Ensure we decrement the global and per-user counts on exit
+    let _guard = scopeguard::guard((Arc::clone(&state), my_username.clone()), |(s, user)| {
         let remaining = s.ws_connection_count.fetch_sub(1, Ordering::Relaxed) - 1;
+        if let Some(user) = user {
+            s.release_ws_slot(&user);
+        }
         debug!("WebSocket client disconnected ({} active)", remaining);
     });
 
