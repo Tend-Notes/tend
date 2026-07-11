@@ -559,6 +559,7 @@ impl BackupManager {
             info!("Pushing to remote...");
             let push_output = Command::new("git")
                 .args(["push"])
+                .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
                 .current_dir(&self.repo_path)
                 .output();
 
@@ -732,6 +733,7 @@ impl BackupManager {
 
         let output = Command::new("git")
             .args(["push"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -774,6 +776,7 @@ impl BackupManager {
 
         let output = Command::new("git")
             .args(["pull", "--rebase"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -801,6 +804,9 @@ impl BackupManager {
 
     /// Set or update the remote repository URL
     pub fn set_remote(&self, url: &str) -> Result<RemoteResult, GitError> {
+        // Crate-boundary defense: never store an unvalidated remote URL.
+        validate_remote_url(url)?;
+
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
@@ -885,6 +891,7 @@ impl BackupManager {
         // Note: Don't use --exit-code as it returns 2 for empty repos (which is still a valid connection)
         let output = Command::new("git")
             .args(["ls-remote", "origin"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -976,6 +983,7 @@ impl BackupManager {
         // Fetch from remote first to get latest refs
         let fetch_output = Command::new("git")
             .args(["fetch", "origin"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -1074,6 +1082,7 @@ impl BackupManager {
         // Fetch from remote
         let fetch_output = Command::new("git")
             .args(["fetch", "origin"])
+            .env("GIT_ALLOW_PROTOCOL", "https:http:ssh")
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| GitError::OperationFailed(e.to_string()))?;
@@ -1252,6 +1261,63 @@ pub struct PushResult {
     pub details: String,
 }
 
+/// Validate a git remote URL before it is stored or used.
+///
+/// Git honours remote-helper transports such as `ext::` and `fd::`, so a crafted
+/// remote URL (e.g. `ext::sh -c '<cmd>'`) would run arbitrary shell commands on
+/// the host during any later `push`/`pull`/`ls-remote`/`fetch`. We therefore
+/// allow ONLY ordinary transport URLs (`https`/`http`/`ssh`) and scp-style
+/// `[user@]host:path`, and reject everything else.
+pub fn validate_remote_url(url: &str) -> Result<(), GitError> {
+    let reject = |why: &str| -> Result<(), GitError> {
+        Err(GitError::RepositoryError(format!("Rejected remote URL: {why}")))
+    };
+
+    if url.is_empty() {
+        return reject("empty");
+    }
+    // A leading '-' would be parsed by git as a command-line option.
+    if url.starts_with('-') {
+        return reject("must not start with '-'");
+    }
+    // Real remote URLs never contain whitespace or control characters; rejecting
+    // them also defeats `ext::sh -c '...'`-style payloads.
+    if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        return reject("contains whitespace or control characters");
+    }
+
+    let lower = url.to_ascii_lowercase();
+
+    // Local-file transport is never a valid *remote*.
+    if lower.starts_with("file://") {
+        return reject("file:// is not allowed");
+    }
+
+    // Remote-helper transports use `scheme::…`. Any `::` in the segment before
+    // the first '/' means a helper (ext::, fd::, …). Standard URLs (`https://`)
+    // and scp-style (`git@host:path`) never have `::` there.
+    let before_first_slash = url.split('/').next().unwrap_or(url);
+    if before_first_slash.contains("::") {
+        return reject("remote-helper transports are not allowed");
+    }
+
+    let is_transport_url =
+        lower.starts_with("https://") || lower.starts_with("http://") || lower.starts_with("ssh://");
+    // scp-style: `[user@]host:path` — a ':' with a non-empty host that has no
+    // '/' before it, and which is not a `scheme://` URL.
+    let is_scp_style = !url.contains("://")
+        && url
+            .find(':')
+            .map(|i| i > 0 && !url[..i].contains('/'))
+            .unwrap_or(false);
+
+    if !(is_transport_url || is_scp_style) {
+        return reject("only https/http/ssh URLs or scp-style host:path are allowed");
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1261,6 +1327,40 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let bm = BackupManager::new(temp_dir.path(), false);
         (temp_dir, bm)
+    }
+
+    #[test]
+    fn test_validate_remote_url() {
+        // Malicious / disallowed transports and shapes are rejected.
+        for bad in [
+            "",
+            "ext::sh -c 'id'",
+            "ext::somehelper",
+            "fd::17/foo",
+            "file:///etc/passwd",
+            "-oProxyCommand=id",
+            "--upload-pack=id",
+            "git://github.com/user/repo.git", // git:// not allowed
+            "github.com/user/repo",           // schemeless, not scp-style
+        ] {
+            assert!(
+                validate_remote_url(bad).is_err(),
+                "expected rejection for {bad:?}"
+            );
+        }
+
+        // Ordinary transport + scp-style URLs are accepted.
+        for good in [
+            "https://github.com/user/repo.git",
+            "http://example.com/user/repo.git",
+            "ssh://git@github.com:22/user/repo.git",
+            "git@github.com:user/repo.git",
+        ] {
+            assert!(
+                validate_remote_url(good).is_ok(),
+                "expected acceptance for {good:?}"
+            );
+        }
     }
 
     #[test]

@@ -219,6 +219,9 @@ pub async fn set_remote(
     user: AuthenticatedUser,
     Json(request): Json<SetRemoteRequest>,
 ) -> Result<Json<RemoteResult>, AppError> {
+    // Validate at the route boundary so a rejected URL is a 400, not a 500.
+    tend_git::validate_remote_url(&request.url)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
     let result = garden.backup_manager.set_remote(&request.url)?;
