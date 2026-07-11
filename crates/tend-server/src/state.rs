@@ -260,12 +260,18 @@ impl GardenState {
         git_config: &GitConfig,
         search_config: SearchConfig,
     ) -> anyhow::Result<Self> {
-        // Verify passphrase first
-        if !EncryptedFileManager::verify_passphrase(&data_dir, &passphrase)? {
-            return Err(anyhow::anyhow!("Invalid passphrase for encrypted garden"));
+        // Constructing the manager unwraps the garden's X25519 identity with the
+        // passphrase (scrypt runs once here); a wrong passphrase fails with an
+        // "Invalid passphrase" error, so no separate verify step is needed.
+        let file_manager = EncryptedFileManager::new(&data_dir, passphrase)?;
+
+        // Eager migration (SEC-25 Part B): re-encrypt any legacy
+        // passphrase-scrypt files to the identity so future reads run no scrypt.
+        // One-time; a no-op once the garden is migrated.
+        if let Err(e) = file_manager.migrate_to_identity().await {
+            tracing::warn!("Encrypted garden identity migration incomplete: {}", e);
         }
 
-        let file_manager = EncryptedFileManager::new(&data_dir, passphrase)?;
         Self::new_with_file_manager(
             data_dir,
             UnifiedFileManager::Encrypted(file_manager),

@@ -16,20 +16,38 @@ use tend_core::{ContentType, Page, PageMeta};
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-use crate::encryption::{decrypt, encrypt, EncryptionError};
+use age::x25519;
+
+use crate::encryption::{
+    decrypt, decrypt_with_identity, encrypt_to_recipient, generate_identity, unwrap_identity,
+    wrap_identity, EncryptionError,
+};
 use crate::error::StorageError;
 use crate::fs::{decode_filename, encode_filename, validate_safe_name};
 
 /// File extension for encrypted files
 const ENCRYPTED_EXT: &str = "md.age";
 
+/// On-disk location (under the garden) of the passphrase-wrapped X25519 identity.
+const IDENTITY_FILE: &str = "identity.age";
+
 /// Manages encrypted file operations for a garden
 pub struct EncryptedFileManager {
     /// Root path of the garden
     root: PathBuf,
 
-    /// Passphrase for encryption/decryption (held in memory, zeroized on drop)
+    /// Passphrase (held in memory, zeroized on drop). Retained to unwrap the
+    /// identity and to read/migrate any legacy passphrase-scrypt files.
     passphrase: SecretString,
+
+    /// Per-garden X25519 identity, unwrapped once at unlock. Note files are
+    /// encrypted/decrypted with this (no per-file scrypt). Held in memory only;
+    /// age's `Identity` zeroizes its secret on drop, so it is cleared on
+    /// lock/garden-switch/drop along with the manager (SEC-19).
+    identity: x25519::Identity,
+
+    /// Public recipient derived from `identity`, for encrypting note files.
+    recipient: x25519::Recipient,
 
     /// Lock for write operations
     write_lock: Arc<RwLock<()>>,
@@ -51,14 +69,148 @@ impl EncryptedFileManager {
         crate::fs::restrict_dir(&root.join("pages"));
         crate::fs::restrict_dir(&root.join("journals"));
 
+        let passphrase = SecretString::from(passphrase);
+
+        // Load the garden's X25519 identity (unwrap with the passphrase —
+        // scrypt runs once here), or mint one on first unlock.
+        let identity = Self::load_or_create_identity(&root, passphrase.expose_secret())?;
+        let recipient = identity.to_public();
+
         info!("Initialized encrypted garden at: {}", root.display());
 
         Ok(Self {
             root,
-            passphrase: SecretString::from(passphrase),
+            passphrase,
+            identity,
+            recipient,
             write_lock: Arc::new(RwLock::new(())),
             pending_writes: Arc::new(RwLock::new(HashSet::new())),
         })
+    }
+
+    /// Load the garden's wrapped X25519 identity, or create and store one.
+    ///
+    /// The identity file is standard age-scrypt ciphertext wrapping the identity
+    /// secret; unwrapping it runs scrypt exactly once per unlock. When absent
+    /// (a fresh garden, or a legacy garden being migrated), a new identity is
+    /// generated and stored — but only after the passphrase is verified against
+    /// the existing `encryption.verify`, so a wrong passphrase can't mint a bad
+    /// identity.
+    fn load_or_create_identity(
+        root: &Path,
+        passphrase: &str,
+    ) -> Result<x25519::Identity, StorageError> {
+        let identity_path = root.join(".tend").join(IDENTITY_FILE);
+
+        if identity_path.exists() {
+            let wrapped = std::fs::read(&identity_path)?;
+            // Unwrapping is also the passphrase check (scrypt runs once here).
+            return unwrap_identity(&wrapped, passphrase).map_err(|e| match e {
+                EncryptionError::WrongPassphrase => {
+                    StorageError::Other("Invalid passphrase".to_string())
+                }
+                other => StorageError::Other(format!("Failed to unwrap identity: {}", other)),
+            });
+        }
+
+        // No identity yet. If a verification file exists (legacy or freshly
+        // created garden), the passphrase must decrypt it before we mint an
+        // identity — otherwise a wrong passphrase would write an identity that
+        // no correct passphrase could ever unwrap.
+        let verify_path = root.join(".tend").join("encryption.verify");
+        if verify_path.exists() {
+            let verify = std::fs::read(&verify_path)?;
+            decrypt(&verify, passphrase)
+                .map_err(|_| StorageError::Other("Invalid passphrase".into()))?;
+        }
+
+        let identity = generate_identity();
+        let wrapped = wrap_identity(&identity, passphrase)
+            .map_err(|e| StorageError::Other(format!("Failed to wrap identity: {}", e)))?;
+        if let Some(parent) = identity_path.parent() {
+            std::fs::create_dir_all(parent)?;
+            crate::fs::restrict_dir(parent);
+        }
+        std::fs::write(&identity_path, wrapped)?;
+        crate::fs::restrict_file(&identity_path);
+        info!("Minted X25519 identity for encrypted garden: {}", root.display());
+
+        Ok(identity)
+    }
+
+    /// Decrypt a note file, preferring the fast X25519 identity and falling back
+    /// to the legacy passphrase-scrypt path for files not yet migrated.
+    fn decrypt_file(&self, encrypted: &[u8]) -> Result<String, StorageError> {
+        match decrypt_with_identity(encrypted, &self.identity) {
+            Ok(content) => Ok(content),
+            Err(_) => decrypt(encrypted, self.passphrase.expose_secret()).map_err(|e| match e {
+                EncryptionError::WrongPassphrase => {
+                    StorageError::Other("Wrong passphrase".to_string())
+                }
+                _ => StorageError::Other(format!("Decryption failed: {}", e)),
+            }),
+        }
+    }
+
+    /// Re-encrypt any legacy passphrase-scrypt note files to the garden's
+    /// X25519 identity (eager migration). Runs once, right after unlock; after
+    /// it every file decrypts without scrypt. Returns the number migrated.
+    ///
+    /// Idempotent: files already encrypted to the identity are skipped, so this
+    /// is a cheap no-op on an already-migrated garden.
+    pub async fn migrate_to_identity(&self) -> Result<usize, StorageError> {
+        let _guard = self.write_lock.write().await;
+        let mut migrated = 0usize;
+        let mut dirs = vec![self.root.join("pages"), self.root.join("journals")];
+
+        while let Some(dir) = dirs.pop() {
+            let Ok(mut entries) = tokio::fs::read_dir(&dir).await else {
+                continue;
+            };
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                if path.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                if !name.ends_with(ENCRYPTED_EXT) {
+                    continue;
+                }
+                let data = tokio::fs::read(&path).await?;
+                // Already identity-encrypted -> nothing to do.
+                if decrypt_with_identity(&data, &self.identity).is_ok() {
+                    continue;
+                }
+                // Legacy scrypt file: decrypt with the passphrase (one scrypt,
+                // one time) and re-encrypt to the identity.
+                let content = match decrypt(&data, self.passphrase.expose_secret()) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        debug!("Skipping unreadable file during migration {}: {}", path.display(), e);
+                        continue;
+                    }
+                };
+                let reencrypted = encrypt_to_recipient(&content, &self.recipient)
+                    .map_err(|e| StorageError::Other(format!("Re-encryption failed: {}", e)))?;
+                let tmp = path.with_extension("migrating");
+                tokio::fs::write(&tmp, &reencrypted).await?;
+                tokio::fs::rename(&tmp, &path).await?;
+                crate::fs::restrict_file(&path);
+                migrated += 1;
+            }
+        }
+
+        if migrated > 0 {
+            info!(
+                "Migrated {} legacy file(s) to X25519 identity in {}",
+                migrated,
+                self.root.display()
+            );
+        }
+        Ok(migrated)
     }
 
     /// Verify the passphrase is correct by decrypting the verification file
@@ -142,7 +294,8 @@ impl EncryptedFileManager {
         let _guard = self.write_lock.read().await;
 
         let content = serialize_page(page);
-        let encrypted = encrypt(&content, self.passphrase.expose_secret())
+        // Encrypt to the garden's X25519 recipient (no per-file scrypt).
+        let encrypted = encrypt_to_recipient(&content, &self.recipient)
             .map_err(|e| StorageError::Other(format!("Encryption failed: {}", e)))?;
 
         let tmp_path = path.with_extension("tmp");
@@ -376,10 +529,7 @@ impl EncryptedFileManager {
         };
 
         let encrypted = tokio::fs::read(&path).await?;
-        let content = decrypt(&encrypted, self.passphrase.expose_secret()).map_err(|e| match e {
-            EncryptionError::WrongPassphrase => StorageError::Other("Wrong passphrase".to_string()),
-            _ => StorageError::Other(format!("Decryption failed: {}", e)),
-        })?;
+        let content = self.decrypt_file(&encrypted)?;
 
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
@@ -502,6 +652,7 @@ impl EncryptedFileManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encryption::encrypt;
     use tempfile::TempDir;
 
     async fn setup() -> (TempDir, EncryptedFileManager) {
@@ -524,6 +675,38 @@ mod tests {
 
         assert!(EncryptedFileManager::verify_passphrase(temp_dir.path(), "test-passphrase").unwrap());
         assert!(!EncryptedFileManager::verify_passphrase(temp_dir.path(), "wrong-passphrase").unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_migrates_legacy_scrypt_file_to_identity() {
+        let temp = TempDir::new().unwrap();
+        let passphrase = "test-passphrase";
+
+        // Legacy garden: a verify file plus a page encrypted *directly* with the
+        // passphrase (the old scrypt-per-file format), and no identity yet.
+        let vp = temp.path().join(".tend").join("encryption.verify");
+        std::fs::create_dir_all(vp.parent().unwrap()).unwrap();
+        std::fs::write(&vp, encrypt("tend-encryption-verification", passphrase).unwrap()).unwrap();
+
+        std::fs::create_dir_all(temp.path().join("pages")).unwrap();
+        let mut page = Page::new("Legacy Page");
+        page.add_block(tend_core::Block::new("legacy secret"));
+        let fname = format!("{}.{}", encode_filename("Legacy Page"), ENCRYPTED_EXT);
+        let legacy_path = temp.path().join("pages").join(fname);
+        std::fs::write(&legacy_path, encrypt(&serialize_page(&page), passphrase).unwrap()).unwrap();
+
+        // Constructing mints an identity; migration re-encrypts the legacy file.
+        let efm = EncryptedFileManager::new(temp.path(), passphrase.to_string()).unwrap();
+        assert_eq!(efm.migrate_to_identity().await.unwrap(), 1);
+        assert_eq!(efm.migrate_to_identity().await.unwrap(), 0, "idempotent");
+
+        // Content is preserved and the file is now X25519 (identity-decryptable).
+        let read = efm.read_page("Legacy Page").await.unwrap();
+        assert_eq!(read.blocks.len(), 1);
+        let data = std::fs::read(&legacy_path).unwrap();
+        assert!(decrypt_with_identity(&data, &efm.identity).is_ok());
+        // ...and no longer the passphrase-scrypt format.
+        assert!(decrypt(&data, passphrase).is_err());
     }
 
     #[tokio::test]
