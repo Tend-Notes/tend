@@ -1579,6 +1579,10 @@ function GardensSection() {
       // Load the new garden's content types
       const types = await contentTypesApi.list()
       useSettingsStore.getState().setContentTypes(types)
+      // Reset the URL to home first: a stale /page/<name> from the previous
+      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
+      // leaking the page across gardens.
+      window.history.replaceState(null, '', '/')
       // Load the new garden's default page
       await usePageStore.getState().initializeFromUrl()
     } catch (err) {
@@ -1627,6 +1631,10 @@ function GardensSection() {
       // Load the new garden's content types
       const types = await contentTypesApi.list()
       useSettingsStore.getState().setContentTypes(types)
+      // Reset the URL to home first: a stale /page/<name> from the previous
+      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
+      // leaking the page across gardens.
+      window.history.replaceState(null, '', '/')
       // Load the new garden's default page
       await usePageStore.getState().initializeFromUrl()
     } catch (err) {
