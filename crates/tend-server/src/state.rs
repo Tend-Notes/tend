@@ -168,6 +168,27 @@ impl UnifiedFileManager {
         }
     }
 
+    /// Load every sheet of a content type as a fully decrypted `Page`, in a
+    /// single decrypt pass. For encrypted gardens this decrypts each file once
+    /// (vs. `list_sheets` + `read_sheet`, which decrypts it twice); for plain
+    /// gardens reads are cheap so it reuses `list_sheets` + `read_sheet`.
+    pub async fn load_all_sheets(&self, content_type: &ContentType) -> Result<Vec<Page>, StorageError> {
+        match self {
+            Self::Encrypted(efm) => efm.load_all_sheets(content_type).await,
+            Self::Plain(fm) => {
+                let metas = fm.list_sheets(content_type).await?;
+                let mut pages = Vec::with_capacity(metas.len());
+                for meta in &metas {
+                    let (bare, _) = tend_core::split_name(content_type, &meta.name);
+                    if let Ok(page) = fm.read_sheet(content_type, bare, meta.journal_date).await {
+                        pages.push(page);
+                    }
+                }
+                Ok(pages)
+            }
+        }
+    }
+
     /// Write a sheet for a content type
     pub async fn write_sheet(&self, content_type: &ContentType, page: &Page, date: Option<NaiveDate>) -> Result<(), StorageError> {
         match self {
@@ -697,6 +718,95 @@ impl GardenState {
         Ok(())
     }
 
+    /// Load every sheet a single time (one decrypt pass) and (re)build the
+    /// link, tag, todo, and search indices from that shared set.
+    ///
+    /// For encrypted gardens each file decrypt runs the scrypt KDF (~1s), so
+    /// decrypting a page once and feeding every index from it — instead of each
+    /// index re-listing and re-decrypting — cuts unlock-time decryptions ~4x.
+    /// (SEC-25 Part A. The per-decrypt scrypt cost itself is Part B.)
+    pub async fn rebuild_indices_single_pass(
+        &mut self,
+        content_types: &[ContentType],
+    ) -> anyhow::Result<()> {
+        // Single decrypt pass over every sheet (load_all_sheets decrypts each
+        // file exactly once and returns the page bodies).
+        let mut loaded: Vec<(&ContentType, Option<NaiveDate>, Page)> = Vec::new();
+        for ct in content_types {
+            for page in self.file_manager.load_all_sheets(ct).await? {
+                let journal_date = PageMeta::from(&page).journal_date;
+                loaded.push((ct, journal_date, page));
+            }
+        }
+
+        // Link index (backlinks).
+        {
+            let pages_for_links: Vec<(String, Vec<tend_core::Block>)> = loaded
+                .iter()
+                .map(|(_, _, p)| (p.name.clone(), p.blocks.values().cloned().collect()))
+                .collect();
+            let mut link_index = self.link_index.write().await;
+            link_index
+                .rebuild_all(pages_for_links.into_iter())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to rebuild link index: {}", e))?;
+        }
+
+        // Tag index.
+        {
+            let mut tag_index = self.tag_index.write().await;
+            tag_index.clear();
+            for (_, _, page) in &loaded {
+                tag_index.index_page(page);
+            }
+        }
+
+        // Todo index.
+        {
+            let mut todo_index = self.todo_index.write().await;
+            todo_index.clear();
+            for (ct, date, page) in &loaded {
+                todo_index.index_page(page, ct, *date);
+            }
+        }
+
+        // Search index (if enabled): a fresh index populated from the shared
+        // pages. Encrypted gardens use a RAM-only index; plain gardens on disk.
+        if self.search_config.enabled {
+            {
+                let mut status = self.index_status.write().await;
+                *status = IndexStatus::Building;
+            }
+            let index_path = self.data_dir.join(".tend").join("search_index");
+            let search_index = if self.encrypted {
+                SearchIndex::in_memory()?
+            } else {
+                SearchIndex::open(&index_path)?
+            };
+            let search_index = Arc::new(RwLock::new(search_index));
+            {
+                let mut index = search_index.write().await;
+                for (_, _, page) in &loaded {
+                    if let Err(e) = index.index_page(page) {
+                        tracing::warn!("Failed to index {} in search: {}", page.name, e);
+                    }
+                }
+                index.commit()?;
+            }
+            self.search_index = Some(search_index);
+            {
+                let mut status = self.index_status.write().await;
+                *status = IndexStatus::Ready;
+            }
+        }
+
+        info!(
+            "Rebuilt link/tag/todo/search indices from a single decrypt pass ({} sheets)",
+            loaded.len()
+        );
+        Ok(())
+    }
+
     /// Check if tag index is populated
     pub async fn is_tag_index_populated(&self) -> bool {
         let index = self.tag_index.read().await;
@@ -1117,22 +1227,15 @@ impl UserState {
         // The encrypted garden's search and link indices are RAM-only and start
         // empty, so build them from the now-decrypted pages on unlock; otherwise
         // search would sit at "needs to be built" and backlinks would be blank.
+        // SEC-25 Part A: decrypt each page once and feed every index from that
+        // single pass (link/tag/todo/search), instead of one decrypt pass per
+        // index — each decrypt runs the scrypt KDF, so this cuts unlock cost ~4x.
         {
             let content_types =
                 crate::routes::gardens::load_user_content_types(&self.username).unwrap_or_default();
-            {
-                let garden = self.garden.read().await;
-                if let Err(e) = garden.rebuild_link_index(&content_types).await {
-                    tracing::warn!("Failed to build link index on unlock: {}", e);
-                }
-            }
-            {
-                let mut garden = self.garden.write().await;
-                if garden.search_config.enabled {
-                    if let Err(e) = garden.build_index(&content_types).await {
-                        tracing::warn!("Failed to build search index on unlock: {}", e);
-                    }
-                }
+            let mut garden = self.garden.write().await;
+            if let Err(e) = garden.rebuild_indices_single_pass(&content_types).await {
+                tracing::warn!("Failed to build indices on unlock: {}", e);
             }
         }
 

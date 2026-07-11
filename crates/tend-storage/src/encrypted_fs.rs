@@ -237,13 +237,41 @@ impl EncryptedFileManager {
 
     /// List all encrypted sheets of a content type (one code path, driven by `organization`).
     pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
+        let mut sheets: Vec<PageMeta> = self
+            .collect_sheets(content_type)
+            .await?
+            .iter()
+            .map(PageMeta::from)
+            .collect();
+
+        if content_type.is_date_named() {
+            sheets.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
+        } else {
+            sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
+        }
+        Ok(sheets)
+    }
+
+    /// Load every sheet of a content type as a fully decrypted `Page`.
+    ///
+    /// Unlike `list_sheets` (which decrypts each file only to derive its
+    /// `PageMeta` and then discards the `Page`), this returns the decrypted
+    /// pages directly — one decrypt per file. Callers that need the page bodies
+    /// (e.g. rebuilding every index at once on unlock) use this so a page is
+    /// decrypted a single time instead of once per index. Order is unspecified.
+    pub async fn load_all_sheets(&self, content_type: &ContentType) -> Result<Vec<Page>, StorageError> {
+        self.collect_sheets(content_type).await
+    }
+
+    /// Walk a content type's directory and decrypt every sheet exactly once.
+    async fn collect_sheets(&self, content_type: &ContentType) -> Result<Vec<Page>, StorageError> {
         let base_dir = self.root.join(&content_type.directory);
 
         if !base_dir.exists() {
             return Ok(Vec::new());
         }
 
-        let mut sheets = Vec::new();
+        let mut pages = Vec::new();
         let ext_suffix = format!(".{}", ENCRYPTED_EXT);
 
         if content_type.is_date_foldered() {
@@ -263,7 +291,7 @@ impl EncryptedFileManager {
                             if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
                                 let name = decode_filename(raw_name);
                                 match self.read_sheet(content_type, &name, date).await {
-                                    Ok(page) => sheets.push(PageMeta::from(&page)),
+                                    Ok(page) => pages.push(page),
                                     Err(e) => {
                                         debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
                                     }
@@ -299,7 +327,7 @@ impl EncryptedFileManager {
                     decode_filename(raw_name)
                 };
                 match self.read_sheet(content_type, &name, None).await {
-                    Ok(page) => sheets.push(PageMeta::from(&page)),
+                    Ok(page) => pages.push(page),
                     Err(e) => {
                         debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
                     }
@@ -307,12 +335,7 @@ impl EncryptedFileManager {
             }
         }
 
-        if content_type.is_date_named() {
-            sheets.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
-        } else {
-            sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
-        }
-        Ok(sheets)
+        Ok(pages)
     }
 
     /// Read and decrypt a sheet (one code path, driven by `organization`).
