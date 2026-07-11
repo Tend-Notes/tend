@@ -19,6 +19,9 @@ import { useEscapeKey } from '../../hooks/useEscapeKey'
 interface HeatmapCalendarProps {
   onClose: () => void
   currentDate?: string // YYYY-MM-DD format
+  // When provided, picking a day calls this instead of navigating to a journal —
+  // lets the same picker act as a date selector (e.g. the palette date filter).
+  onSelectDate?: (date: string) => void
 }
 
 // Get intensity level (0-4) based on block count
@@ -30,7 +33,7 @@ function getIntensityLevel(blockCount: number): number {
   return 4
 }
 
-export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) {
+export function HeatmapCalendar({ onClose, currentDate, onSelectDate }: HeatmapCalendarProps) {
   const { navigateToJournal } = usePageStore()
   const [journals, setJournals] = useState<PageMeta[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -99,9 +102,10 @@ export function HeatmapCalendar({ onClose, currentDate }: HeatmapCalendarProps) 
     setViewMonth(today.month)
   }
 
-  // Handle day click
+  // Handle day click — select as a date if a handler was given, else navigate.
   const handleDayClick = (dateStr: string) => {
-    navigateToJournal(dateStr)
+    if (onSelectDate) onSelectDate(dateStr)
+    else navigateToJournal(dateStr)
     onClose()
   }
 

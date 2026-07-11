@@ -8,6 +8,7 @@ import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useToastStore } from '../../stores/toastStore'
 import * as api from '../../lib/api'
 import { qualifyName } from '../../lib/name'
+import { HeatmapCalendar } from '../ui/HeatmapCalendar'
 import type { PageMeta } from '../../types'
 
 interface CommandPaletteProps {
@@ -83,6 +84,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // Optional second-layer filter on the Link panel: narrows results to a sheet
   // date (journalDate) for date-organized content types. '' = no date filter.
   const [linkDate, setLinkDate] = useState('')
+  const [showLinkCal, setShowLinkCal] = useState(false)
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
@@ -103,6 +105,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setShowCommitInput(false)
       setLinkingSheet(null)
       setLinkDate('')
+      setShowLinkCal(false)
       setReindexing(false)
       clearPendingContentType()
     }
@@ -111,6 +114,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const handleStartLinkSheet = useCallback(async (ct: ContentType) => {
     setSearch('')
     setLinkDate('')
+    setShowLinkCal(false)
     try {
       const sheets = await api.sheets.list(ct.id)
       setLinkingSheet({ contentType: ct, sheets })
@@ -328,40 +332,71 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           (() => {
             const query = search.toLowerCase().trim()
             const isDated = usesDate(linkingSheet.contentType)
-            const filtered = linkingSheet.sheets
-              .filter(s => s.title.toLowerCase().includes(query) || s.name.toLowerCase().includes(query))
-              // Second-layer filter: narrow to the picked sheet date, if any.
+            const nameOf = (s: PageMeta) => (s.title || s.name.split('/').pop() || '')
+            // Text matches, IGNORING the date filter — this drives the create gate.
+            const nameMatches = linkingSheet.sheets.filter(
+              s => nameOf(s).toLowerCase().includes(query) || s.name.toLowerCase().includes(query)
+            )
+            // The shown list also applies the date filter (the second layer).
+            const filtered = nameMatches
               .filter(s => !linkDate || s.journalDate === linkDate)
               .slice(0, 15)
+            // Offer "create" only when the search matches nothing, or every match is a
+            // prefix of the search (search + extra chars, e.g. standup / standupFollowUp)
+            // — a recurring or new name. Deliberately independent of the date filter.
+            const showCreate =
+              query.length > 0 &&
+              (nameMatches.length === 0 || nameMatches.every(s => nameOf(s).toLowerCase().startsWith(query)))
             // Create on the picked date if set, else today (date-organized types only).
             const createDate = isDated ? (linkDate || new Date().toISOString().slice(0, 10)) : undefined
             const newSheetPath = qualifyName(linkingSheet.contentType, search.trim(), createDate)
             return (
               <>
-                <Command.Input
-                  autoFocus
-                  value={search}
-                  onValueChange={setSearch}
-                  placeholder={`Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
-                  className="w-full px-4 py-3 bg-transparent border-b border-base-02 text-base-05 placeholder:text-base-04 focus:outline-none"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') setLinkingSheet(null)
-                  }}
-                />
-                {isDated && (
-                  <div className="flex items-center gap-2 px-4 py-2 border-b border-base-02 text-xs text-base-04">
-                    <span>Date</span>
-                    <input
-                      type="date"
-                      value={linkDate}
-                      onChange={(e) => setLinkDate(e.target.value)}
-                      className="px-2 py-1 bg-base-00 border border-base-02 rounded text-base-05 focus:outline-none focus:border-base-04"
+                <div className="relative flex items-center border-b border-base-02">
+                  <Command.Input
+                    autoFocus
+                    value={search}
+                    onValueChange={setSearch}
+                    placeholder={`Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
+                    className="flex-1 px-4 py-3 bg-transparent text-base-05 placeholder:text-base-04 focus:outline-none"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setLinkingSheet(null)
+                    }}
+                  />
+                  {isDated && (
+                    <div className="flex items-center gap-1 pr-3">
+                      {linkDate && (
+                        <span className="text-xs text-base-05">
+                          {linkDate}
+                          <button
+                            onClick={() => setLinkDate('')}
+                            className="ml-1 text-base-04 hover:text-base-05"
+                            title="Clear date filter"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      )}
+                      {/* Same calendar icon + picker as the journal page. */}
+                      <button
+                        onClick={() => setShowLinkCal((v) => !v)}
+                        className={`p-1 transition-colors ${linkDate ? 'text-base-0D' : 'text-base-04 hover:text-base-05'}`}
+                        title="Filter by date"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+                  {isDated && showLinkCal && (
+                    <HeatmapCalendar
+                      currentDate={linkDate || undefined}
+                      onSelectDate={(d) => setLinkDate(d)}
+                      onClose={() => setShowLinkCal(false)}
                     />
-                    {linkDate && (
-                      <button onClick={() => setLinkDate('')} className="hover:text-base-05">Clear</button>
-                    )}
-                  </div>
-                )}
+                  )}
+                </div>
                 <Command.List className="max-h-80 overflow-y-auto p-2">
                   {filtered.length === 0 && !search.trim() && (
                     <Command.Empty className="py-6 text-center text-sm text-base-04">
@@ -401,7 +436,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       })}
                     </Command.Group>
                   )}
-                  {search.trim() && (
+                  {showCreate && (
                     <Command.Group heading="Create new" className="mb-2">
                       <Command.Item
                         value={`create-${search}`}
