@@ -208,20 +208,22 @@ Tend supports optional encryption for gardens. When you create an encrypted gard
 
 ### Search and Encrypted Gardens
 
-By default, **search is disabled** for encrypted gardens. This is a security measure because the search index stores the full plaintext content of all blocks.
+By default, **search is disabled** for encrypted gardens. When you enable it, the search index is **built in memory only while the garden is unlocked and is never written to disk** — so full-text search works with no plaintext index at rest.
 
 When creating an encrypted garden, you can choose to:
 
-1. **Disable search entirely** (default) - No search index is created. Searching an encrypted garden will show a message explaining this.
+1. **Disable search entirely** (default) - No index is built. Searching an encrypted garden will show a message explaining this.
 
-2. **Enable search with auto-expiry** - A plaintext search index is created in `.tend/search_index/`. You can configure the index to auto-delete after a period of inactivity (default: 6 hours). The index will be rebuilt from scratch when you search again after expiry, which may cause brief delays for large gardens.
+2. **Enable in-memory search** - The index is built in RAM on unlock and dropped on lock. You can optionally have it dropped after a period of non-use (default: 6 hours) and rebuilt on the next search, which may cause brief delays for large gardens.
+
+The link/tag (backlink) index is handled the same way: for encrypted gardens it is kept in memory only and rebuilt from your notes on unlock, so page and link names are never stored in plaintext.
 
 ### Security Notes
 
 - **Passphrase recovery is not possible.** If you forget your passphrase, your notes cannot be recovered.
-- **Filenames are visible.** Only file contents are encrypted, not page names.
-- If search is enabled, the index in `.tend/` contains full block text. For maximum security, either disable search or delete `.tend/` when not using the garden.
-- Encryption only protects files at rest. Anyone with access to the running server can read decrypted content.
+- **Filenames are the only at-rest exposure.** Note content, the search index, and link/tag metadata are all either encrypted or kept in memory only. Page names (the `.age` filenames) are not encrypted.
+- **Nothing under `.tend/` is pushed to a remote.** Git backup only pushes the encrypted `.age` content; indices and metadata stay local.
+- Encryption only protects files at rest. Anyone with access to the running server while a garden is unlocked can read decrypted content.
 
 ### Recovering Files Outside Tend
 

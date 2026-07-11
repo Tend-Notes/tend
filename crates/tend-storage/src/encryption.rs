@@ -11,13 +11,13 @@
 //! - `pages/*.md` → `pages/*.md.age`
 //! - `journals/*.md` → `journals/*.md.age`
 //!
-//! The following are NOT encrypted:
-//! - `.tend/search_index/` - Search index (can be rebuilt from encrypted files)
-//! - `.git/` - Git repository (stores encrypted `.age` blobs)
+//! For encrypted gardens the search index and the link/tag (backlink) index are
+//! kept in memory only — built on unlock, dropped on lock — so they are never
+//! written to disk in plaintext. The `.git/` repository stores only the
+//! encrypted `.age` blobs, and nothing under `.tend/` is pushed to a remote.
 //!
-//! Note: The search index contains text snippets for search results. For maximum
-//! security, delete the `.tend/` directory when not using the garden. It will be
-//! rebuilt on next startup.
+//! The only at-rest exposure is filenames: page names remain visible as
+//! `pages/<name>.md.age` / `journals/<name>.md.age` in the filesystem.
 //!
 //! # Recovery outside Tend
 //!
