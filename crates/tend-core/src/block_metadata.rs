@@ -113,12 +113,9 @@ fn parse_footer(footer: &str) -> Option<Vec<BlockMetadata>> {
 
         // Parse data lines
         if in_data_section {
-            if let Some(block_meta) = parse_metadata_line(line) {
-                metadata.push(block_meta);
-            } else {
-                // Malformed line - footer is corrupt
-                return None;
-            }
+            // A malformed line means the footer is corrupt; propagate None.
+            let block_meta = parse_metadata_line(line)?;
+            metadata.push(block_meta);
         }
     }
 
