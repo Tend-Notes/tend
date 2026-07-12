@@ -98,6 +98,16 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
     })
     viewRef.current = view
 
+    // PERF-22: load the code-fence highlighter lazily and splice it into the
+    // running editor via reconfigure, keeping lowlight + highlight.js languages
+    // out of the initial chunk. Fenced code renders as plain markdown text until
+    // this resolves; viewRef is nulled on unmount so a late resolve is a no-op.
+    void import('./codeHighlight').then(({ codeHighlightPlugin }) => {
+      const v = viewRef.current
+      if (!v) return
+      v.updateState(v.state.reconfigure({ plugins: [...v.state.plugins, codeHighlightPlugin()] }))
+    })
+
     // Wire the command surface (downstream feature reconnect):
     // - insert text from the command palette at the caret (or last-focused block)
     const setInsertTextAtCursor = useUIStore.getState().setInsertTextAtCursor

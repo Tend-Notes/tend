@@ -25,7 +25,6 @@ import { uuidPlugin } from './uuidPlugin'
 import { moveListItem, toggleCollapse } from './commands'
 import { ListItemView } from './nodeview'
 import { formattingPlugin, type NavHandlers } from './decorations'
-import { codeHighlightPlugin } from './codeHighlight'
 import { slashMenuPlugin } from './slashMenuPlugin'
 import { formatKeymap } from './formatKeymap'
 
@@ -86,7 +85,10 @@ export function outlinerLayer(): EditorLayer {
 export function formattingLayer(nav: NavHandlers): EditorLayer {
   // The format keymap sits in L3 (inline markup) and, being highest precedence,
   // its Mod-b/i/e/… win over the base keymap.
-  return { plugins: [keymap(formatKeymap), formattingPlugin(nav), codeHighlightPlugin()] }
+  // codeHighlightPlugin (lowlight + highlight.js languages) is added lazily
+  // after mount in OutlineEditorV2 via reconfigure, so it stays out of the
+  // initial chunk. Until it loads, fenced code renders as plain markdown text.
+  return { plugins: [keymap(formatKeymap), formattingPlugin(nav)] }
 }
 
 // Slash-command trigger detection. Keyless (the React SlashMenu owns keyboard
