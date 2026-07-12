@@ -309,15 +309,18 @@ function scheduleDebouncedSave(get: StoreGet, set: ImmerSet) {
     try {
       const version = page.version
       const apiBlocks = blocks.map(api.blockToApiFormat)
+      // Send page-level properties so changes (e.g. the `longform` flag) persist;
+      // the server merges them, so re-sending unchanged props is a no-op.
+      const properties = page.properties
       let updatedPage: Page
       const contentTypeObj = useSettingsStore.getState().contentTypes.find(ct => ct.id === contentType)
       if (contentTypeObj) {
         const sheetName = extractSheetName(contentTypeObj, pageName)
         const sheetDate = extractDateFromPageName(contentTypeObj, pageName)
-        updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate)
+        updatedPage = await api.sheets.update(contentType, sheetName, apiBlocks, version, sheetDate, properties)
       } else {
         // Fallback for unknown content type
-        updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version)
+        updatedPage = await api.sheets.update(contentType, pageName, apiBlocks, version, undefined, properties)
       }
       // Server save succeeded - clear the draft and pending save data
       pendingSaveData = null

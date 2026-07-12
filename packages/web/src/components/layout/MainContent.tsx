@@ -9,6 +9,7 @@ const OutlinerEditor = lazy(() =>
   import('../editor/OutlinerEditor').then((m) => ({ default: m.OutlinerEditor }))
 )
 import { OutlineEditorV2 } from '../editor/outline2/OutlineEditorV2'
+import { LongformEditor } from '../editor/longform/LongformEditor'
 import { useSettingsStore } from '../../stores/settingsStore'
 // TemplateEditor and ImportErrorEditor also build on the legacy CodeMirror
 // stack (via plots/OutlinerEditor) and are only shown on rare edit paths, so
@@ -171,7 +172,7 @@ export function MainContent() {
         {/* Key changes with page name to trigger crossfade animation */}
         {/* Mobile-first: minimal padding on mobile, constrained width on md+ */}
         {/* pb-[50vh] provides bottom padding so typewriter scroll can center the last line */}
-        <div key={`${currentPage.name}:${useLegacyEditor ? 'v1' : 'v2'}`} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
+        <div key={`${currentPage.name}:${currentPage.properties.longform === 'true' ? 'longform' : useLegacyEditor ? 'v1' : 'v2'}`} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
           {/* Page title with save status */}
           <div className="flex items-center gap-3 mb-8">
             <div className="relative flex items-center gap-2">
@@ -199,9 +200,12 @@ export function MainContent() {
             <SaveStatus />
           </div>
 
-          {/* Editor: ProseMirror node-model editor by default; legacy per-block
-              CodeMirror editor as a fallback. */}
-          {useLegacyEditor ? (
+          {/* Editor: Longform Mode (flat wall-of-text) when the page is flagged;
+              otherwise the ProseMirror node-model editor by default, with the
+              legacy per-block CodeMirror editor as a fallback. */}
+          {currentPage.properties.longform === 'true' ? (
+            <LongformEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
+          ) : useLegacyEditor ? (
             <Suspense fallback={null}>
               <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
             </Suspense>
