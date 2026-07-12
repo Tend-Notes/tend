@@ -59,19 +59,26 @@ export function useAutoCommit() {
     }
   }, [autoCommitEnabled, currentPage, recordCommit, addLogEntry])
 
-  // Track character changes when blocks update
+  // Track character changes when blocks update. Debounced: currentPage changes
+  // on every keystroke, and re-summing every block per keystroke is O(blocks)
+  // wasted work — recompute only after typing settles. The delta is measured
+  // against the last settled count, so the accumulated total fed to
+  // smart-commit is unchanged, just batched.
   useEffect(() => {
     if (!currentPage) return
+    const page = currentPage
+    const timer = setTimeout(() => {
+      const currentCharCount = calculateTotalChars(page.blocks)
+      const delta = currentCharCount - prevCharCountRef.current
 
-    const currentCharCount = calculateTotalChars(currentPage.blocks)
-    const delta = currentCharCount - prevCharCountRef.current
+      // Only track if there's a meaningful change (not initial load)
+      if (prevCharCountRef.current > 0 && delta !== 0) {
+        recordCharacterChange(delta)
+      }
 
-    // Only track if there's a meaningful change (not initial load)
-    if (prevCharCountRef.current > 0 && delta !== 0) {
-      recordCharacterChange(delta)
-    }
-
-    prevCharCountRef.current = currentCharCount
+      prevCharCountRef.current = currentCharCount
+    }, 400)
+    return () => clearTimeout(timer)
   }, [currentPage, recordCharacterChange])
 
   // Check for smart commit trigger
