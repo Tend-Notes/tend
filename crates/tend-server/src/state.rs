@@ -169,6 +169,16 @@ impl UnifiedFileManager {
         }
     }
 
+    /// List sheets as lightweight `PageMeta` derived from filenames only — no
+    /// file reads or decrypts. Only `name` (canonical) and `journal_date` are
+    /// meaningful; used to resolve which pages exist / their hashes cheaply.
+    pub async fn list_sheet_names(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
+        match self {
+            Self::Plain(fm) => fm.list_sheet_names(content_type).await,
+            Self::Encrypted(efm) => efm.list_sheet_names(content_type).await,
+        }
+    }
+
     /// Load every sheet of a content type as a fully decrypted `Page`, in a
     /// single decrypt pass. For encrypted gardens this decrypts each file once
     /// (vs. `list_sheets` + `read_sheet`, which decrypts it twice); for plain

@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use tend_core::parser::{parse_journal_filename, parse_markdown};
 use tend_core::serializer::serialize_page;
 use tend_core::{ContentType, Page, PageMeta};
@@ -116,6 +116,27 @@ pub(crate) fn restrict_file(path: &Path) {
 }
 #[cfg(not(unix))]
 pub(crate) fn restrict_file(_path: &Path) {}
+
+/// Build a lightweight `PageMeta` for a sheet from just its name + date (no file
+/// read). Only `name` (canonicalized) and `journal_date` are meaningful; the
+/// rest are placeholders. Used by the name-only listing that resolves which
+/// pages exist without reading/parsing their bodies.
+pub(crate) fn sheet_ref_meta(
+    content_type: &ContentType,
+    bare_name: &str,
+    date: Option<NaiveDate>,
+) -> PageMeta {
+    PageMeta {
+        name: tend_core::qualify_name(content_type, bare_name, date),
+        title: bare_name.to_string(),
+        content_type: content_type.id.clone(),
+        is_journal: content_type.is_date_named(),
+        journal_date: date,
+        block_count: 0,
+        created_at: Utc::now(),
+        modified_at: Utc::now(),
+    }
+}
 
 impl FileManager {
     /// Create a new FileManager for the given root directory
@@ -306,14 +327,19 @@ impl FileManager {
     /// One code path for every type, driven by `organization`. Pages and
     /// custom-flat types list a flat directory; journals (date-named) list only
     /// date-named files; date-foldered types descend into date subdirectories.
-    pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
+    /// Walk a content type's directory and derive each sheet's (bare name,
+    /// date) from its FILENAME only — no file reads.
+    async fn collect_sheet_refs(
+        &self,
+        content_type: &ContentType,
+    ) -> Result<Vec<(String, Option<NaiveDate>)>, StorageError> {
         let base_dir = self.root.join(&content_type.directory);
 
         if !base_dir.exists() {
             return Ok(Vec::new());
         }
 
-        let mut sheets = Vec::new();
+        let mut refs = Vec::new();
 
         if content_type.is_date_foldered() {
             // Scan date subdirectories
@@ -332,13 +358,7 @@ impl FileManager {
                         let path = entry.path();
                         if path.extension().is_some_and(|e| e == "md") {
                             if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
-                                let name = decode_filename(raw_name);
-                                match self.read_sheet(content_type, &name, date).await {
-                                    Ok(page) => sheets.push(PageMeta::from(&page)),
-                                    Err(e) => {
-                                        debug!("Failed to read sheet {}/{}: {}", content_type.id, name, e);
-                                    }
-                                }
+                                refs.push((decode_filename(raw_name), date));
                             }
                         }
                     }
@@ -368,11 +388,35 @@ impl FileManager {
                         None => continue,
                     }
                 };
-                match self.read_sheet(content_type, &name, None).await {
-                    Ok(page) => sheets.push(PageMeta::from(&page)),
-                    Err(e) => {
-                        debug!("Failed to read sheet {}/{}: {}", content_type.id, name, e);
-                    }
+                refs.push((name, None));
+            }
+        }
+
+        Ok(refs)
+    }
+
+    /// List sheets as lightweight `PageMeta` derived from filenames only (no
+    /// file reads). Only `name` (canonical) and `journal_date` are real.
+    pub async fn list_sheet_names(
+        &self,
+        content_type: &ContentType,
+    ) -> Result<Vec<PageMeta>, StorageError> {
+        Ok(self
+            .collect_sheet_refs(content_type)
+            .await?
+            .into_iter()
+            .map(|(name, date)| sheet_ref_meta(content_type, &name, date))
+            .collect())
+    }
+
+    pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
+        let refs = self.collect_sheet_refs(content_type).await?;
+        let mut sheets = Vec::with_capacity(refs.len());
+        for (name, date) in refs {
+            match self.read_sheet(content_type, &name, date).await {
+                Ok(page) => sheets.push(PageMeta::from(&page)),
+                Err(e) => {
+                    debug!("Failed to read sheet {}/{}: {}", content_type.id, name, e);
                 }
             }
         }

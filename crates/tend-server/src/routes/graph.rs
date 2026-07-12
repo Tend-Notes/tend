@@ -66,7 +66,7 @@ pub async fn get_graph(
     // Get all content types for this garden
     let content_types = load_user_content_types(&user.username).unwrap_or_default();
 
-    // Collect sheets from all content types
+    // Nodes: one metadata pass over each content type (title + block_count).
     for ct in &content_types {
         let sheets = garden.file_manager.list_sheets(ct).await?;
         for sheet_meta in &sheets {
@@ -79,19 +79,22 @@ pub async fn get_graph(
                 block_count: sheet_meta.block_count,
             });
         }
+    }
 
-        // Build edges from wiki-links in this content type's sheets
-        for sheet_meta in &sheets {
-            let page = garden.load_sheet_from_meta(ct, sheet_meta).await;
-
-            if let Some(page) = page {
-                let links = page.all_wiki_links();
-                for link in links {
-                    // Only create edge if target exists
-                    if existing_pages.contains(&link) {
-                        let key = (sheet_meta.name.clone(), link.clone());
-                        *edges_map.entry(key).or_insert(0) += 1;
-                    }
+    // Edges: derive from the link index rather than re-reading and re-parsing
+    // every page body. The index knows every wiki-link as (source_hash,
+    // target_name); map source_hash back to a page name via the nodes.
+    {
+        let mut hash_to_name: HashMap<String, String> = HashMap::with_capacity(nodes.len());
+        for node in &nodes {
+            hash_to_name.insert(tend_links::hash_page_name(&node.id), node.id.clone());
+        }
+        let link_index = garden.link_index.read().await;
+        for (source_hash, target_name) in link_index.wiki_link_edges() {
+            if let Some(source) = hash_to_name.get(&source_hash) {
+                // Only create an edge if the target page exists.
+                if existing_pages.contains(&target_name) {
+                    *edges_map.entry((source.clone(), target_name)).or_insert(0) += 1;
                 }
             }
         }

@@ -417,14 +417,20 @@ impl EncryptedFileManager {
     }
 
     /// Walk a content type's directory and decrypt every sheet exactly once.
-    async fn collect_sheets(&self, content_type: &ContentType) -> Result<Vec<Page>, StorageError> {
+    /// Walk a content type's directory and derive each sheet's (bare name,
+    /// date) from its FILENAME only — no file reads or decrypts. Filenames
+    /// aren't encrypted, so this is cheap even for encrypted gardens.
+    async fn collect_sheet_refs(
+        &self,
+        content_type: &ContentType,
+    ) -> Result<Vec<(String, Option<NaiveDate>)>, StorageError> {
         let base_dir = self.root.join(&content_type.directory);
 
         if !base_dir.exists() {
             return Ok(Vec::new());
         }
 
-        let mut pages = Vec::new();
+        let mut refs = Vec::new();
         let ext_suffix = format!(".{}", ENCRYPTED_EXT);
 
         if content_type.is_date_foldered() {
@@ -442,13 +448,7 @@ impl EncryptedFileManager {
                         let path = entry.path();
                         if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
                             if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
-                                let name = decode_filename(raw_name);
-                                match self.read_sheet(content_type, &name, date).await {
-                                    Ok(page) => pages.push(page),
-                                    Err(e) => {
-                                        debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
-                                    }
-                                }
+                                refs.push((decode_filename(raw_name), date));
                             }
                         }
                     }
@@ -479,15 +479,40 @@ impl EncryptedFileManager {
                     };
                     decode_filename(raw_name)
                 };
-                match self.read_sheet(content_type, &name, None).await {
-                    Ok(page) => pages.push(page),
-                    Err(e) => {
-                        debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
-                    }
-                }
+                refs.push((name, None));
             }
         }
 
+        Ok(refs)
+    }
+
+    /// List sheets as lightweight `PageMeta` derived from filenames only (no
+    /// reads/decrypts). Only `name` (canonical) and `journal_date` are real;
+    /// title/counts/timestamps are placeholders. Used to resolve which pages
+    /// exist (and their hashes) without decrypting every file.
+    pub async fn list_sheet_names(
+        &self,
+        content_type: &ContentType,
+    ) -> Result<Vec<PageMeta>, StorageError> {
+        Ok(self
+            .collect_sheet_refs(content_type)
+            .await?
+            .into_iter()
+            .map(|(name, date)| crate::fs::sheet_ref_meta(content_type, &name, date))
+            .collect())
+    }
+
+    async fn collect_sheets(&self, content_type: &ContentType) -> Result<Vec<Page>, StorageError> {
+        let refs = self.collect_sheet_refs(content_type).await?;
+        let mut pages = Vec::with_capacity(refs.len());
+        for (name, date) in refs {
+            match self.read_sheet(content_type, &name, date).await {
+                Ok(page) => pages.push(page),
+                Err(e) => {
+                    debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
+                }
+            }
+        }
         Ok(pages)
     }
 
@@ -667,6 +692,29 @@ mod tests {
 
         let efm = EncryptedFileManager::new(temp_dir.path(), passphrase.to_string()).unwrap();
         (temp_dir, efm)
+    }
+
+    #[tokio::test]
+    async fn list_sheet_names_lists_by_filename_without_decrypting() {
+        let (temp, efm) = setup().await;
+
+        // A file that is NOT valid ciphertext: reading/decrypting it would fail.
+        std::fs::create_dir_all(temp.path().join("pages")).unwrap();
+        std::fs::write(temp.path().join("pages").join("Junk.md.age"), b"not-real-ciphertext").unwrap();
+
+        // Names come from the filename only — no decrypt — so it IS listed.
+        let names = efm.list_sheet_names(&ContentType::page()).await.unwrap();
+        assert!(
+            names.iter().any(|m| m.name == "Junk"),
+            "list_sheet_names should list by filename without reading"
+        );
+
+        // list_sheets actually decrypts, so it can't read the garbage and skips it.
+        let full = efm.list_sheets(&ContentType::page()).await.unwrap();
+        assert!(
+            !full.iter().any(|m| m.name == "Junk"),
+            "list_sheets reads/decrypts, so the unreadable file is excluded"
+        );
     }
 
     #[tokio::test]
