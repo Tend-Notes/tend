@@ -70,11 +70,40 @@ const TASK_KEYWORD_COLORS: Record<string, string> = {
 }
 
 /**
- * Parse block content into tokens for rendering.
+ * Bounded LRU cache for parseContent. The parse is a pure function of the
+ * content string but runs ~a dozen regexes per token scan, and the same block
+ * content is re-parsed constantly (V2 decorations, cross-block ops). Cache the
+ * token list keyed by content; a Map preserves insertion order so the oldest
+ * entry is evicted first, and a cache hit is moved to most-recently-used.
+ */
+const PARSE_CACHE_MAX = 500
+const parseContentCache = new Map<string, ContentToken[]>()
+
+/**
+ * Parse block content into tokens for rendering (cached; see parseContentCache).
  * Handles markdown formatting, tags, wikilinks, URLs, task statuses,
  * block references, and header prefixes.
+ *
+ * The returned token array is shared from the cache — treat it as read-only.
  */
 export function parseContent(content: string): ContentToken[] {
+  const cached = parseContentCache.get(content)
+  if (cached !== undefined) {
+    // Refresh recency: delete + re-insert moves it to the end (most recent).
+    parseContentCache.delete(content)
+    parseContentCache.set(content, cached)
+    return cached
+  }
+  const tokens = parseContentUncached(content)
+  parseContentCache.set(content, tokens)
+  if (parseContentCache.size > PARSE_CACHE_MAX) {
+    const oldest = parseContentCache.keys().next().value
+    if (oldest !== undefined) parseContentCache.delete(oldest)
+  }
+  return tokens
+}
+
+function parseContentUncached(content: string): ContentToken[] {
   const tokens: ContentToken[] = []
   let remaining = content
   // Absolute number of `content` characters already consumed, so each token can
@@ -389,6 +418,16 @@ export function renderContent(
 
 // Simple cache for block references (shared across all BlockReferenceDisplay instances)
 const blockRefReactCache = new Map<string, { data: BlockRef | null; timestamp: number }>()
+const BLOCK_REF_REACT_CACHE_MAX = 1000
+
+/** Insert into the React block-ref cache, evicting the oldest past the cap. */
+function setBlockRefReactCache(uuid: string, value: { data: BlockRef | null; timestamp: number }): void {
+  blockRefReactCache.set(uuid, value)
+  if (blockRefReactCache.size > BLOCK_REF_REACT_CACHE_MAX) {
+    const oldest = blockRefReactCache.keys().next().value
+    if (oldest !== undefined) blockRefReactCache.delete(oldest)
+  }
+}
 const BLOCK_REF_CACHE_TTL = 60000 // 1 minute
 
 interface BlockReferenceDisplayProps {
@@ -418,7 +457,7 @@ function BlockReferenceDisplay({ uuid, onNavigate, onLinkNavigate, getTagColors 
     // Fetch block data
     blocks.lookup(uuid).then((data) => {
       if (cancelled) return
-      blockRefReactCache.set(uuid, { data, timestamp: Date.now() })
+      setBlockRefReactCache(uuid, { data, timestamp: Date.now() })
       setBlockData(data)
     }).catch(() => {
       if (cancelled) return

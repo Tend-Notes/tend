@@ -221,7 +221,10 @@ pub async fn search(
     // Update last use time for TTL tracking
     garden.touch_search_index().await;
 
-    let index = search_index.read().await;
+    // Commit any saves that were deferred (PERF-03) before querying, so results
+    // always reflect the latest edits despite batched commits on the save path.
+    let mut index = search_index.write().await;
+    index.commit_if_dirty()?;
     let results = index.search(&query.q, query.limit)?;
 
     Ok(Json(SearchResponse {

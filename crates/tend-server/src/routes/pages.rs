@@ -66,7 +66,7 @@ pub async fn create_page(
     if let Some(search_index) = &garden.search_index {
         let mut index = search_index.write().await;
         index.index_page(&page)?;
-        index.commit()?;
+        index.maybe_commit()?;
     }
 
     // Update link index

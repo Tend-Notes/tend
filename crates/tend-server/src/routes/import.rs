@@ -989,7 +989,7 @@ pub async fn accept_import_error(
             if let Err(e) = index.index_page(&page) {
                 tracing::warn!("Failed to update search index for accepted import {}: {}", file_name, e);
             }
-            let _ = index.commit();
+            let _ = index.maybe_commit();
         }
 
         // Update block index (if available - not for encrypted gardens)

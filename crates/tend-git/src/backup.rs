@@ -93,6 +93,7 @@ pub struct FileDiff {
 }
 
 /// Manages Git backup operations
+#[derive(Clone)]
 pub struct BackupManager {
     repo_path: PathBuf,
     auto_push: bool,
@@ -363,11 +364,18 @@ impl BackupManager {
 
         let limit_str = limit.unwrap_or(50).to_string();
 
-        // Build args for git log
+        // A marker prefixes each commit header so we can tell header lines from
+        // the `--name-only` file lists that follow them.
+        const MARKER: &str = "@@COMMIT@@";
+
+        // Single process: `git log --name-only` yields both the commit metadata
+        // and its changed-file list, so we count files without a `diff-tree`
+        // subprocess per commit (previously 1 + N processes per history call).
         let mut args = vec![
             "log".to_string(),
             format!("-{}", limit_str),
-            "--format=%H|%h|%an|%aI|%s".to_string(),
+            format!("--format={}%H|%h|%an|%aI|%s", MARKER),
+            "--name-only".to_string(),
         ];
 
         // Add path filter if provided (git log -- <path>)
@@ -376,7 +384,6 @@ impl BackupManager {
             args.push(path.to_string());
         }
 
-        // Get log with custom format: sha|short_sha|author|timestamp|message
         let output = Command::new("git")
             .args(&args)
             .current_dir(&self.repo_path)
@@ -393,40 +400,40 @@ impl BackupManager {
         }
 
         let log_str = String::from_utf8_lossy(&output.stdout);
-        let mut commits = Vec::new();
+        let mut commits: Vec<CommitInfo> = Vec::new();
+        let mut files_changed: u32 = 0;
 
         for line in log_str.lines() {
-            let parts: Vec<&str> = line.splitn(5, '|').collect();
-            if parts.len() < 5 {
-                continue;
+            if let Some(header) = line.strip_prefix(MARKER) {
+                // Attribute the files counted so far to the previous commit.
+                if let Some(last) = commits.last_mut() {
+                    last.files_changed = files_changed;
+                }
+                files_changed = 0;
+
+                let parts: Vec<&str> = header.splitn(5, '|').collect();
+                if parts.len() < 5 {
+                    continue;
+                }
+                let timestamp = chrono::DateTime::parse_from_rfc3339(parts[3])
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                commits.push(CommitInfo {
+                    sha: parts[0].to_string(),
+                    short_sha: parts[1].to_string(),
+                    message: parts[4].to_string(),
+                    author: parts[2].to_string(),
+                    timestamp,
+                    files_changed: 0,
+                });
+            } else if !line.trim().is_empty() {
+                // A changed-file line for the current commit.
+                files_changed += 1;
             }
-
-            let sha = parts[0].to_string();
-            let short_sha = parts[1].to_string();
-            let author = parts[2].to_string();
-            let timestamp = chrono::DateTime::parse_from_rfc3339(parts[3])
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
-            let message = parts[4].to_string();
-
-            // Get files changed count for this commit
-            let stat_output = Command::new("git")
-                .args(["diff-tree", "--no-commit-id", "--name-only", "-r", &sha])
-                .current_dir(&self.repo_path)
-                .output();
-
-            let files_changed = stat_output
-                .map(|o| String::from_utf8_lossy(&o.stdout).lines().count() as u32)
-                .unwrap_or(0);
-
-            commits.push(CommitInfo {
-                sha,
-                short_sha,
-                message,
-                author,
-                timestamp,
-                files_changed,
-            });
+        }
+        // Attribute the trailing file count to the final commit.
+        if let Some(last) = commits.last_mut() {
+            last.files_changed = files_changed;
         }
 
         Ok(commits)
@@ -1511,5 +1518,32 @@ mod tests {
         let result = bm.backup().unwrap();
         assert!(result.success);
         assert!(result.commit_sha.is_some());
+    }
+
+    #[test]
+    fn test_history_parses_commits_and_file_counts() {
+        let (temp_dir, bm) = setup();
+
+        // Commit 1: one new file.
+        std::fs::write(temp_dir.path().join("a.md"), "# A\n").unwrap();
+        bm.backup().unwrap();
+        // Commit 2: two new files.
+        std::fs::write(temp_dir.path().join("b.md"), "# B\n").unwrap();
+        std::fs::write(temp_dir.path().join("c.md"), "# C\n").unwrap();
+        bm.backup().unwrap();
+        // Commit 3: modify one existing file.
+        std::fs::write(temp_dir.path().join("a.md"), "# A edited\n").unwrap();
+        bm.backup().unwrap();
+
+        let history = bm.history(Some(10), None).unwrap();
+        // 3 backups (the initial repo .gitignore may add a 4th commit).
+        assert!(history.len() >= 3, "expected >=3 commits, got {}", history.len());
+
+        // Newest first: the modify-one-file commit.
+        assert_eq!(history[0].files_changed, 1, "modify commit changed 1 file");
+        // The two-new-files commit changed at least 2.
+        assert!(history[1].files_changed >= 2, "second commit changed >=2 files");
+        // Metadata parsed.
+        assert!(!history[0].sha.is_empty() && !history[0].message.is_empty());
     }
 }

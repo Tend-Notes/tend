@@ -1,12 +1,23 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
-import { OutlinerEditor } from '../editor/OutlinerEditor'
+// Default editor (ProseMirror) loads eagerly; the legacy CodeMirror editor is
+// only pulled in when the user opts into it, keeping it out of the initial chunk.
+const OutlinerEditor = lazy(() =>
+  import('../editor/OutlinerEditor').then((m) => ({ default: m.OutlinerEditor }))
+)
 import { OutlineEditorV2 } from '../editor/outline2/OutlineEditorV2'
 import { useSettingsStore } from '../../stores/settingsStore'
-import { TemplateEditor } from '../editor/TemplateEditor'
-import { ImportErrorEditor } from '../editor/ImportErrorEditor'
+// TemplateEditor and ImportErrorEditor also build on the legacy CodeMirror
+// stack (via plots/OutlinerEditor) and are only shown on rare edit paths, so
+// they're lazy too — this keeps all of @codemirror out of the initial chunk.
+const TemplateEditor = lazy(() =>
+  import('../editor/TemplateEditor').then((m) => ({ default: m.TemplateEditor }))
+)
+const ImportErrorEditor = lazy(() =>
+  import('../editor/ImportErrorEditor').then((m) => ({ default: m.ImportErrorEditor }))
+)
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
@@ -114,11 +125,13 @@ export function MainContent() {
   if (editingTemplate) {
     return (
       <main className="flex-1 flex flex-col overflow-hidden">
-        <TemplateEditor
-          contentTypeName={editingTemplate.contentTypeName}
-          page={editingTemplate.page}
-          hasUnsavedChanges={editingTemplate.hasUnsavedChanges}
-        />
+        <Suspense fallback={null}>
+          <TemplateEditor
+            contentTypeName={editingTemplate.contentTypeName}
+            page={editingTemplate.page}
+            hasUnsavedChanges={editingTemplate.hasUnsavedChanges}
+          />
+        </Suspense>
       </main>
     )
   }
@@ -127,15 +140,17 @@ export function MainContent() {
   if (editingImportError) {
     return (
       <main className="flex-1 flex flex-col overflow-hidden">
-        <ImportErrorEditor
-          errorName={editingImportError.errorName}
-          originalName={editingImportError.originalName}
-          error={editingImportError.error}
-          timestamp={editingImportError.timestamp}
-          page={editingImportError.page}
-          fileName={editingImportError.fileName}
-          hasUnsavedChanges={editingImportError.hasUnsavedChanges}
-        />
+        <Suspense fallback={null}>
+          <ImportErrorEditor
+            errorName={editingImportError.errorName}
+            originalName={editingImportError.originalName}
+            error={editingImportError.error}
+            timestamp={editingImportError.timestamp}
+            page={editingImportError.page}
+            fileName={editingImportError.fileName}
+            hasUnsavedChanges={editingImportError.hasUnsavedChanges}
+          />
+        </Suspense>
       </main>
     )
   }
@@ -186,7 +201,9 @@ export function MainContent() {
           {/* Editor: ProseMirror node-model editor by default; legacy per-block
               CodeMirror editor as a fallback. */}
           {useLegacyEditor ? (
-            <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
+            <Suspense fallback={null}>
+              <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
+            </Suspense>
           ) : (
             <OutlineEditorV2 page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
           )}

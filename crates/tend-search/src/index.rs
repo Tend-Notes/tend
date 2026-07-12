@@ -66,11 +66,24 @@ pub struct SearchResult {
     pub score: f32,
 }
 
+/// Commit the writer after this many buffered document changes, so a burst of
+/// saves fsyncs once instead of once per save.
+const COMMIT_PENDING_THRESHOLD: usize = 32;
+
+/// Commit at least this often when there are buffered changes, bounding how long
+/// a just-saved doc stays uncommitted (it's still searchable via commit-before-
+/// query; this bounds durability/crash-drift of the derived index).
+const COMMIT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Manages the Tantivy search index
 pub struct SearchIndex {
     index: Index,
     reader: IndexReader,
     writer: IndexWriter,
+    /// Uncommitted document changes buffered in the writer.
+    pending: usize,
+    /// When the writer was last committed, for time-based commit batching.
+    last_commit: std::time::Instant,
 }
 
 impl SearchIndex {
@@ -105,6 +118,8 @@ impl SearchIndex {
             index,
             reader,
             writer,
+            pending: 0,
+            last_commit: std::time::Instant::now(),
         })
     }
 
@@ -122,6 +137,8 @@ impl SearchIndex {
             index,
             reader,
             writer,
+            pending: 0,
+            last_commit: std::time::Instant::now(),
         })
     }
 
@@ -157,6 +174,7 @@ impl SearchIndex {
 
         debug!("Indexed {} blocks for page: {}", page.blocks.len(), page.name);
 
+        self.pending += 1;
         Ok(())
     }
 
@@ -179,14 +197,38 @@ impl SearchIndex {
 
         debug!("Removed page from index: {}", page_name);
 
+        self.pending += 1;
         Ok(())
     }
 
-    /// Commit changes to the index
+    /// Commit changes to the index (durable fsync + reader reload).
     pub fn commit(&mut self) -> Result<(), SearchError> {
         self.writer.commit()?;
         // Reload the reader to see the new changes
         self.reader.reload()?;
+        self.pending = 0;
+        self.last_commit = std::time::Instant::now();
+        Ok(())
+    }
+
+    /// Commit only if there are uncommitted changes. Called before a search so
+    /// results always reflect the latest saves despite deferred commits.
+    pub fn commit_if_dirty(&mut self) -> Result<(), SearchError> {
+        if self.pending > 0 {
+            self.commit()?;
+        }
+        Ok(())
+    }
+
+    /// Commit if enough documents have buffered or enough time has elapsed since
+    /// the last commit; otherwise defer. This batches a burst of saves into a
+    /// single fsync instead of one fsync per save.
+    pub fn maybe_commit(&mut self) -> Result<(), SearchError> {
+        if self.pending >= COMMIT_PENDING_THRESHOLD
+            || (self.pending > 0 && self.last_commit.elapsed() >= COMMIT_INTERVAL)
+        {
+            self.commit()?;
+        }
         Ok(())
     }
 
@@ -284,6 +326,42 @@ mod tests {
         let results = index.search("hello", 10).unwrap();
         assert_eq!(results.len(), 1);
         assert!(results[0].content.contains("Hello"));
+    }
+
+    #[test]
+    fn maybe_commit_batches_saves_and_query_flushes() {
+        let mut index = SearchIndex::in_memory().unwrap();
+
+        // A burst of saves within the batching window commits nothing (each
+        // maybe_commit defers: < COMMIT_PENDING_THRESHOLD and < COMMIT_INTERVAL).
+        for i in 0..10 {
+            let mut page = Page::new(&format!("Page {i}"));
+            page.add_block(Block::new("hello world"));
+            index.index_page(&page).unwrap();
+            index.maybe_commit().unwrap();
+        }
+        assert_eq!(index.pending, 10, "10 saves buffered, none committed");
+        // Uncommitted -> not yet searchable.
+        assert_eq!(index.search("hello", 20).unwrap().len(), 0);
+
+        // Commit-before-query flushes the buffered saves in one commit.
+        index.commit_if_dirty().unwrap();
+        assert_eq!(index.pending, 0);
+        assert_eq!(index.search("hello", 20).unwrap().len(), 10);
+    }
+
+    #[test]
+    fn maybe_commit_flushes_when_threshold_reached() {
+        let mut index = SearchIndex::in_memory().unwrap();
+        for i in 0..COMMIT_PENDING_THRESHOLD {
+            let mut page = Page::new(&format!("P{i}"));
+            page.add_block(Block::new("threshold content"));
+            index.index_page(&page).unwrap();
+            index.maybe_commit().unwrap();
+        }
+        // Hitting the pending threshold commits automatically.
+        assert_eq!(index.pending, 0, "threshold reached -> auto-committed");
+        assert_eq!(index.search("threshold", 100).unwrap().len(), COMMIT_PENDING_THRESHOLD);
     }
 
     #[test]

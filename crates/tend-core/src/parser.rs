@@ -56,11 +56,6 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
     let markdown = &parsed.markdown;
 
     let mut page = Page::new(page_name);
-    let lines: Vec<&str> = markdown.lines().collect();
-
-    if lines.is_empty() {
-        return Ok(page);
-    }
 
     // Track blocks by their indent level to build the hierarchy
     // Stack of (indent_level, block_uuid)
@@ -70,7 +65,9 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
     // Track if we've seen a block yet (page properties come before blocks)
     let mut seen_first_block = false;
 
-    for line in lines {
+    // Iterate the lines directly; empty input simply yields no iterations and
+    // returns the fresh page (no intermediate Vec<&str> allocation).
+    for line in markdown.lines() {
         // Try to match a bullet line
         if let Some(caps) = BULLET_RE.captures(line) {
             seen_first_block = true;

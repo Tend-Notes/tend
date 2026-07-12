@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -222,12 +223,26 @@ pub struct GardenState {
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
     /// Link index for efficient backlink lookups
     pub link_index: Arc<RwLock<LinkIndex>>,
-    /// Block index for block reference lookups - None for encrypted gardens
+    /// Block index for block reference lookups - None for encrypted gardens.
+    ///
+    /// PERF-15: this stays a `Mutex` (not `RwLock`) on purpose. `BlockIndex`
+    /// wraps a `rusqlite::Connection`, which is `!Sync` — a SQLite connection
+    /// cannot be used from multiple threads concurrently even for reads, so
+    /// `RwLock<BlockIndex>` would not be `Sync` and couldn't be shared in the
+    /// `Arc`. `lookup` takes `&self`, but the connection still serializes, so a
+    /// read-write lock would buy nothing. Making `((uuid))` lookups truly
+    /// concurrent would require a connection pool (r2d2) or a read-only
+    /// in-memory map — deferred as an architectural change.
     pub block_index: Option<Arc<Mutex<BlockIndex>>>,
     /// Tag index for efficient tag lookups
     pub tag_index: Arc<RwLock<TagIndex>>,
     /// Todo index for efficient todo lookups
     pub todo_index: Arc<RwLock<TodoIndex>>,
+    /// Whether the tag/todo indices have been built at least once this session.
+    /// Tracked explicitly (not via emptiness) so a garden with zero tags/todos
+    /// doesn't re-scan on every /tags or /todos request.
+    tag_index_built: Arc<AtomicBool>,
+    todo_index_built: Arc<AtomicBool>,
     pub backup_manager: BackupManager,
     /// Whether this garden is encrypted
     pub encrypted: bool,
@@ -237,6 +252,9 @@ pub struct GardenState {
     pub index_status: Arc<RwLock<IndexStatus>>,
     /// Last time the search index was used (for TTL tracking)
     pub last_search_use: Arc<RwLock<Option<Instant>>>,
+    /// Last time the on-disk `search_last_use` timestamp was written, to
+    /// throttle that write to at most once per minute.
+    last_search_persist: Arc<RwLock<Option<Instant>>>,
 }
 
 impl GardenState {
@@ -420,11 +438,14 @@ impl GardenState {
             block_index,
             tag_index,
             todo_index,
+            tag_index_built: Arc::new(AtomicBool::new(false)),
+            todo_index_built: Arc::new(AtomicBool::new(false)),
             backup_manager,
             encrypted,
             search_config,
             index_status: Arc::new(RwLock::new(index_status)),
             last_search_use: Arc::new(RwLock::new(None)),
+            last_search_persist: Arc::new(RwLock::new(None)),
         };
 
         // If block index exists but is empty, populate it from existing pages
@@ -457,8 +478,28 @@ impl GardenState {
 
     /// Mark the search index as used (resets TTL timer)
     pub async fn touch_search_index(&self) {
-        let mut last_use = self.last_search_use.write().await;
-        *last_use = Some(Instant::now());
+        let now = Instant::now();
+        {
+            let mut last_use = self.last_search_use.write().await;
+            *last_use = Some(now);
+        }
+
+        // TTL disabled (ttl_hours == 0, e.g. unencrypted gardens): the GC never
+        // expires this index, so the on-disk timestamp is pure waste. Skip it —
+        // as-you-type search then does zero index-dir writes.
+        if self.search_config.ttl_hours == 0 {
+            return;
+        }
+
+        // Otherwise throttle the write to ~once/minute so a stream of queries
+        // doesn't rewrite the timestamp file on every keystroke.
+        {
+            let mut last_persist = self.last_search_persist.write().await;
+            match *last_persist {
+                Some(t) if now.duration_since(t) < Duration::from_secs(60) => return,
+                _ => *last_persist = Some(now),
+            }
+        }
 
         // Persist to disk for GC task (survives restarts, works without loading state)
         let last_use_path = self.data_dir.join(".tend").join("search_last_use");
@@ -695,6 +736,7 @@ impl GardenState {
         }
 
         info!("Tag index rebuilt with {} tags", tag_index.len());
+        self.tag_index_built.store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -720,6 +762,7 @@ impl GardenState {
         }
 
         info!("Todo index rebuilt with {} tasks", todo_index.len());
+        self.todo_index_built.store(true, Ordering::Relaxed);
 
         Ok(())
     }
@@ -766,6 +809,7 @@ impl GardenState {
                 tag_index.index_page(page);
             }
         }
+        self.tag_index_built.store(true, Ordering::Relaxed);
 
         // Todo index.
         {
@@ -775,6 +819,7 @@ impl GardenState {
                 todo_index.index_page(page, ct, *date);
             }
         }
+        self.todo_index_built.store(true, Ordering::Relaxed);
 
         // Search index (if enabled): a fresh index populated from the shared
         // pages. Encrypted gardens use a RAM-only index; plain gardens on disk.
@@ -815,14 +860,12 @@ impl GardenState {
 
     /// Check if tag index is populated
     pub async fn is_tag_index_populated(&self) -> bool {
-        let index = self.tag_index.read().await;
-        !index.is_empty()
+        self.tag_index_built.load(Ordering::Relaxed)
     }
 
     /// Check if todo index is populated
     pub async fn is_todo_index_populated(&self) -> bool {
-        let index = self.todo_index.read().await;
-        !index.is_empty()
+        self.todo_index_built.load(Ordering::Relaxed)
     }
 }
 

@@ -4,7 +4,11 @@ import { Sidebar } from './components/sidebar/Sidebar'
 import { MainContent } from './components/layout/MainContent'
 import { DraftRecoveryDialog } from './components/ui/DraftRecoveryDialog'
 import { ConflictResolutionDialog } from './components/ui/ConflictResolutionDialog'
-import { LogseqImportDialog } from './components/ui/LogseqImportDialog'
+// Lazy: this dialog (and its framer-motion dependency) is only needed when the
+// user opens the Logseq import, so keep it out of the initial chunk.
+const LogseqImportDialog = lazy(() =>
+  import('./components/ui/LogseqImportDialog').then((m) => ({ default: m.LogseqImportDialog }))
+)
 import { WorkTimerBanner } from './components/ui/WorkTimerBanner'
 import { DemoBanner } from './components/ui/DemoBanner'
 import { DemoWelcomeOverlay } from './components/ui/DemoWelcomeOverlay'
@@ -310,11 +314,15 @@ function App() {
       {/* Conflict resolution dialog */}
       <ConflictResolutionDialog />
 
-      {/* Logseq import dialog */}
-      <LogseqImportDialog
-        open={importDialogOpen}
-        onOpenChange={(open) => !open && closeImportDialog()}
-      />
+      {/* Logseq import dialog (mounted only while open so its chunk lazy-loads) */}
+      {importDialogOpen && (
+        <Suspense fallback={null}>
+          <LogseqImportDialog
+            open={importDialogOpen}
+            onOpenChange={(open) => !open && closeImportDialog()}
+          />
+        </Suspense>
+      )}
 
       {/* Toast notifications */}
       <Toasts />
