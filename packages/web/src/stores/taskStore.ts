@@ -154,13 +154,21 @@ export const useTaskStore = create<TaskState>()(
   }))
 )
 
+// currentPage.version bumps on every save (i.e. every keystroke burst), and
+// refresh() refetches ALL tasks across ALL pages. Debounce so a burst of saves
+// triggers a single refetch after typing settles, instead of one per save.
 let lastPageVersion = usePageStore.getState().currentPage?.version
+let taskRefreshTimer: ReturnType<typeof setTimeout> | undefined
 usePageStore.subscribe((state) => {
   const version = state.currentPage?.version
   if (version !== lastPageVersion) {
     lastPageVersion = version
-    void useTaskStore.getState().refresh()
+    if (taskRefreshTimer) clearTimeout(taskRefreshTimer)
+    taskRefreshTimer = setTimeout(() => {
+      void useTaskStore.getState().refresh()
+    }, 800)
   }
 })
 
+// Initial load: the sidebar todo count is shown on cold load, so fetch once.
 void useTaskStore.getState().refresh()
