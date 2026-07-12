@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 //! Garden management routes
 
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::SystemTime;
 
 use axum::extract::State;
 use axum::Json;
@@ -224,9 +226,33 @@ fn save_gardens_config(config: &GardensConfig) -> Result<(), std::io::Error> {
 }
 
 /// Load user-scoped gardens configuration, purging archives older than 15 days
-fn load_user_gardens_config(username: &str) -> GardensConfig {
+/// Cache of parsed gardens configs keyed by username, invalidated by file
+/// mtime. The config is read + parsed on many hot paths (backlinks, graph,
+/// todos, tags, every sheet op via get_content_type…); memoizing by mtime turns
+/// that per-request read+parse into a cheap stat while the file is unchanged.
+fn gardens_config_cache() -> &'static Mutex<HashMap<String, (SystemTime, GardensConfig)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (SystemTime, GardensConfig)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Read + parse the gardens config, reusing the cached parse while the file's
+/// mtime is unchanged. Returns the raw (unpurged) config.
+fn read_gardens_config_raw(username: &str) -> GardensConfig {
     let path = user_gardens_config_path(username);
-    let mut config = if path.exists() {
+    let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+
+    // Fast path: cached parse still valid for this file mtime.
+    if let Some(mtime) = mtime {
+        if let Ok(cache) = gardens_config_cache().lock() {
+            if let Some((cached_mtime, cfg)) = cache.get(username) {
+                if *cached_mtime == mtime {
+                    return cfg.clone();
+                }
+            }
+        }
+    }
+
+    let config = if path.exists() {
         match std::fs::read_to_string(&path) {
             Ok(content) => match serde_json::from_str(&content) {
                 Ok(config) => config,
@@ -244,16 +270,26 @@ fn load_user_gardens_config(username: &str) -> GardensConfig {
         default_user_gardens_config(username)
     };
 
-    // Purge archives older than 15 days
-    let cutoff = Utc::now() - chrono::Duration::days(15);
-    let original_len = config.archived.len();
-    config.archived.retain(|a| a.archived_at > cutoff);
-
-    // Save if we purged anything
-    if config.archived.len() != original_len {
-        let _ = save_user_gardens_config(username, &config);
+    if let Some(mtime) = mtime {
+        if let Ok(mut cache) = gardens_config_cache().lock() {
+            cache.insert(username.to_string(), (mtime, config.clone()));
+        }
     }
+    config
+}
 
+/// Drop archives older than 15 days (in memory only).
+fn purge_old_archives(config: &mut GardensConfig) {
+    let cutoff = Utc::now() - chrono::Duration::days(15);
+    config.archived.retain(|a| a.archived_at > cutoff);
+}
+
+fn load_user_gardens_config(username: &str) -> GardensConfig {
+    let mut config = read_gardens_config_raw(username);
+    // PERF-06: purge the returned view in memory only — never write on a read
+    // path. The purge is persisted on the write path (save_user_gardens_config),
+    // which every real mutation goes through.
+    purge_old_archives(&mut config);
     config
 }
 
@@ -283,7 +319,11 @@ fn save_user_gardens_config(username: &str, config: &GardensConfig) -> Result<()
         std::fs::create_dir_all(parent)?;
     }
 
-    let content = serde_json::to_string_pretty(config)?;
+    // Persist the archive purge here (on the write path) rather than on reads.
+    let mut config = config.clone();
+    purge_old_archives(&mut config);
+
+    let content = serde_json::to_string_pretty(&config)?;
     std::fs::write(&path, &content)?;
 
     // Set restrictive permissions (0600 - owner read/write only)
