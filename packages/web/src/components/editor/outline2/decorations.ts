@@ -13,7 +13,7 @@ import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
 import { useTagStore } from '../../../stores/tagStore'
 import { nextStatusKeyword } from '../../../lib/taskStatus'
-import { isCodeFenceText } from './codeHighlight'
+import { isCodeFenceText } from './codeFence'
 
 // Reuse V1's existing formatting classes so styling matches exactly.
 const CONTENT_CLASS: Record<string, string> = {

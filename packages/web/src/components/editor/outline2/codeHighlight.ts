@@ -9,6 +9,7 @@ import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Node as PMNode } from 'prosemirror-model'
 import { createLowlight } from 'lowlight'
+import { FENCE } from './codeFence'
 import javascript from 'highlight.js/lib/languages/javascript'
 import typescript from 'highlight.js/lib/languages/typescript'
 import python from 'highlight.js/lib/languages/python'
@@ -35,9 +36,6 @@ lowlight.register('css', css)
 lowlight.register('html', html); lowlight.register('xml', html)
 lowlight.register('markdown', markdown); lowlight.register('md', markdown)
 lowlight.register('sql', sql)
-
-// A block whose content is a single fenced code block: ```lang\n code \n```
-const FENCE = /^```([\w+#-]*)\r?\n([\s\S]*?)\r?\n```$/
 
 interface Span { from: number; to: number; cls: string }
 
@@ -72,10 +70,6 @@ function highlightSpans(code: string, language: string): Span[] {
 
 // True when a line node's text is a fenced code block (so the formatting layer
 // can skip it — see decorations.ts).
-export function isCodeFenceText(text: string): boolean {
-  return FENCE.test(text)
-}
-
 function build(doc: PMNode): DecorationSet {
   const decos: Decoration[] = []
   doc.descendants((node, pos) => {
