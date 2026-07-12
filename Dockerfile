@@ -39,7 +39,8 @@ RUN pnpm run build
 # =============================================================================
 # Stage 2: Build Rust backend
 # =============================================================================
-FROM rust:1.83-alpine AS backend-builder
+# Rust 1.85+: gix 0.71 (SEC-22) pulls gix-utils 0.3.3 whose MSRV is 1.85.
+FROM rust:1.85-alpine AS backend-builder
 
 # Install build dependencies
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig git
