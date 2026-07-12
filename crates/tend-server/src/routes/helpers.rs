@@ -141,6 +141,9 @@ pub async fn update_all_indices_with_content_type(
         let mut link_index = garden.link_index.write().await;
         if let Err(e) = link_index.index_page(&page.name, page.blocks.values()).await {
             warn!("Failed to update link index for {} {}: {}", entity_type, page.name, e);
+        } else if let Err(e) = link_index.maybe_persist().await {
+            // Deferred rewrite: a burst of saves persists once (PERF-08).
+            warn!("Failed to persist link index for {} {}: {}", entity_type, page.name, e);
         }
     }
 

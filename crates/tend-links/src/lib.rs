@@ -125,7 +125,19 @@ pub struct LinkIndex {
     /// When false the index is RAM-only and `persist()` is a no-op, so page and
     /// link names never touch the disk in plaintext (used for encrypted gardens).
     persistent: bool,
+    /// Mutations since the last persist, for batching the whole-file rewrite.
+    pending: usize,
+    /// When the index was last persisted, for time-based persist batching.
+    last_persist: std::time::Instant,
 }
+
+/// Persist after this many buffered mutations, so an autosave burst rewrites
+/// links.json once instead of per save.
+const LINK_PERSIST_PENDING_THRESHOLD: usize = 32;
+/// Persist at least this often when dirty, bounding how long a change stays
+/// only in memory (the index is rebuildable from the notes, so this is a
+/// durability window, not correctness).
+const LINK_PERSIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl LinkIndex {
     /// Create or load a link index at the given path
@@ -150,6 +162,8 @@ impl LinkIndex {
             target_index: HashMap::new(),
             source_index: HashMap::new(),
             persistent: true,
+            pending: 0,
+            last_persist: std::time::Instant::now(),
         };
 
         index.rebuild_indices();
@@ -168,6 +182,8 @@ impl LinkIndex {
             target_index: HashMap::new(),
             source_index: HashMap::new(),
             persistent: false,
+            pending: 0,
+            last_persist: std::time::Instant::now(),
         }
     }
 
@@ -188,8 +204,13 @@ impl LinkIndex {
         }
     }
 
-    /// Persist the index to disk
-    async fn persist(&self) -> Result<()> {
+    /// Persist the index to disk (rewrites links.json).
+    async fn persist(&mut self) -> Result<()> {
+        // Reset the batch counters even on the RAM-only no-op so maybe_persist
+        // doesn't keep retrying.
+        self.pending = 0;
+        self.last_persist = std::time::Instant::now();
+
         // RAM-only indices (encrypted gardens) never touch the disk.
         if !self.persistent {
             return Ok(());
@@ -210,6 +231,27 @@ impl LinkIndex {
             let _ = std::fs::set_permissions(&index_file, std::fs::Permissions::from_mode(0o600));
         }
         debug!(?index_file, entries = self.data.entries.len(), "Persisted link index");
+        Ok(())
+    }
+
+    /// Persist only if enough mutations have buffered or enough time has passed
+    /// since the last persist; otherwise defer. Batches an autosave burst into a
+    /// single links.json rewrite.
+    pub async fn maybe_persist(&mut self) -> Result<()> {
+        if self.pending >= LINK_PERSIST_PENDING_THRESHOLD
+            || (self.pending > 0 && self.last_persist.elapsed() >= LINK_PERSIST_INTERVAL)
+        {
+            self.persist().await?;
+        }
+        Ok(())
+    }
+
+    /// Persist any buffered mutations now. Call at durability points (e.g. after
+    /// a bulk import) so a single rewrite covers the whole batch.
+    pub async fn flush(&mut self) -> Result<()> {
+        if self.pending > 0 {
+            self.persist().await?;
+        }
         Ok(())
     }
 
@@ -277,7 +319,10 @@ impl LinkIndex {
             self.data.entries.push(entry);
         }
 
-        self.persist().await
+        // Defer the whole-file rewrite: callers batch it via maybe_persist
+        // (save path) or flush (after a bulk import).
+        self.pending += 1;
+        Ok(())
     }
 
     /// Remove all links originating from a page
@@ -590,11 +635,13 @@ mod tests {
     async fn test_persistence() {
         let temp_dir = TempDir::new().unwrap();
 
-        // Create and populate index
+        // Create and populate index. index_page defers the disk write now
+        // (PERF-08), so flush() to persist before reloading.
         {
             let mut index = LinkIndex::new(temp_dir.path().to_path_buf()).await.unwrap();
             let blocks = vec![Block::new("Link to [[Target]]")];
             index.index_page("Source", &blocks).await.unwrap();
+            index.flush().await.unwrap();
         }
 
         // Load index and verify
@@ -604,6 +651,22 @@ mod tests {
             let backlinks = index.get_backlinks("Target");
             assert_eq!(backlinks.len(), 1);
         }
+    }
+
+    #[tokio::test]
+    async fn index_page_defers_persist_until_flush() {
+        let temp = TempDir::new().unwrap();
+        let mut index = LinkIndex::new(temp.path().to_path_buf()).await.unwrap();
+        let links_json = temp.path().join("links.json");
+
+        index.index_page("Source", &[Block::new("[[Target]]")]).await.unwrap();
+        // Deferred: nothing on disk yet (batches an autosave burst).
+        assert!(!links_json.exists(), "index_page should not write to disk");
+        // In-memory reads are already current.
+        assert_eq!(index.get_backlinks("Target").len(), 1);
+
+        index.flush().await.unwrap();
+        assert!(links_json.exists(), "flush should persist");
     }
 
     #[tokio::test]

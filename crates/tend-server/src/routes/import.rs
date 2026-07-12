@@ -599,6 +599,11 @@ async fn process_import(
                 tracing::warn!("Failed to update link index for imported item {}: {}", page_name, e);
             }
         }
+        // Persist once for the whole batch (PERF-08: index_page defers the
+        // rewrite, so this is a single links.json write instead of one per page).
+        if let Err(e) = link_index.flush().await {
+            tracing::warn!("Failed to persist link index after import: {}", e);
+        }
     }
 
     let _ = tx
@@ -978,6 +983,8 @@ pub async fn accept_import_error(
             let mut link_index = garden.link_index.write().await;
             if let Err(e) = link_index.index_page(&file_name, page.blocks.values()).await {
                 tracing::warn!("Failed to update link index for accepted import {}: {}", file_name, e);
+            } else if let Err(e) = link_index.flush().await {
+                tracing::warn!("Failed to persist link index for accepted import {}: {}", file_name, e);
             }
         }
 
