@@ -15,7 +15,7 @@ use crate::state::AppState;
 use crate::ws::{BroadcastEvent, WsEvent};
 
 use super::gardens::load_user_content_types;
-use super::helpers::{apply_block_updates, remove_from_all_indices, update_all_indices};
+use super::helpers::{apply_block_updates, apply_property_updates, remove_from_all_indices, update_all_indices};
 use tend_core::ContentType;
 
 /// List all pages
@@ -160,6 +160,10 @@ pub struct UpdatePageRequest {
     /// Expected version for conflict detection. If provided and doesn't match
     /// the current version, returns 409 Conflict.
     pub version: Option<u64>,
+    /// Page-level property changes to merge (Some = set, None = remove). Omitted
+    /// keys are left untouched.
+    #[serde(default)]
+    pub properties: std::collections::HashMap<String, Option<String>>,
 }
 
 /// Block data in API requests
@@ -193,6 +197,7 @@ pub async fn update_page(
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
     apply_block_updates(&mut page, req.blocks, req.version)?;
+    apply_property_updates(&mut page, req.properties);
 
     garden.file_manager.write_page(&page).await?;
 

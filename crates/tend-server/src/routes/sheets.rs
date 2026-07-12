@@ -18,7 +18,7 @@ use crate::routes::pages::BlockData;
 use crate::state::AppState;
 
 use super::gardens::load_user_content_types;
-use super::helpers::{apply_block_updates, remove_from_all_indices, update_all_indices_with_content_type};
+use super::helpers::{apply_block_updates, apply_property_updates, remove_from_all_indices, update_all_indices_with_content_type};
 
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
@@ -208,6 +208,10 @@ pub struct UpdateSheetRequest {
     pub blocks: Vec<BlockData>,
     /// Expected version for conflict detection
     pub version: Option<u64>,
+    /// Page-level property changes to merge (Some = set, None = remove). Omitted
+    /// keys are left untouched. Used e.g. to flag a page `longform`.
+    #[serde(default)]
+    pub properties: std::collections::HashMap<String, Option<String>>,
 }
 
 /// Look up a content type by ID from the active garden's config for a user
@@ -395,6 +399,7 @@ pub async fn update_sheet(
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
     apply_block_updates(&mut page, req.blocks, req.version)?;
+    apply_property_updates(&mut page, req.properties);
 
     garden.file_manager.write_sheet(&content_type, &page, date).await?;
 

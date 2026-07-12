@@ -84,6 +84,27 @@ pub fn apply_block_updates(
     Ok(())
 }
 
+/// Merge page-level property changes into a page before writing.
+///
+/// `Some(v)` sets the key, `None` removes it. Keys not present in `properties`
+/// are left untouched, so server-set properties (e.g. `readonly`) survive
+/// clients that don't echo them back.
+pub fn apply_property_updates(
+    page: &mut Page,
+    properties: std::collections::HashMap<String, Option<String>>,
+) {
+    for (key, value) in properties {
+        match value {
+            Some(v) => {
+                page.properties.insert(key, v);
+            }
+            None => {
+                page.properties.remove(&key);
+            }
+        }
+    }
+}
+
 /// Update all indices (search, link, block, tag, todo) for a page.
 ///
 /// This function updates:
