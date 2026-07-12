@@ -64,7 +64,17 @@ type CacheEntry = {
 
 const blockRefCache = new Map<string, CacheEntry>()
 const CACHE_TTL_MS = 60 * 1000 // 1 minute cache TTL
+const BLOCK_REF_CACHE_MAX = 1000 // bound the cache so a long session can't grow it unbounded
 const pendingFetches = new Map<string, Promise<CacheEntry>>()
+
+/** Insert into the block-ref cache, evicting the oldest entry past the cap. */
+function cacheBlockRef(uuid: string, entry: CacheEntry): void {
+  blockRefCache.set(uuid, entry)
+  if (blockRefCache.size > BLOCK_REF_CACHE_MAX) {
+    const oldest = blockRefCache.keys().next().value
+    if (oldest !== undefined) blockRefCache.delete(oldest)
+  }
+}
 
 /**
  * Get block reference data, using cache if available
@@ -91,7 +101,7 @@ async function getBlockRef(uuid: string): Promise<CacheEntry> {
         error: data === null ? 'not_found' : undefined,
         timestamp: Date.now(),
       }
-      blockRefCache.set(uuid, entry)
+      cacheBlockRef(uuid, entry)
       return entry
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : 'Unknown error'
@@ -101,7 +111,7 @@ async function getBlockRef(uuid: string): Promise<CacheEntry> {
         error: isEncrypted ? 'encrypted' : 'error',
         timestamp: Date.now(),
       }
-      blockRefCache.set(uuid, entry)
+      cacheBlockRef(uuid, entry)
       return entry
     } finally {
       pendingFetches.delete(uuid)

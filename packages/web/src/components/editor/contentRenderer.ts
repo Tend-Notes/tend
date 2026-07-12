@@ -418,6 +418,16 @@ export function renderContent(
 
 // Simple cache for block references (shared across all BlockReferenceDisplay instances)
 const blockRefReactCache = new Map<string, { data: BlockRef | null; timestamp: number }>()
+const BLOCK_REF_REACT_CACHE_MAX = 1000
+
+/** Insert into the React block-ref cache, evicting the oldest past the cap. */
+function setBlockRefReactCache(uuid: string, value: { data: BlockRef | null; timestamp: number }): void {
+  blockRefReactCache.set(uuid, value)
+  if (blockRefReactCache.size > BLOCK_REF_REACT_CACHE_MAX) {
+    const oldest = blockRefReactCache.keys().next().value
+    if (oldest !== undefined) blockRefReactCache.delete(oldest)
+  }
+}
 const BLOCK_REF_CACHE_TTL = 60000 // 1 minute
 
 interface BlockReferenceDisplayProps {
@@ -447,7 +457,7 @@ function BlockReferenceDisplay({ uuid, onNavigate, onLinkNavigate, getTagColors 
     // Fetch block data
     blocks.lookup(uuid).then((data) => {
       if (cancelled) return
-      blockRefReactCache.set(uuid, { data, timestamp: Date.now() })
+      setBlockRefReactCache(uuid, { data, timestamp: Date.now() })
       setBlockData(data)
     }).catch(() => {
       if (cancelled) return
