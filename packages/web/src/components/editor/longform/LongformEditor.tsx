@@ -88,6 +88,14 @@ export function LongformEditor({ page, readonly = false, onBlocksChange }: Longf
     })
     viewRef.current = view
 
+    // Focus the editor on mount so switching into longform (or opening a
+    // longform page) is ready to type with no extra click. Deferred a frame so
+    // the contentEditable is laid out before we place the caret.
+    requestAnimationFrame(() => {
+      const v = viewRef.current
+      if (v && !readonly) v.focus()
+    })
+
     // Lazy code-fence highlighter (kept out of the initial chunk), spliced in
     // via reconfigure once loaded — mirrors OutlineEditorV2.
     void import('../outline2/codeHighlight').then(({ codeHighlightPlugin }) => {
