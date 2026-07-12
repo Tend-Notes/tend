@@ -484,6 +484,18 @@ impl LinkIndex {
 
         targets.into_iter().collect()
     }
+
+    /// Every wiki-link as a `(source_hash, target_name)` pair, so a caller with a
+    /// source-hash → page-name map can build the link graph without re-reading
+    /// and re-parsing every page body.
+    pub fn wiki_link_edges(&self) -> Vec<(String, String)> {
+        self.data
+            .entries
+            .iter()
+            .filter(|e| e.link_type == LinkType::WikiLink)
+            .filter_map(|e| e.target_name.clone().map(|t| (e.source_hash.clone(), t)))
+            .collect()
+    }
 }
 
 // We need hex encoding for SHA-256 output

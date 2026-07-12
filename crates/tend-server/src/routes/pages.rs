@@ -291,7 +291,10 @@ pub async fn get_backlinks(
     let content_types = load_user_content_types(&user.username).unwrap_or_default();
 
     for ct in &content_types {
-        let sheets = garden.file_manager.list_sheets(ct).await?;
+        // Resolve which pages exist from filenames only (no reads/decrypts),
+        // then read ONLY the pages whose hash is a backlink source. Previously
+        // this list_sheets'd (read+parsed) the whole garden just to find them.
+        let sheets = garden.file_manager.list_sheet_names(ct).await?;
         for sheet_meta in &sheets {
             let page_hash = hash_page_name(&sheet_meta.name);
             if !source_hashes.contains(&page_hash) {
