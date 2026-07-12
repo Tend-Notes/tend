@@ -23,6 +23,22 @@ pub fn serialize_page(page: &Page) -> String {
         output.push_str(&format!("{}:: {}\n", key, value));
     }
 
+    // Longform pages store the whole body as a single block written verbatim
+    // (no `- ` bullet prefix, no indentation), so the file reads as clean prose.
+    // The footer still carries the block's UUID so references/sync stay stable.
+    if is_longform(page) {
+        if let Some(root_uuid) = page.root_blocks.first() {
+            output.push('\n');
+            if let Some(block) = page.get_block(root_uuid) {
+                output.push_str(&block.content);
+                output.push('\n');
+            }
+            let metadata = blocks_to_metadata(&page.root_blocks, &page.blocks);
+            output.push_str(&serialize_footer(&metadata));
+        }
+        return output;
+    }
+
     // Add a blank line between page properties and blocks (if there are properties and blocks)
     if !page.root_blocks.is_empty() {
         output.push('\n');
@@ -40,6 +56,11 @@ pub fn serialize_page(page: &Page) -> String {
     }
 
     output
+}
+
+/// Whether a page is in longform mode (single verbatim block, no bullets).
+fn is_longform(page: &Page) -> bool {
+    page.properties.get("longform").map(|v| v == "true").unwrap_or(false)
 }
 
 /// Serialize a single block and its children recursively

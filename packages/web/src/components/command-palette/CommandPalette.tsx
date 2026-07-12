@@ -251,12 +251,13 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     onOpenChange(false)
   }
 
-  // Toggle free text mode (hides bullets and indentation via CSS)
-  const handleToggleFreeTextMode = useCallback(async () => {
-    if (!currentPage) return
-
-    const currentlyEnabled = currentPage.properties?.freeText === 'true'
-    await updateCurrentPageProperty('freeText', currentlyEnabled ? null : 'true')
+  // Convert a blank, non-journal page into Longform Mode (a single wall-of-text
+  // block, edited without bullets). Only offered on blank pages so there's no
+  // outline-to-prose migration to do.
+  const handleConvertToLongform = useCallback(async () => {
+    if (!currentPage || currentPage.isJournal) return
+    if (currentPage.properties?.longform === 'true') return
+    await updateCurrentPageProperty('longform', 'true')
     onOpenChange(false)
   }, [currentPage, updateCurrentPageProperty, onOpenChange])
 
@@ -301,8 +302,18 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     }
   }, [onOpenChange])
 
-  // Check if free text mode is currently enabled
-  const isFreeTextEnabled = currentPage?.properties?.freeText === 'true'
+  // Longform conversion is offered only on a blank, non-journal page that isn't
+  // already longform (blank = no blocks, or a single empty block).
+  const isBlankPage =
+    !!currentPage &&
+    (currentPage.rootBlocks.length === 0 ||
+      (currentPage.rootBlocks.length === 1 &&
+        (currentPage.blocks[currentPage.rootBlocks[0]]?.content ?? '') === ''))
+  const canConvertToLongform =
+    !!currentPageName &&
+    !currentPage?.isJournal &&
+    currentPage?.properties?.longform !== 'true' &&
+    isBlankPage
 
   return (
     <Command.Dialog
@@ -560,12 +571,12 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               >
                 Purge recent file list
               </CommandItem>
-              {currentPage && (
+              {canConvertToLongform && (
                 <CommandItem
-                  onSelect={handleToggleFreeTextMode}
-                  value="toggle free text mode bullets outline"
+                  onSelect={handleConvertToLongform}
+                  value="convert longform mode wall of text prose no bullets"
                 >
-                  {isFreeTextEnabled ? 'Disable free text mode' : 'Enable free text mode'}
+                  Convert to Longform
                 </CommandItem>
               )}
             </Command.Group>

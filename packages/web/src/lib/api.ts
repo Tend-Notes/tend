@@ -470,11 +470,18 @@ const _sheets = {
       body: JSON.stringify({ name, date: options?.date, content: options?.content }),
     }),
 
-  update: (contentTypeId: string, name: string, blocks: BlockData[], version?: number, date?: string) => {
+  update: (
+    contentTypeId: string,
+    name: string,
+    blocks: BlockData[],
+    version?: number,
+    date?: string,
+    properties?: Record<string, string | null>
+  ) => {
     const params = date ? `?date=${encodeURIComponent(date)}` : ''
     return fetchJson<Page>(`${API_BASE}/sheets/${encodeURIComponent(contentTypeId)}/${encodeURIComponent(name)}${params}`, {
       method: 'PUT',
-      body: JSON.stringify({ blocks, version }),
+      body: JSON.stringify(properties ? { blocks, version, properties } : { blocks, version }),
     })
   },
 

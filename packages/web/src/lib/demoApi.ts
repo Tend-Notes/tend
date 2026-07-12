@@ -723,7 +723,8 @@ export const sheets = {
     name: string,
     blocksData: BlockData[],
     version?: number,
-    date?: string
+    date?: string,
+    _properties?: Record<string, string | null>
   ): Promise<Page> => {
     if (contentTypeId === 'journal' && date) {
       return journals.update(date, blocksData, version)

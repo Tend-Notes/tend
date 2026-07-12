@@ -107,6 +107,17 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
     },
+    // Force a single instance of the ProseMirror core packages. Their classes
+    // (Schema/Node/Fragment/EditorState) use identity checks, so a second copy
+    // — which the dev server can pull in when a new PM-importing module is added
+    // — breaks structural commands ("multiple versions of prosemirror-model").
+    dedupe: [
+      'prosemirror-model',
+      'prosemirror-state',
+      'prosemirror-view',
+      'prosemirror-transform',
+      'prosemirror-keymap',
+    ],
   },
   server: {
     proxy: {

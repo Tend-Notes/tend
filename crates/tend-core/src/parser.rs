@@ -54,11 +54,71 @@ static PROPERTY_RE: LazyLock<Regex> =
 /// listing so the sidebar/graph don't parse full bodies just for a count.
 pub fn count_blocks(content: &str) -> usize {
     let parsed = parse_content_with_footer(content);
+    // Longform pages are a single verbatim block; `- ` lines in the prose are
+    // not bullets, so counting them would be wrong.
+    if is_longform_header(&parsed.markdown) {
+        return 1;
+    }
     parsed
         .markdown
         .lines()
         .filter(|line| BULLET_RE.is_match(line))
         .count()
+}
+
+/// Whether the header (the leading `key:: value` property lines, before the
+/// blank line that separates them from the body) declares `longform:: true`.
+fn is_longform_header(markdown: &str) -> bool {
+    for line in markdown.lines() {
+        // The header is a contiguous run of property lines; a blank line or any
+        // non-property line means the body has started without the flag.
+        if let Some(caps) = PROPERTY_RE.captures(line) {
+            let key = caps.get(2).map_or("", |m| m.as_str());
+            let value = caps.get(3).map_or("", |m| m.as_str());
+            if key == "longform" && value == "true" {
+                return true;
+            }
+        } else {
+            return false;
+        }
+    }
+    false
+}
+
+/// Parse a longform page: header properties, then the remaining markdown as a
+/// single verbatim block (mirrors `serialize_page`'s longform branch).
+fn parse_longform(mut page: Page, markdown: &str, metadata: Option<&[BlockMetadata]>) -> Page {
+    // Consume the leading property lines into page-level properties.
+    let mut rest = markdown;
+    loop {
+        let (line, remainder) = match rest.split_once('\n') {
+            Some((l, r)) => (l, r),
+            None => (rest, ""),
+        };
+        let Some(caps) = PROPERTY_RE.captures(line) else { break };
+        let key = caps.get(2).map_or("", |m| m.as_str());
+        let value = caps.get(3).map_or("", |m| m.as_str());
+        if key == "version" {
+            if let Ok(v) = value.parse::<u64>() {
+                page.version = v;
+            }
+        } else {
+            page.properties.insert(key.to_string(), value.to_string());
+        }
+        rest = remainder;
+    }
+
+    // `serialize_page` writes exactly one blank line between header and body,
+    // and one trailing newline after the body. Strip both to recover the
+    // block's content verbatim.
+    let body = rest.strip_prefix('\n').unwrap_or(rest);
+    let content = body.strip_suffix('\n').unwrap_or(body);
+
+    page.add_block(Block::new(content));
+    if let Some(metadata) = metadata {
+        apply_footer_metadata(&mut page, metadata);
+    }
+    page
 }
 
 /// Parse a Markdown file into a Page
@@ -73,6 +133,12 @@ pub fn parse_markdown(content: &str, page_name: &str) -> Result<Page, CoreError>
     let markdown = &parsed.markdown;
 
     let mut page = Page::new(page_name);
+
+    // Longform pages (a `longform:: true` page-level property in the header)
+    // store their whole body as a single verbatim block — no bullet parsing.
+    if is_longform_header(markdown) {
+        return Ok(parse_longform(page, markdown, parsed.metadata.as_deref()));
+    }
 
     // Track blocks by their indent level to build the hierarchy
     // Stack of (indent_level, block_uuid)
@@ -279,6 +345,82 @@ pub fn is_journal_filename(filename: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::serializer::serialize_page;
+
+    // A longform body deliberately containing things the outliner format
+    // reserves: a `- ` list line, a `key:: value`-looking line, blank lines,
+    // and a fenced code block. None of these may fracture the single block.
+    const LONGFORM_BODY: &str = "# My essay\n\nSome **bold** prose.\n\n- a list item I typed\n- another one\n\nnote:: not a real property\n\n```python\nprint(\"hi\")\n```\n\nMore prose.";
+
+    #[test]
+    fn longform_roundtrip_preserves_verbatim_body() {
+        let mut page = Page::new("Essay");
+        page.version = 3;
+        page.properties.insert("longform".to_string(), "true".to_string());
+        page.add_block(Block::new(LONGFORM_BODY));
+        let uuid = page.root_blocks[0];
+
+        let serialized = serialize_page(&page);
+        // Clean file: the body appears verbatim, and no bullet was added in
+        // front of the block content (the body's own `- ` lines are prose).
+        assert!(serialized.contains(LONGFORM_BODY), "body not verbatim:\n{serialized}");
+        assert!(
+            !serialized.contains("- # My essay"),
+            "block content was bulleted:\n{serialized}"
+        );
+
+        let parsed = parse_markdown(&serialized, "Essay").unwrap();
+        assert_eq!(parsed.blocks.len(), 1, "longform must parse to one block");
+        assert_eq!(parsed.root_blocks[0], uuid, "block UUID must survive via footer");
+        assert_eq!(parsed.get_block(&uuid).unwrap().content, LONGFORM_BODY);
+        assert_eq!(parsed.properties.get("longform").map(String::as_str), Some("true"));
+        assert_eq!(parsed.version, 3);
+
+        // Second round-trip is stable.
+        assert_eq!(serialize_page(&parsed), serialized);
+    }
+
+    #[test]
+    fn longform_list_line_does_not_fracture_into_blocks() {
+        // The whole point of backend-aware storage: a typed markdown list stays
+        // in the one block instead of re-parsing into separate bullets.
+        let mut page = Page::new("N");
+        page.properties.insert("longform".to_string(), "true".to_string());
+        page.add_block(Block::new("intro\n- one\n- two\nmore"));
+        let reparsed = parse_markdown(&serialize_page(&page), "N").unwrap();
+        assert_eq!(reparsed.blocks.len(), 1);
+        assert_eq!(reparsed.root_blocks.len(), 1);
+        assert_eq!(
+            reparsed.get_block(&reparsed.root_blocks[0]).unwrap().content,
+            "intro\n- one\n- two\nmore"
+        );
+    }
+
+    #[test]
+    fn longform_empty_body_roundtrips() {
+        let mut page = Page::new("Blank");
+        page.properties.insert("longform".to_string(), "true".to_string());
+        page.add_block(Block::new(""));
+        let reparsed = parse_markdown(&serialize_page(&page), "Blank").unwrap();
+        assert_eq!(reparsed.blocks.len(), 1);
+        assert_eq!(reparsed.get_block(&reparsed.root_blocks[0]).unwrap().content, "");
+    }
+
+    #[test]
+    fn count_blocks_is_one_for_longform() {
+        let mut page = Page::new("Essay");
+        page.properties.insert("longform".to_string(), "true".to_string());
+        page.add_block(Block::new(LONGFORM_BODY));
+        assert_eq!(count_blocks(&serialize_page(&page)), 1);
+    }
+
+    #[test]
+    fn non_longform_page_unaffected() {
+        let content = "version:: 2\n\n- a\n- b\n";
+        let parsed = parse_markdown(content, "T").unwrap();
+        assert_eq!(parsed.blocks.len(), 2);
+        assert!(!is_longform_header(content));
+    }
 
     #[test]
     fn count_blocks_matches_full_parse() {

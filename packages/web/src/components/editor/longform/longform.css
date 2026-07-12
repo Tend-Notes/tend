@@ -1,0 +1,16 @@
+/* SPDX-License-Identifier: MIT WITH Commons-Clause */
+/* Longform Mode overrides. The container also carries the `outline2` class so it
+   reuses V2's formatting/header/inline paint; here we strip the bullet gutter
+   and give the prose a comfortable measure. The flat schema emits no bullets,
+   fold, or nested lists, so those outline2 rules simply match nothing. */
+
+.longform .ProseMirror {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 1rem 0 40vh;
+}
+
+/* No bullet gutter: each line is flush prose, not an indented block. */
+.longform .block-content {
+  padding-left: 0;
+}

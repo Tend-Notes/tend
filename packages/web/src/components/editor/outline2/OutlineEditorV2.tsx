@@ -14,6 +14,7 @@ import { useUIStore } from '../../../stores/uiStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
 import { pageToDoc, docToBlocks } from './pageDoc'
 import { focusBlock, blockUuidAtSelection } from './pmUtil'
+import { hasFinePointer } from '../../../lib/pointer'
 import { textLayer, outlinerLayer, formattingLayer, slashMenuLayer, composeLayers } from './layers'
 import { slashMenuKey, type SlashTrigger } from './slashMenuPlugin'
 import { SlashMenu } from './SlashMenu'
@@ -144,7 +145,13 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
           el.classList.add('block-container--highlight')
           setTimeout(() => el.classList.remove('block-container--highlight'), 2000)
         }
+        return
       }
+      // Otherwise focus the editor on load so you can start typing (and so the
+      // first click lands where you click instead of just focusing — the editor
+      // is already focused, so there's no focus transition to eat the click).
+      // Skip on touch devices, where it would pop the soft keyboard every load.
+      if (!readonly && hasFinePointer()) v.focus()
     })
 
     return () => {
