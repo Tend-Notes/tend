@@ -15,6 +15,7 @@ import { useUIStore } from '../../../stores/uiStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
 import { pageToDocFlat, docToBlocksFlat } from './pageDoc'
 import { formattingLayer, textLayer, composeLayers } from '../outline2/layers'
+import { hasFinePointer } from '../../../lib/pointer'
 // ProseMirror's required base styles — without these Firefox mis-renders the
 // contentEditable and shows no caret (Chromium tolerates their absence).
 import 'prosemirror-view/style/prosemirror.css'
@@ -90,10 +91,11 @@ export function LongformEditor({ page, readonly = false, onBlocksChange }: Longf
 
     // Focus the editor on mount so switching into longform (or opening a
     // longform page) is ready to type with no extra click. Deferred a frame so
-    // the contentEditable is laid out before we place the caret.
+    // the contentEditable is laid out before we place the caret. Skip on touch
+    // devices, where it would pop the soft keyboard on every load.
     requestAnimationFrame(() => {
       const v = viewRef.current
-      if (v && !readonly) v.focus()
+      if (v && !readonly && hasFinePointer()) v.focus()
     })
 
     // Lazy code-fence highlighter (kept out of the initial chunk), spliced in
