@@ -138,9 +138,8 @@ pub async fn update_all_indices_with_content_type(
 
     // Update link index
     {
-        let blocks: Vec<_> = page.blocks.values().cloned().collect();
         let mut link_index = garden.link_index.write().await;
-        if let Err(e) = link_index.index_page(&page.name, &blocks).await {
+        if let Err(e) = link_index.index_page(&page.name, page.blocks.values()).await {
             warn!("Failed to update link index for {} {}: {}", entity_type, page.name, e);
         }
     }

@@ -595,8 +595,7 @@ async fn process_import(
         let mut link_index = garden.link_index.write().await;
 
         for (page_name, page) in &imported_items {
-            let blocks: Vec<_> = page.blocks.values().cloned().collect();
-            if let Err(e) = link_index.index_page(page_name, &blocks).await {
+            if let Err(e) = link_index.index_page(page_name, page.blocks.values()).await {
                 tracing::warn!("Failed to update link index for imported item {}: {}", page_name, e);
             }
         }
@@ -976,9 +975,8 @@ pub async fn accept_import_error(
 
         // Update link index
         {
-            let blocks: Vec<_> = page.blocks.values().cloned().collect();
             let mut link_index = garden.link_index.write().await;
-            if let Err(e) = link_index.index_page(&file_name, &blocks).await {
+            if let Err(e) = link_index.index_page(&file_name, page.blocks.values()).await {
                 tracing::warn!("Failed to update link index for accepted import {}: {}", file_name, e);
             }
         }

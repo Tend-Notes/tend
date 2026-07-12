@@ -216,9 +216,13 @@ impl LinkIndex {
     /// Index a page, extracting all links from its blocks
     ///
     /// This will remove any existing links from this page before adding new ones.
-    pub async fn index_page(&mut self, page_name: &str, blocks: &[Block]) -> Result<()> {
+    pub async fn index_page<'b>(
+        &mut self,
+        page_name: &str,
+        blocks: impl IntoIterator<Item = &'b Block>,
+    ) -> Result<()> {
         let source_hash = hash_page_name(page_name);
-        debug!(%page_name, %source_hash, blocks = blocks.len(), "Indexing page");
+        debug!(%page_name, %source_hash, "Indexing page");
 
         // Remove existing links from this page
         self.remove_page_internal(&source_hash);
