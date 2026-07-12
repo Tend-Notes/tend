@@ -33,6 +33,12 @@ function randomTagColors(): TagColors {
   return colors
 }
 
+// Colors generated for a tag that isn't persisted yet. getTagColors is called
+// during render (from contentRenderer/Sidebar), so it must not set()/write
+// localStorage synchronously — it stashes the color here, returns it stably,
+// and persists on a microtask after render.
+const pendingTagColors = new Map<string, TagColors>()
+
 interface TagState {
   // Tag metadata keyed by tag name (without #)
   tags: Record<string, TagMetadata>
@@ -67,14 +73,18 @@ export const useTagStore = create<TagState>()(
         if (tag?.hue !== undefined && tag?.sat !== undefined && tag?.textL !== undefined && tag?.bgL !== undefined) {
           return tag as TagColors
         }
-        // First access - generate and persist random colors
-        const colors = randomTagColors()
-        set((state) => ({
-          tags: {
-            ...state.tags,
-            [tagName]: { ...state.tags[tagName], ...colors },
-          },
-        }))
+        // First access: reuse a color already generated this session for
+        // stability, else generate one. Persist AFTER render (microtask) so we
+        // don't call set()/write localStorage during another component's render.
+        let colors = pendingTagColors.get(tagName)
+        if (!colors) {
+          colors = randomTagColors()
+          pendingTagColors.set(tagName, colors)
+          queueMicrotask(() => {
+            get().setTagColors(tagName, pendingTagColors.get(tagName)!)
+            pendingTagColors.delete(tagName)
+          })
+        }
         return colors
       },
 

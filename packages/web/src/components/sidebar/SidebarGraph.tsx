@@ -130,9 +130,12 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
       return false
     }
 
-    // Try immediately, retry after brief delay if layout not settled yet
+    // Try immediately, retry after brief delay if layout not settled yet.
+    // Capture the timer so it's cleared on unmount (avoids a setState on an
+    // unmounted component if this tears down within 50ms).
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
     if (!updateDimensions()) {
-      setTimeout(updateDimensions, 50)
+      retryTimer = setTimeout(updateDimensions, 50)
     }
 
     // Use ResizeObserver for subsequent changes
@@ -147,7 +150,10 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
     })
 
     observer.observe(container)
-    return () => observer.disconnect()
+    return () => {
+      if (retryTimer !== undefined) clearTimeout(retryTimer)
+      observer.disconnect()
+    }
   }, [loading])
 
   // Handle node click - defined before useEffect that uses it
