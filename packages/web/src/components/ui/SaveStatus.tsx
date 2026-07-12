@@ -46,7 +46,7 @@ const statusConfig: Record<SyncStatus, { label: string; colorVar: string; Icon: 
 }
 
 export function SaveStatus() {
-  const { status } = useSyncStatusStore()
+  const status = useSyncStatusStore((s) => s.status)
   const navigateToPage = usePageStore((state) => state.navigateToPage)
   const config = statusConfig[status]
   const { Icon, colorVar } = config

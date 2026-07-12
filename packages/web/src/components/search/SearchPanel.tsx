@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
+import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useState, useCallback } from 'react'
 import { useUIStore } from '../../stores/uiStore'
 import { usePageStore } from '../../stores/pageStore'
@@ -7,8 +8,8 @@ import type { SearchResult } from '../../types'
 import type { SearchStatus } from '../../lib/api'
 
 function SearchPanel() {
-  const { searchOpen, closeSearch } = useUIStore()
-  const { navigateToPage, navigateToJournal } = usePageStore()
+  const { searchOpen, closeSearch } = useUIStore(useShallow((s) => ({ searchOpen: s.searchOpen, closeSearch: s.closeSearch })))
+  const { navigateToPage, navigateToJournal } = usePageStore(useShallow((s) => ({ navigateToPage: s.navigateToPage, navigateToJournal: s.navigateToJournal })))
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<SearchResult[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)

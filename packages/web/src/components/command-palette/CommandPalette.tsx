@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
+import { useShallow } from 'zustand/react/shallow'
 import { Command } from 'cmdk'
 import { useEffect, useState, useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
@@ -88,9 +89,9 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
-  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty, openTaskManager } = usePageStore()
-  const { toggleSidebar, openSearch, setSidebarMode, pendingContentType, pendingLinkContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore()
-  const { contentTypes } = useSettingsStore()
+  const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty, openTaskManager } = usePageStore(useShallow((s) => ({ loadTodaysJournal: s.loadTodaysJournal, createPage: s.createPage, deletePage: s.deletePage, currentPageName: s.currentPageName, currentPage: s.currentPage, clearRecentFiles: s.clearRecentFiles, updateCurrentPageProperty: s.updateCurrentPageProperty, openTaskManager: s.openTaskManager })))
+  const { toggleSidebar, openSearch, setSidebarMode, pendingContentType, pendingLinkContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore(useShallow((s) => ({ toggleSidebar: s.toggleSidebar, openSearch: s.openSearch, setSidebarMode: s.setSidebarMode, pendingContentType: s.pendingContentType, pendingLinkContentType: s.pendingLinkContentType, clearPendingContentType: s.clearPendingContentType, onSheetCreated: s.onSheetCreated, insertTextAtCursor: s.insertTextAtCursor, openImportDialog: s.openImportDialog })))
+  const contentTypes = useSettingsStore((s) => s.contentTypes)
 
   // Custom content types (excluding built-in page and journal)
   const customContentTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')

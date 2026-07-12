@@ -21,7 +21,7 @@ const typeLabels: Record<ActivityType, string> = {
 }
 
 export function ActivityLog() {
-  const { entries } = useActivityLogStore()
+  const entries = useActivityLogStore((s) => s.entries)
   const [isExpanded, setIsExpanded] = useState(false)
 
   // Get the most recent entry for collapsed view

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Knowledge graph visualization using d3-force
 
+import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
 import { select } from 'd3-selection'
@@ -59,7 +60,7 @@ function SidebarGraph({ onBack }: SidebarGraphProps) {
   const [error, setError] = useState<string | null>(null)
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 })
 
-  const { navigateToPage, navigateToJournal, currentPageName } = usePageStore()
+  const { navigateToPage, navigateToJournal, currentPageName } = usePageStore(useShallow((s) => ({ navigateToPage: s.navigateToPage, navigateToJournal: s.navigateToJournal, currentPageName: s.currentPageName })))
 
   // Build color map for content types
   const contentTypeColors = useMemo(() => {

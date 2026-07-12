@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Hook to apply themes based on user settings
 
+import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useState } from 'react'
 import { useSettingsStore } from '../stores/settingsStore'
 import {
@@ -15,13 +16,16 @@ import {
 } from '../lib/themes'
 
 export function useTheme() {
-  const {
-    themeMode,
-    lightThemeName,
-    darkThemeName,
-    customLightTheme,
-    customDarkTheme,
-  } = useSettingsStore()
+  const { themeMode, lightThemeName, darkThemeName, customLightTheme, customDarkTheme } =
+    useSettingsStore(
+      useShallow((s) => ({
+        themeMode: s.themeMode,
+        lightThemeName: s.lightThemeName,
+        darkThemeName: s.darkThemeName,
+        customLightTheme: s.customLightTheme,
+        customDarkTheme: s.customDarkTheme,
+      }))
+    )
 
   const [systemPreference, setSystemPreference] = useState<'light' | 'dark'>(
     getSystemThemePreference
@@ -68,7 +72,7 @@ export function useTheme() {
   }, [currentTheme])
 
   // Apply font size when it changes
-  const { fontSizePreset, customFontSize, getEffectiveFontSize } = useSettingsStore()
+  const { fontSizePreset, customFontSize, getEffectiveFontSize } = useSettingsStore(useShallow((s) => ({ fontSizePreset: s.fontSizePreset, customFontSize: s.customFontSize, getEffectiveFontSize: s.getEffectiveFontSize })))
   useEffect(() => {
     document.documentElement.style.fontSize = `${getEffectiveFontSize()}px`
   }, [fontSizePreset, customFontSize, getEffectiveFontSize])

@@ -83,7 +83,7 @@ export function ImportErrorEditor({
   const saveImportError = usePageStore((state) => state.saveImportError)
   const discardImportError = usePageStore((state) => state.discardImportError)
   const closeImportErrorEditor = usePageStore((state) => state.closeImportErrorEditor)
-  const { contentTypes } = useSettingsStore()
+  const contentTypes = useSettingsStore((s) => s.contentTypes)
 
   // Parse the filename for both date and title
   const parsedFilename = useMemo(() => parseFilenameForDateAndTitle(originalName), [originalName])

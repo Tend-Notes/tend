@@ -8,6 +8,7 @@
 // Code fence detection scans blocks to identify ``` regions for visual treatment.
 
 import { useMemo, useEffect, useCallback, useState, useRef, memo } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { Page, Block } from '../../../types'
 import { usePageStore } from '../../../stores/pageStore'
 import { useSelectionStore } from '../../../stores/selectionStore'
@@ -370,11 +371,13 @@ export function Plots({ page, readonly = false, onBlocksChange }: PlotsProps) {
 
   // Use onBlocksChange if provided (for template editing), otherwise use store's updateCurrentPage
   const updateCurrentPage = onBlocksChange ?? updateCurrentPageFromStore
-  const {
-    setFocusedBlock,
-    clearSelection,
-    isInSelection,
-  } = useSelectionStore()
+  const { setFocusedBlock, clearSelection, isInSelection } = useSelectionStore(
+    useShallow((s) => ({
+      setFocusedBlock: s.setFocusedBlock,
+      clearSelection: s.clearSelection,
+      isInSelection: s.isInSelection,
+    }))
+  )
   // Subscribe to selection state changes to trigger re-renders
   const anchorUuid = useSelectionStore((state) => state.anchorUuid)
   const focusUuid = useSelectionStore((state) => state.focusUuid)

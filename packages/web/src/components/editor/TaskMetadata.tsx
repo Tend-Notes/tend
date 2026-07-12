@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Inline task metadata component for displaying and editing due date, start date, and priority
 
+import { useShallow } from 'zustand/react/shallow'
 import { useState, useMemo } from 'react'
 import { DatePickerPopover } from '../ui/DatePickerPopover'
 import { PriorityPickerPopover, getPriorityDisplay } from '../ui/PriorityPickerPopover'
@@ -44,7 +45,7 @@ export function TaskMetadata({ blockUuid, properties, onPropertyChange, isComple
   const [showPriorityPicker, setShowPriorityPicker] = useState(false)
   const [showWorkLog, setShowWorkLog] = useState(false)
 
-  const { activeSession, startSession } = useWorkSessionStore()
+  const { activeSession, startSession } = useWorkSessionStore(useShallow((s) => ({ activeSession: s.activeSession, startSession: s.startSession })))
   const currentPage = usePageStore((state) => state.currentPage)
 
   // Check if this task is the currently active work session

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
+import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
@@ -25,7 +26,7 @@ import { SelectionPill } from '../editor/SelectionPill'
 import { TaskManagerPage } from '../tasks/TaskManagerPage'
 
 export function MainContent() {
-  const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore()
+  const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore(useShallow((s) => ({ currentPage: s.currentPage, isLoading: s.isLoading, initialized: s.initialized, error: s.error, editingTemplate: s.editingTemplate, editingImportError: s.editingImportError })))
   const viewingTasks = usePageStore((s) => s.viewingTasks)
   const useLegacyEditor = useSettingsStore((s) => s.useLegacyEditor)
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)

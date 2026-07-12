@@ -4,6 +4,7 @@
 // Renders as a floating popup when user types /
 // Shows filtered list of commands and allows selection
 
+import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { EditorView } from '@codemirror/view'
@@ -49,7 +50,7 @@ export function SlashCommandSuggestions({ view, state }: SlashCommandSuggestions
   const popupRef = useRef<HTMLDivElement>(null)
   const taskStatusSet = useSettingsStore((s) => s.taskStatusSet)
   const contentTypes = useSettingsStore((s) => s.contentTypes)
-  const { openCommandPaletteForContentType, openCommandPaletteForLinking } = useUIStore()
+  const { openCommandPaletteForContentType, openCommandPaletteForLinking } = useUIStore(useShallow((s) => ({ openCommandPaletteForContentType: s.openCommandPaletteForContentType, openCommandPaletteForLinking: s.openCommandPaletteForLinking })))
 
   // Custom content types (excluding built-in page and journal)
   const customContentTypes = contentTypes.filter(ct => ct.id !== 'page' && ct.id !== 'journal')

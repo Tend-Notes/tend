@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Sidebar todos panel - aggregates all tasks across pages
 
+import { useShallow } from 'zustand/react/shallow'
 import { useState, useEffect, useMemo } from 'react'
 import { type TaskItem } from '../../lib/api'
 import { useTaskStore } from '../../stores/taskStore'
@@ -61,7 +62,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
     }
   }, [todoFilter, setTodoFilter])
 
-  const { navigateToPage, navigateToJournal, setPendingScrollTarget } = usePageStore()
+  const { navigateToPage, navigateToJournal, setPendingScrollTarget } = usePageStore(useShallow((s) => ({ navigateToPage: s.navigateToPage, navigateToJournal: s.navigateToJournal, setPendingScrollTarget: s.setPendingScrollTarget })))
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
 
   // Filter tasks
