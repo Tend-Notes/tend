@@ -251,15 +251,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
     onOpenChange(false)
   }
 
-  // Toggle free text mode (hides bullets and indentation via CSS)
-  const handleToggleFreeTextMode = useCallback(async () => {
-    if (!currentPage) return
-
-    const currentlyEnabled = currentPage.properties?.freeText === 'true'
-    await updateCurrentPageProperty('freeText', currentlyEnabled ? null : 'true')
-    onOpenChange(false)
-  }, [currentPage, updateCurrentPageProperty, onOpenChange])
-
   // Convert a blank, non-journal page into Longform Mode (a single wall-of-text
   // block, edited without bullets). Only offered on blank pages so there's no
   // outline-to-prose migration to do.
@@ -310,9 +301,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setStabilizing(false)
     }
   }, [onOpenChange])
-
-  // Check if free text mode is currently enabled
-  const isFreeTextEnabled = currentPage?.properties?.freeText === 'true'
 
   // Longform conversion is offered only on a blank, non-journal page that isn't
   // already longform (blank = no blocks, or a single empty block).
@@ -583,14 +571,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               >
                 Purge recent file list
               </CommandItem>
-              {currentPage && (
-                <CommandItem
-                  onSelect={handleToggleFreeTextMode}
-                  value="toggle free text mode bullets outline"
-                >
-                  {isFreeTextEnabled ? 'Disable free text mode' : 'Enable free text mode'}
-                </CommandItem>
-              )}
               {canConvertToLongform && (
                 <CommandItem
                   onSelect={handleConvertToLongform}
