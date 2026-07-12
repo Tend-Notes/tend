@@ -7,7 +7,20 @@
 // `line` is a block's editable content (source markdown, styled by decorations).
 // Bullets/nesting are structure — non-editable chrome — never text.
 
-import { Schema } from 'prosemirror-model'
+import { Schema, type NodeSpec } from 'prosemirror-model'
+
+// A block's own editable content (one logical block of markdown text). Shared
+// verbatim with the flat longform schema so decorations (which key off the
+// `div.block-content` DOM and the `line` node name) behave identically in both.
+export const lineNodeSpec: NodeSpec = {
+  content: 'text*',
+  toDOM() {
+    return ['div', { class: 'block-content' }, 0]
+  },
+  parseDOM: [{ tag: 'div.block-content' }],
+}
+
+export const textNodeSpec: NodeSpec = {}
 
 export const outlineSchema = new Schema({
   nodes: {
@@ -55,16 +68,9 @@ export const outlineSchema = new Schema({
       ],
     },
 
-    // A block's own editable content (one logical block of markdown text).
-    line: {
-      content: 'text*',
-      toDOM() {
-        return ['div', { class: 'block-content' }, 0]
-      },
-      parseDOM: [{ tag: 'div.block-content' }],
-    },
+    line: lineNodeSpec,
 
-    text: {},
+    text: textNodeSpec,
   },
 })
 
