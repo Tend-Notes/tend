@@ -1,13 +1,28 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Backlinks panel - shows pages/blocks that link to the current page
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { BacklinkRef } from '../../types'
 import * as api from '../../lib/api'
 import { usePageStore } from '../../stores/pageStore'
 
 interface BacklinksPanelProps {
   pageName: string
+}
+
+// The panel is keyed by page name in MainContent, so it remounts and refetches
+// on every navigation. Cache results briefly so revisiting a page (or bouncing
+// between two) doesn't refetch each time.
+const BACKLINKS_TTL_MS = 30_000
+const BACKLINKS_CACHE_MAX = 200
+const backlinksCache = new Map<string, { refs: BacklinkRef[]; timestamp: number }>()
+
+function cacheBacklinks(pageName: string, refs: BacklinkRef[]): void {
+  backlinksCache.set(pageName, { refs, timestamp: Date.now() })
+  if (backlinksCache.size > BACKLINKS_CACHE_MAX) {
+    const oldest = backlinksCache.keys().next().value
+    if (oldest !== undefined) backlinksCache.delete(oldest)
+  }
 }
 
 export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
@@ -19,11 +34,20 @@ export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
   useEffect(() => {
     if (!pageName) return
 
+    // Serve from cache within the TTL so revisiting a page doesn't refetch.
+    const cached = backlinksCache.get(pageName)
+    if (cached && Date.now() - cached.timestamp < BACKLINKS_TTL_MS) {
+      setBacklinks(cached.refs)
+      setIsLoading(false)
+      return
+    }
+
     let cancelled = false
     setIsLoading(true)
 
     api.pages.getBacklinks(pageName)
       .then((refs) => {
+        cacheBacklinks(pageName, refs)
         if (!cancelled) {
           setBacklinks(refs)
         }
@@ -45,24 +69,29 @@ export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
     }
   }, [pageName])
 
-  // Group backlinks by page
-  const groupedBacklinks = backlinks.reduce(
-    (acc, ref) => {
-      if (!acc[ref.pageName]) {
-        acc[ref.pageName] = {
-          pageTitle: ref.pageTitle,
-          isJournal: ref.isJournal,
-          journalDate: ref.journalDate,
-          blocks: [],
-        }
-      }
-      acc[ref.pageName].blocks.push({
-        uuid: ref.blockUuid,
-        content: ref.blockContent,
-      })
-      return acc
-    },
-    {} as Record<string, { pageTitle: string; isJournal: boolean; journalDate: string | null; blocks: { uuid: string; content: string }[] }>
+  // Group backlinks by page (memoized: only recompute when the refs change,
+  // not on every render/collapse toggle).
+  const groupedBacklinks = useMemo(
+    () =>
+      backlinks.reduce(
+        (acc, ref) => {
+          if (!acc[ref.pageName]) {
+            acc[ref.pageName] = {
+              pageTitle: ref.pageTitle,
+              isJournal: ref.isJournal,
+              journalDate: ref.journalDate,
+              blocks: [],
+            }
+          }
+          acc[ref.pageName].blocks.push({
+            uuid: ref.blockUuid,
+            content: ref.blockContent,
+          })
+          return acc
+        },
+        {} as Record<string, { pageTitle: string; isJournal: boolean; journalDate: string | null; blocks: { uuid: string; content: string }[] }>
+      ),
+    [backlinks]
   )
 
   const pageCount = Object.keys(groupedBacklinks).length
@@ -153,26 +182,31 @@ export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
  * Uses React elements instead of dangerouslySetInnerHTML to prevent XSS.
  */
 function HighlightedContent({ content, currentPageName }: { content: string; currentPageName: string }) {
-  // Parse content into segments: text and wiki-links
-  const segments: Array<{ type: 'text' | 'link'; value: string }> = []
-  const linkRegex = /\[\[([^\]]+)\]\]/g
-  let lastIndex = 0
-  let match
+  // Parse content into segments: text and wiki-links. Memoized so the regex
+  // scan only runs when the content changes, not on every parent re-render
+  // (e.g. collapse toggles).
+  const segments = useMemo(() => {
+    const segs: Array<{ type: 'text' | 'link'; value: string }> = []
+    const linkRegex = /\[\[([^\]]+)\]\]/g
+    let lastIndex = 0
+    let match
 
-  while ((match = linkRegex.exec(content)) !== null) {
-    // Add text before this match
-    if (match.index > lastIndex) {
-      segments.push({ type: 'text', value: content.slice(lastIndex, match.index) })
+    while ((match = linkRegex.exec(content)) !== null) {
+      // Add text before this match
+      if (match.index > lastIndex) {
+        segs.push({ type: 'text', value: content.slice(lastIndex, match.index) })
+      }
+      // Add the link
+      segs.push({ type: 'link', value: match[1] })
+      lastIndex = match.index + match[0].length
     }
-    // Add the link
-    segments.push({ type: 'link', value: match[1] })
-    lastIndex = match.index + match[0].length
-  }
 
-  // Add remaining text
-  if (lastIndex < content.length) {
-    segments.push({ type: 'text', value: content.slice(lastIndex) })
-  }
+    // Add remaining text
+    if (lastIndex < content.length) {
+      segs.push({ type: 'text', value: content.slice(lastIndex) })
+    }
+    return segs
+  }, [content])
 
   return (
     <>
