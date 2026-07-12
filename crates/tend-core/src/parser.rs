@@ -46,6 +46,23 @@ static PROPERTY_RE: LazyLock<Regex> =
 
 /// Parse a Markdown file into a Page
 ///
+/// Count the blocks in a markdown document without building the block tree.
+///
+/// A block is exactly one bullet line (`- …`) in the body, so this equals
+/// `parse_markdown(content, _).blocks.len()` but skips all the expensive work
+/// (block/UUID/property parsing, the tree + hashmap). Used by metadata-only
+/// listing so the sidebar/graph don't parse full bodies just for a count.
+pub fn count_blocks(content: &str) -> usize {
+    let parsed = parse_content_with_footer(content);
+    parsed
+        .markdown
+        .lines()
+        .filter(|line| BULLET_RE.is_match(line))
+        .count()
+}
+
+/// Parse a Markdown file into a Page
+///
 /// Supports two UUID sources (in order of preference):
 /// 1. Embedded footer (`<!-- tend:blocks ... -->`)
 /// 2. Inline Logseq-style properties (`id:: uuid`)
@@ -262,6 +279,29 @@ pub fn is_journal_filename(filename: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn count_blocks_matches_full_parse() {
+        // count_blocks must equal parse_markdown(...).blocks.len() for the
+        // metadata-only listing to produce identical block_count.
+        let cases = [
+            "",
+            "- one",
+            "- a\n- b\n- c",
+            "- parent\n  - child\n  - child2\n- sibling",
+            "page-prop:: x\n- first\n- second",
+            "- ```js\ncode line\nnot a bullet\n```\n- after",
+            "- with props\n  key:: value\n  collapsed:: true\n- next",
+        ];
+        for content in cases {
+            let parsed = parse_markdown(content, "T").unwrap();
+            assert_eq!(
+                count_blocks(content),
+                parsed.blocks.len(),
+                "count mismatch for {content:?}"
+            );
+        }
+    }
 
     #[test]
     fn test_parse_simple_page() {

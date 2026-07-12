@@ -138,6 +138,65 @@ pub(crate) fn sheet_ref_meta(
     }
 }
 
+/// Read (created, modified) timestamps for a file, mirroring how `read_sheet`
+/// sets them (fs metadata, falling back to `now` when unavailable).
+pub(crate) async fn file_timestamps(
+    path: &Path,
+) -> (chrono::DateTime<Utc>, chrono::DateTime<Utc>) {
+    let now = Utc::now();
+    match tokio::fs::metadata(path).await {
+        Ok(meta) => (
+            meta.created().map(Into::into).unwrap_or(now),
+            meta.modified().map(Into::into).unwrap_or(now),
+        ),
+        Err(_) => (now, now),
+    }
+}
+
+/// Build the full `PageMeta` for a sheet from its name/date + a block count +
+/// file timestamps, WITHOUT parsing the body — mirroring exactly the metadata
+/// `read_sheet` + `PageMeta::from` produce (only `block_count` needs the body,
+/// and it's counted cheaply). See the `sheet_meta_matches_read_sheet` test.
+pub(crate) fn sheet_meta(
+    content_type: &ContentType,
+    bare_name: &str,
+    date: Option<NaiveDate>,
+    block_count: usize,
+    created_at: chrono::DateTime<Utc>,
+    modified_at: chrono::DateTime<Utc>,
+) -> PageMeta {
+    // For date-named types (journals) the name IS the date.
+    let resolved_date = if content_type.is_date_named() {
+        NaiveDate::parse_from_str(bare_name, "%Y-%m-%d").ok()
+    } else {
+        date
+    };
+    let is_journal = content_type.id == "journal";
+    let title = if is_journal {
+        resolved_date
+            .map(|d| d.format("%A, %B %-d, %Y").to_string())
+            .unwrap_or_else(|| bare_name.to_string())
+    } else {
+        bare_name.to_string()
+    };
+    // journal_date is set for journals and for any date-foldered type.
+    let journal_date = if is_journal || content_type.is_date_foldered() {
+        resolved_date
+    } else {
+        None
+    };
+    PageMeta {
+        name: tend_core::qualify_name(content_type, bare_name, resolved_date),
+        title,
+        content_type: content_type.id.clone(),
+        is_journal,
+        journal_date,
+        block_count,
+        created_at,
+        modified_at,
+    }
+}
+
 impl FileManager {
     /// Create a new FileManager for the given root directory
     pub fn new(root: impl AsRef<Path>) -> Result<Self, StorageError> {
@@ -332,7 +391,7 @@ impl FileManager {
     async fn collect_sheet_refs(
         &self,
         content_type: &ContentType,
-    ) -> Result<Vec<(String, Option<NaiveDate>)>, StorageError> {
+    ) -> Result<Vec<(String, Option<NaiveDate>, PathBuf)>, StorageError> {
         let base_dir = self.root.join(&content_type.directory);
 
         if !base_dir.exists() {
@@ -358,7 +417,7 @@ impl FileManager {
                         let path = entry.path();
                         if path.extension().is_some_and(|e| e == "md") {
                             if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
-                                refs.push((decode_filename(raw_name), date));
+                                refs.push((decode_filename(raw_name), date, path));
                             }
                         }
                     }
@@ -388,7 +447,7 @@ impl FileManager {
                         None => continue,
                     }
                 };
-                refs.push((name, None));
+                refs.push((name, None, path));
             }
         }
 
@@ -405,20 +464,26 @@ impl FileManager {
             .collect_sheet_refs(content_type)
             .await?
             .into_iter()
-            .map(|(name, date)| sheet_ref_meta(content_type, &name, date))
+            .map(|(name, date, _)| sheet_ref_meta(content_type, &name, date))
             .collect())
     }
 
     pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
         let refs = self.collect_sheet_refs(content_type).await?;
         let mut sheets = Vec::with_capacity(refs.len());
-        for (name, date) in refs {
-            match self.read_sheet(content_type, &name, date).await {
-                Ok(page) => sheets.push(PageMeta::from(&page)),
+        for (name, date, path) in refs {
+            // Metadata only (PERF-02): read the body to count blocks, but skip
+            // parse_markdown (no block tree / UUID / property parsing).
+            let content = match tokio::fs::read_to_string(&path).await {
+                Ok(c) => c,
                 Err(e) => {
                     debug!("Failed to read sheet {}/{}: {}", content_type.id, name, e);
+                    continue;
                 }
-            }
+            };
+            let block_count = tend_core::parser::count_blocks(&content);
+            let (created_at, modified_at) = file_timestamps(&path).await;
+            sheets.push(sheet_meta(content_type, &name, date, block_count, created_at, modified_at));
         }
 
         // Date-named types sort by date; everything else by modified time.
@@ -760,6 +825,43 @@ mod tests {
 
         // A missing custom-flat sheet is a NotFound, not an empty page.
         assert!(fm.read_sheet(&flat_type(), "Nope", None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_sheets_metadata_matches_read_sheet_parse() {
+        let (_temp, fm) = setup().await;
+
+        // A regular page with a few blocks.
+        let mut page = Page::new("My Page");
+        page.add_block(tend_core::Block::new("first"));
+        page.add_block(tend_core::Block::new("second"));
+        page.add_block(tend_core::Block::new("third"));
+        fm.write_sheet(&ContentType::page(), &page, None).await.unwrap();
+
+        // A journal (exercises the date title / is_journal / journal_date path).
+        let date = NaiveDate::from_ymd_opt(2026, 1, 18).unwrap();
+        let mut j = Page::new_journal(date);
+        j.add_block(tend_core::Block::new("entry one"));
+        j.add_block(tend_core::Block::new("entry two"));
+        fm.write_sheet(&ContentType::journal(), &j, Some(date)).await.unwrap();
+
+        // The metadata-only list_sheets must equal PageMeta::from(read_sheet)
+        // field-for-field (only block_count needs the body; it's counted).
+        for ct in [ContentType::page(), ContentType::journal()] {
+            let metas = fm.list_sheets(&ct).await.unwrap();
+            assert!(!metas.is_empty());
+            for meta in &metas {
+                let (bare, _) = tend_core::split_name(&ct, &meta.name);
+                let full = PageMeta::from(&fm.read_sheet(&ct, bare, meta.journal_date).await.unwrap());
+                assert_eq!(meta.name, full.name, "name");
+                assert_eq!(meta.title, full.title, "title");
+                assert_eq!(meta.is_journal, full.is_journal, "is_journal");
+                assert_eq!(meta.journal_date, full.journal_date, "journal_date");
+                assert_eq!(meta.content_type, full.content_type, "content_type");
+                assert_eq!(meta.block_count, full.block_count, "block_count");
+                assert_eq!(meta.modified_at, full.modified_at, "modified_at");
+            }
+        }
     }
 
     #[tokio::test]
