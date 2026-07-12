@@ -390,12 +390,37 @@ impl EncryptedFileManager {
 
     /// List all encrypted sheets of a content type (one code path, driven by `organization`).
     pub async fn list_sheets(&self, content_type: &ContentType) -> Result<Vec<PageMeta>, StorageError> {
-        let mut sheets: Vec<PageMeta> = self
-            .collect_sheets(content_type)
-            .await?
-            .iter()
-            .map(PageMeta::from)
-            .collect();
+        let refs = self.collect_sheet_refs(content_type).await?;
+        let mut sheets = Vec::with_capacity(refs.len());
+        for (name, date, path) in refs {
+            // Metadata only (PERF-02): decrypt to count blocks, but skip
+            // parse_markdown (no block tree). The decrypt is unavoidable for the
+            // count; skipping the parse still saves the per-file tree build.
+            let encrypted = match tokio::fs::read(&path).await {
+                Ok(b) => b,
+                Err(e) => {
+                    debug!("Failed to read encrypted sheet {}/{}: {}", content_type.id, name, e);
+                    continue;
+                }
+            };
+            let content = match self.decrypt_file(&encrypted) {
+                Ok(c) => c,
+                Err(e) => {
+                    debug!("Failed to decrypt sheet {}/{}: {}", content_type.id, name, e);
+                    continue;
+                }
+            };
+            let block_count = tend_core::parser::count_blocks(&content);
+            let (created_at, modified_at) = crate::fs::file_timestamps(&path).await;
+            sheets.push(crate::fs::sheet_meta(
+                content_type,
+                &name,
+                date,
+                block_count,
+                created_at,
+                modified_at,
+            ));
+        }
 
         if content_type.is_date_named() {
             sheets.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
@@ -423,7 +448,7 @@ impl EncryptedFileManager {
     async fn collect_sheet_refs(
         &self,
         content_type: &ContentType,
-    ) -> Result<Vec<(String, Option<NaiveDate>)>, StorageError> {
+    ) -> Result<Vec<(String, Option<NaiveDate>, PathBuf)>, StorageError> {
         let base_dir = self.root.join(&content_type.directory);
 
         if !base_dir.exists() {
@@ -448,7 +473,7 @@ impl EncryptedFileManager {
                         let path = entry.path();
                         if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
                             if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
-                                refs.push((decode_filename(raw_name), date));
+                                refs.push((decode_filename(raw_name), date, path.clone()));
                             }
                         }
                     }
@@ -479,7 +504,7 @@ impl EncryptedFileManager {
                     };
                     decode_filename(raw_name)
                 };
-                refs.push((name, None));
+                refs.push((name, None, path));
             }
         }
 
@@ -498,14 +523,14 @@ impl EncryptedFileManager {
             .collect_sheet_refs(content_type)
             .await?
             .into_iter()
-            .map(|(name, date)| crate::fs::sheet_ref_meta(content_type, &name, date))
+            .map(|(name, date, _)| crate::fs::sheet_ref_meta(content_type, &name, date))
             .collect())
     }
 
     async fn collect_sheets(&self, content_type: &ContentType) -> Result<Vec<Page>, StorageError> {
         let refs = self.collect_sheet_refs(content_type).await?;
         let mut pages = Vec::with_capacity(refs.len());
-        for (name, date) in refs {
+        for (name, date, _) in refs {
             match self.read_sheet(content_type, &name, date).await {
                 Ok(page) => pages.push(page),
                 Err(e) => {
