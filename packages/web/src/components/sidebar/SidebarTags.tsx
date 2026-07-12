@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Sidebar tags panel - shows all tags with option to view/edit tag details
 
+import { useShallow } from 'zustand/react/shallow'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useTagStore } from '../../stores/tagStore'
 import { usePageStore } from '../../stores/pageStore'
@@ -13,8 +14,8 @@ interface SidebarTagsProps {
 type SortMode = 'alpha' | 'count'
 
 export function SidebarTags({ onBack }: SidebarTagsProps) {
-  const { getTagColors, setTagColors } = useTagStore()
-  const { currentPage, navigateToPage } = usePageStore()
+  const { getTagColors, setTagColors } = useTagStore(useShallow((s) => ({ getTagColors: s.getTagColors, setTagColors: s.setTagColors })))
+  const { currentPage, navigateToPage } = usePageStore(useShallow((s) => ({ currentPage: s.currentPage, navigateToPage: s.navigateToPage })))
 
   // Tag currently being color-edited (inline)
   const [editingColorTag, setEditingColorTag] = useState<string | null>(null)

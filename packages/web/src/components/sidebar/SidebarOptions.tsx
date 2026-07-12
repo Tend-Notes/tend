@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Sidebar options view - settings and configuration
 
+import { useShallow } from 'zustand/react/shallow'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, usesDate, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
@@ -49,7 +50,7 @@ export function redactRemoteUrl(url: string): string {
 }
 
 export function SidebarOptions({ onBack }: SidebarOptionsProps) {
-  const { openSection, setOpenSection } = useSettingsStore()
+  const { openSection, setOpenSection } = useSettingsStore(useShallow((s) => ({ openSection: s.openSection, setOpenSection: s.setOpenSection })))
 
   const handleSectionClick = (sectionId: SectionId) => {
     setOpenSection(openSection === sectionId ? null : sectionId)
@@ -177,7 +178,26 @@ function AppearanceSection() {
     setCustomFontSize,
     useLegacyEditor,
     setUseLegacyEditor,
-  } = useSettingsStore()
+  } = useSettingsStore(
+    useShallow((s) => ({
+      themeMode: s.themeMode,
+      setThemeMode: s.setThemeMode,
+      lightThemeName: s.lightThemeName,
+      darkThemeName: s.darkThemeName,
+      setLightThemeName: s.setLightThemeName,
+      setDarkThemeName: s.setDarkThemeName,
+      customLightTheme: s.customLightTheme,
+      customDarkTheme: s.customDarkTheme,
+      setCustomLightTheme: s.setCustomLightTheme,
+      setCustomDarkTheme: s.setCustomDarkTheme,
+      fontSizePreset: s.fontSizePreset,
+      setFontSizePreset: s.setFontSizePreset,
+      customFontSize: s.customFontSize,
+      setCustomFontSize: s.setCustomFontSize,
+      useLegacyEditor: s.useLegacyEditor,
+      setUseLegacyEditor: s.setUseLegacyEditor,
+    }))
+  )
 
   const [showCustomFontSize, setShowCustomFontSize] = useState(fontSizePreset === 'custom')
   const [showThemePicker, setShowThemePicker] = useState<'light' | 'dark' | null>(null)
@@ -637,7 +657,7 @@ palette:
 
 // Tasks section
 function TasksSection() {
-  const { taskStatusSet, setTaskStatusSet } = useSettingsStore()
+  const { taskStatusSet, setTaskStatusSet } = useSettingsStore(useShallow((s) => ({ taskStatusSet: s.taskStatusSet, setTaskStatusSet: s.setTaskStatusSet })))
 
   const statusSetLabels: Record<TaskStatusSet, string> = {
     'todo-doing-done': 'TODO / DOING / DONE',
@@ -821,12 +841,15 @@ function RemoteStatusIcon({ status, message }: { status: RemoteStatus; message?:
 
 // Backup section
 function BackupSection() {
-  const {
-    backupEnabled,
-    setBackupEnabled,
-    backupIntervalMinutes,
-    setBackupIntervalMinutes,
-  } = useSettingsStore()
+  const { backupEnabled, setBackupEnabled, backupIntervalMinutes, setBackupIntervalMinutes } =
+    useSettingsStore(
+      useShallow((s) => ({
+        backupEnabled: s.backupEnabled,
+        setBackupEnabled: s.setBackupEnabled,
+        backupIntervalMinutes: s.backupIntervalMinutes,
+        setBackupIntervalMinutes: s.setBackupIntervalMinutes,
+      }))
+    )
 
   const [remoteUrl, setRemoteUrl] = useState<string | null>(null)
   const [editingRemote, setEditingRemote] = useState(false)
@@ -1176,7 +1199,7 @@ function BackupSection() {
 
 // Content Types section - synced with backend
 function ContentTypesSection() {
-  const { contentTypes, setContentTypes, updateContentType, addContentType, removeContentType } = useSettingsStore()
+  const { contentTypes, setContentTypes, updateContentType, addContentType, removeContentType } = useSettingsStore(useShallow((s) => ({ contentTypes: s.contentTypes, setContentTypes: s.setContentTypes, updateContentType: s.updateContentType, addContentType: s.addContentType, removeContentType: s.removeContentType })))
   const openTemplateEditor = usePageStore((state) => state.openTemplateEditor)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1432,7 +1455,7 @@ interface ArchivedGarden {
 
 // Gardens section - manages multiple gardens
 function GardensSection() {
-  const { currentGraphId, setCurrentGraphId } = useSettingsStore()
+  const { currentGraphId, setCurrentGraphId } = useSettingsStore(useShallow((s) => ({ currentGraphId: s.currentGraphId, setCurrentGraphId: s.setCurrentGraphId })))
   const [gardens, setGardens] = useState<{ id: string; name: string; encrypted?: boolean }[]>([])
   const [archivedGardens, setArchivedGardens] = useState<ArchivedGarden[]>([])
   const [loading, setLoading] = useState(true)
@@ -2040,7 +2063,7 @@ function GardensSection() {
 
 // Import section with Import Errors management
 function ImportSection() {
-  const { openImportDialog } = useUIStore()
+  const openImportDialog = useUIStore((s) => s.openImportDialog)
   const openImportErrorEditor = usePageStore((state) => state.openImportErrorEditor)
   const [view, setView] = useState<'main' | 'errors'>('main')
   const [errors, setErrors] = useState<{ name: string; originalName: string; error: string; timestamp: string }[]>([])

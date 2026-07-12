@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Work timer banner - shows active task timer at top of app
 
+import { useShallow } from 'zustand/react/shallow'
 import { useState, useEffect, useCallback } from 'react'
 import { useWorkSessionStore, type WorkLogEntry, type WorkSession } from '../../stores/workSessionStore'
 import { usePageStore } from '../../stores/pageStore'
@@ -80,8 +81,8 @@ async function saveWorkLogToBlock(
 }
 
 export function WorkTimerBanner() {
-  const { activeSession, showContinuePrompt, pauseSession, resumeSession, clearSession } = useWorkSessionStore()
-  const { navigateToPage, navigateToJournal } = usePageStore()
+  const { activeSession, showContinuePrompt, pauseSession, resumeSession, clearSession } = useWorkSessionStore(useShallow((s) => ({ activeSession: s.activeSession, showContinuePrompt: s.showContinuePrompt, pauseSession: s.pauseSession, resumeSession: s.resumeSession, clearSession: s.clearSession })))
+  const { navigateToPage, navigateToJournal } = usePageStore(useShallow((s) => ({ navigateToPage: s.navigateToPage, navigateToJournal: s.navigateToJournal })))
   const [elapsed, setElapsed] = useState(0)
   const [showStopDialog, setShowStopDialog] = useState(false)
   const [stopNotes, setStopNotes] = useState('')

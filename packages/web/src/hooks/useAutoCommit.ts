@@ -3,6 +3,7 @@
 // Skipped in demo mode since there's no git backend.
 
 import { useEffect, useRef, useCallback } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useGitStore, SMART_THRESHOLDS } from '../stores/gitStore'
 import { usePageStore } from '../stores/pageStore'
 import { useActivityLogStore } from '../stores/activityLogStore'
@@ -24,9 +25,19 @@ export function useAutoCommit() {
     smartCommitWindowChars,
     recordCharacterChange,
     recordCommit,
-  } = useGitStore()
+  } = useGitStore(
+    useShallow((s) => ({
+      autoCommitIntervalMinutes: s.autoCommitIntervalMinutes,
+      smartCommitThreshold: s.smartCommitThreshold,
+      autoCommitEnabled: s.autoCommitEnabled,
+      lastCommitTime: s.lastCommitTime,
+      smartCommitWindowChars: s.smartCommitWindowChars,
+      recordCharacterChange: s.recordCharacterChange,
+      recordCommit: s.recordCommit,
+    }))
+  )
 
-  const { currentPage } = usePageStore()
+  const currentPage = usePageStore((s) => s.currentPage)
   const addLogEntry = useActivityLogStore((state) => state.addEntry)
 
   // Track previous character count to detect changes

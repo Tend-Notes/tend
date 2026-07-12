@@ -38,7 +38,7 @@ function getIntensityLevel(blockCount: number): number {
 }
 
 export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = true, align = 'left' }: HeatmapCalendarProps) {
-  const { navigateToJournal } = usePageStore()
+  const navigateToJournal = usePageStore((s) => s.navigateToJournal)
   const [journals, setJournals] = useState<PageMeta[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const popoverRef = useRef<HTMLDivElement>(null)

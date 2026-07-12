@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Backlinks panel - shows pages/blocks that link to the current page
 
+import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useMemo, useState } from 'react'
 import type { BacklinkRef } from '../../types'
 import * as api from '../../lib/api'
@@ -29,7 +30,7 @@ export function BacklinksPanel({ pageName }: BacklinksPanelProps) {
   const [backlinks, setBacklinks] = useState<BacklinkRef[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCollapsed, setIsCollapsed] = useState(false)
-  const { navigateToPage, navigateToJournal } = usePageStore()
+  const { navigateToPage, navigateToJournal } = usePageStore(useShallow((s) => ({ navigateToPage: s.navigateToPage, navigateToJournal: s.navigateToJournal })))
 
   useEffect(() => {
     if (!pageName) return

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
+import { useShallow } from 'zustand/react/shallow'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore, type SidebarMode } from '../../stores/uiStore'
@@ -66,9 +67,9 @@ interface SidebarProps {
 export function Sidebar({ mode, onModeChange }: SidebarProps) {
   const { currentPageName, currentPage, navigateToPage, navigateToJournal, loadTodaysJournal } =
     usePageStore()
-  const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar, setTodoFilter } = useUIStore()
-  const { contentTypes } = useSettingsStore()
-  const { recentSheets, recentTags } = useRecentSheetsStore()
+  const { sidebarOpen, sidebarWidth, setSidebarWidth, toggleSidebar, setTodoFilter } = useUIStore(useShallow((s) => ({ sidebarOpen: s.sidebarOpen, sidebarWidth: s.sidebarWidth, setSidebarWidth: s.setSidebarWidth, toggleSidebar: s.toggleSidebar, setTodoFilter: s.setTodoFilter })))
+  const contentTypes = useSettingsStore((s) => s.contentTypes)
+  const { recentSheets, recentTags } = useRecentSheetsStore(useShallow((s) => ({ recentSheets: s.recentSheets, recentTags: s.recentTags })))
   const getTagColors = useTagStore((state) => state.getTagColors)
 
   // Task counts for navigation panel — use shared taskStore to avoid duplicate fetch
