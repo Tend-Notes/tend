@@ -335,7 +335,7 @@ mod tests {
         // A burst of saves within the batching window commits nothing (each
         // maybe_commit defers: < COMMIT_PENDING_THRESHOLD and < COMMIT_INTERVAL).
         for i in 0..10 {
-            let mut page = Page::new(&format!("Page {i}"));
+            let mut page = Page::new(format!("Page {i}"));
             page.add_block(Block::new("hello world"));
             index.index_page(&page).unwrap();
             index.maybe_commit().unwrap();
@@ -354,7 +354,7 @@ mod tests {
     fn maybe_commit_flushes_when_threshold_reached() {
         let mut index = SearchIndex::in_memory().unwrap();
         for i in 0..COMMIT_PENDING_THRESHOLD {
-            let mut page = Page::new(&format!("P{i}"));
+            let mut page = Page::new(format!("P{i}"));
             page.add_block(Block::new("threshold content"));
             index.index_page(&page).unwrap();
             index.maybe_commit().unwrap();
