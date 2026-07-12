@@ -192,7 +192,12 @@ export function TaskManagerPage() {
       : viewedTasks.filter((t) => activePriorities.has((t.priority ?? 'none') as Priority));
 
   return (
-    <div className="flex h-full w-full flex-col bg-base-00 text-base-05">
+    // min-w-0 + overflow-hidden give this flex item an implicit min-width of 0
+    // (like the normal editor <main>), so wide task content can't force the
+    // width up and squeeze the sibling app sidebar to zero (it would otherwise
+    // vanish and the content shift left — seen only in views with wide content,
+    // e.g. Completed).
+    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-base-00 text-base-05">
       <header className="flex items-center justify-between px-6 py-4">
         <h1 className="text-lg font-semibold text-base-06">Tasks</h1>
         <button
@@ -251,7 +256,7 @@ export function TaskManagerPage() {
             </div>
           </div>
         </aside>
-        <main className="flex-1 overflow-y-auto">
+        <main className="flex-1 min-w-0 overflow-y-auto">
           {filteredTasks.length === 0 ? (
             <p className="px-2 py-4 text-sm text-base-04">{emptyMessage(activeView)}</p>
           ) : (
