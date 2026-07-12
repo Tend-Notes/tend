@@ -144,7 +144,12 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
           el.classList.add('block-container--highlight')
           setTimeout(() => el.classList.remove('block-container--highlight'), 2000)
         }
+        return
       }
+      // Otherwise focus the editor on load so you can start typing (and so the
+      // first click lands where you click instead of just focusing — the editor
+      // is already focused, so there's no focus transition to eat the click).
+      if (!readonly) v.focus()
     })
 
     return () => {
