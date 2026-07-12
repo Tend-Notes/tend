@@ -223,7 +223,16 @@ pub struct GardenState {
     pub search_index: Option<Arc<RwLock<SearchIndex>>>,
     /// Link index for efficient backlink lookups
     pub link_index: Arc<RwLock<LinkIndex>>,
-    /// Block index for block reference lookups - None for encrypted gardens
+    /// Block index for block reference lookups - None for encrypted gardens.
+    ///
+    /// PERF-15: this stays a `Mutex` (not `RwLock`) on purpose. `BlockIndex`
+    /// wraps a `rusqlite::Connection`, which is `!Sync` — a SQLite connection
+    /// cannot be used from multiple threads concurrently even for reads, so
+    /// `RwLock<BlockIndex>` would not be `Sync` and couldn't be shared in the
+    /// `Arc`. `lookup` takes `&self`, but the connection still serializes, so a
+    /// read-write lock would buy nothing. Making `((uuid))` lookups truly
+    /// concurrent would require a connection pool (r2d2) or a read-only
+    /// in-memory map — deferred as an architectural change.
     pub block_index: Option<Arc<Mutex<BlockIndex>>>,
     /// Tag index for efficient tag lookups
     pub tag_index: Arc<RwLock<TagIndex>>,
