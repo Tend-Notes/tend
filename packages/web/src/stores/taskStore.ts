@@ -6,6 +6,7 @@ import { immer } from 'zustand/middleware/immer'
 import { todos as todosApi, blocks as blocksApi, type TaskItem } from '../lib/api'
 import type { BlockUpdate } from '../types'
 import { formatDateYMD } from '../lib/dateUtils'
+import { useToastStore } from './toastStore'
 
 export type Task = TaskItem
 
@@ -127,6 +128,9 @@ export const useTaskStore = create<TaskState>()(
     },
 
     updateTask: async (uuid, patch) => {
+      // The task carries its origin page (from /todos); pass it so the server can
+      // locate the block without the block index (works on encrypted gardens).
+      const pageName = get().tasks.find((x) => x.uuid === uuid)?.pageName
       // Optimistically reflect the edit so the row updates immediately; refresh
       // below reconciles with (or reverts to) server truth.
       set((state) => {
@@ -146,7 +150,12 @@ export const useTaskStore = create<TaskState>()(
         }
       })
       try {
-        await blocksApi.update(uuid, patch)
+        await blocksApi.update(uuid, { ...patch, pageName })
+      } catch (err) {
+        // Surface the failure instead of silently snapping the row back.
+        useToastStore
+          .getState()
+          .addToast(`Couldn't update task: ${err instanceof Error ? err.message : String(err)}`, 4000)
       } finally {
         await get().refresh()
       }

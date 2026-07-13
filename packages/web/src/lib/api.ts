@@ -566,7 +566,12 @@ const _blocks = {
   update: (uuid: string, patch: BlockUpdate): Promise<BlockUpdateResult> =>
     fetchJson<BlockUpdateResult>(`${API_BASE}/blocks/${encodeURIComponent(uuid)}`, {
       method: 'PATCH',
-      body: JSON.stringify(patch),
+      body: JSON.stringify({
+        content: patch.content,
+        properties: patch.properties,
+        version: patch.version,
+        page_name: patch.pageName,
+      }),
     }),
 }
 

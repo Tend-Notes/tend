@@ -201,6 +201,9 @@ export interface BlockUpdate {
   content?: string
   properties?: Record<string, string | null>
   version?: number
+  // Origin page name (from /todos). Lets the server locate the block without the
+  // block index, so edits work on encrypted gardens.
+  pageName?: string
 }
 
 // Result of a single-block update.
