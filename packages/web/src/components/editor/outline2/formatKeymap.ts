@@ -11,8 +11,9 @@
 import { Command, TextSelection } from 'prosemirror-state'
 
 // Wrap the selection in `delim` on both sides. With no selection, insert an
-// empty pair and drop the caret between them.
-function wrap(delim: string): Command {
+// empty pair and drop the caret between them. Exported so the touch FormatBar
+// applies the exact same formatting as the Mod-b/i/e keybinds.
+export function wrap(delim: string): Command {
   return (state, dispatch) => {
     const sel = state.selection
     // Only operate within a single text block; a cross-block selection isn't

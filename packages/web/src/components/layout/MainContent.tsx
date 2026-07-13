@@ -3,17 +3,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { useEffect, useState, useRef, useCallback, lazy, Suspense } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
-// Default editor (ProseMirror) loads eagerly; the legacy CodeMirror editor is
-// only pulled in when the user opts into it, keeping it out of the initial chunk.
-const OutlinerEditor = lazy(() =>
-  import('../editor/OutlinerEditor').then((m) => ({ default: m.OutlinerEditor }))
-)
 import { OutlineEditorV2 } from '../editor/outline2/OutlineEditorV2'
 import { LongformEditor } from '../editor/longform/LongformEditor'
-import { useSettingsStore } from '../../stores/settingsStore'
-// TemplateEditor and ImportErrorEditor also build on the legacy CodeMirror
-// stack (via plots/OutlinerEditor) and are only shown on rare edit paths, so
-// they're lazy too — this keeps all of @codemirror out of the initial chunk.
+// TemplateEditor and ImportErrorEditor are only shown on rare edit paths, so
+// they're lazy-loaded to keep them out of the initial chunk.
 const TemplateEditor = lazy(() =>
   import('../editor/TemplateEditor').then((m) => ({ default: m.TemplateEditor }))
 )
@@ -23,13 +16,11 @@ const ImportErrorEditor = lazy(() =>
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
-import { SelectionPill } from '../editor/SelectionPill'
 import { TaskManagerPage } from '../tasks/TaskManagerPage'
 
 export function MainContent() {
   const { currentPage, isLoading, initialized, error, editingTemplate, editingImportError } = usePageStore(useShallow((s) => ({ currentPage: s.currentPage, isLoading: s.isLoading, initialized: s.initialized, error: s.error, editingTemplate: s.editingTemplate, editingImportError: s.editingImportError })))
   const viewingTasks = usePageStore((s) => s.viewingTasks)
-  const useLegacyEditor = useSettingsStore((s) => s.useLegacyEditor)
   const checkGitStatus = useSyncStatusStore((state) => state.checkGitStatus)
   const [showCalendar, setShowCalendar] = useState(false)
 
@@ -172,7 +163,7 @@ export function MainContent() {
         {/* Key changes with page name to trigger crossfade animation */}
         {/* Mobile-first: minimal padding on mobile, constrained width on md+ */}
         {/* pb-[50vh] provides bottom padding so typewriter scroll can center the last line */}
-        <div key={`${currentPage.name}:${currentPage.properties.longform === 'true' ? 'longform' : useLegacyEditor ? 'v1' : 'v2'}`} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
+        <div key={`${currentPage.name}:${currentPage.properties.longform === 'true' ? 'longform' : 'v2'}`} className="page-content px-2 py-3 pb-[50vh] md:max-w-2xl md:mx-auto md:px-6 md:pt-12 md:pb-[50vh]" onAnimationEnd={handlePageChange}>
           {/* Page title with save status */}
           <div className="flex items-center gap-3 mb-8">
             <div className="relative flex items-center gap-2">
@@ -200,15 +191,10 @@ export function MainContent() {
             <SaveStatus />
           </div>
 
-          {/* Editor: Longform Mode (flat wall-of-text) when the page is flagged;
-              otherwise the ProseMirror node-model editor by default, with the
-              legacy per-block CodeMirror editor as a fallback. */}
+          {/* Editor: Longform Mode (flat wall-of-text) when the page is flagged,
+              otherwise the ProseMirror node-model editor. */}
           {currentPage.properties.longform === 'true' ? (
             <LongformEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
-          ) : useLegacyEditor ? (
-            <Suspense fallback={null}>
-              <OutlinerEditor page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
-            </Suspense>
           ) : (
             <OutlineEditorV2 page={currentPage} readonly={currentPage.properties.readonly === 'true'} />
           )}
@@ -219,8 +205,6 @@ export function MainContent() {
           )}
         </div>
       </div>
-
-      <SelectionPill />
     </main>
   )
 }

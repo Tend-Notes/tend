@@ -20,6 +20,7 @@ import { slashMenuKey, type SlashTrigger } from './slashMenuPlugin'
 import { wikiLinkKey, type WikiTrigger } from './wikiLinkPlugin'
 import { SlashMenu } from './SlashMenu'
 import { WikiLinkPopup } from '../WikiLinkPopup'
+import { FormatBar } from './FormatBar'
 // ProseMirror's required base styles — without these Firefox mis-renders the
 // contentEditable and shows no caret (Chromium tolerates their absence).
 import 'prosemirror-view/style/prosemirror.css'
@@ -52,6 +53,10 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
   useEffect(() => {
     if (!wikiTrigger) setWikiDismissedFrom(null)
   }, [wikiTrigger])
+
+  // Flips true once the view exists, so the touch FormatBar mounts (and its
+  // selection listener goes live) even without any other state change.
+  const [viewReady, setViewReady] = useState(false)
 
   // Keep the latest save target in a ref so the view's dispatch closure (built
   // once on mount) always calls the current one.
@@ -111,6 +116,7 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
       },
     })
     viewRef.current = view
+    setViewReady(true)
 
     // PERF-22: load the code-fence highlighter lazily and splice it into the
     // running editor via reconfigure, keeping lowlight + highlight.js languages
@@ -213,6 +219,7 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
         <SlashMenu view={viewRef.current} trigger={slashTrigger} />
       )}
       {wikiPopup}
+      {viewReady && viewRef.current && <FormatBar view={viewRef.current} />}
     </>
   )
 }

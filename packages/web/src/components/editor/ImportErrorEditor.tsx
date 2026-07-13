@@ -5,7 +5,7 @@ import { useCallback, useState, useMemo } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore, usesDate } from '../../stores/settingsStore'
 import type { Page, Block } from '../../types'
-import { Plots } from './plots/Plots'
+import { OutlineEditorV2 } from './outline2/OutlineEditorV2'
 import { DatePickerPopover } from '../ui/DatePickerPopover'
 import { formatShortDate, formatDateYMD } from '../../lib/dateUtils'
 
@@ -358,7 +358,7 @@ export function ImportErrorEditor({
           </div>
 
           {/* The editor - using Plots with custom onBlocksChange */}
-          <Plots page={page} onBlocksChange={handleBlocksChange} />
+          <OutlineEditorV2 page={page} onBlocksChange={handleBlocksChange} />
         </div>
       </div>
     </div>
