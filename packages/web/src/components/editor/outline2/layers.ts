@@ -26,6 +26,7 @@ import { moveListItem, toggleCollapse } from './commands'
 import { ListItemView } from './nodeview'
 import { formattingPlugin, type NavHandlers } from './decorations'
 import { slashMenuPlugin } from './slashMenuPlugin'
+import { wikiLinkPlugin } from './wikiLinkPlugin'
 import { formatKeymap } from './formatKeymap'
 
 export interface EditorLayer {
@@ -91,10 +92,11 @@ export function formattingLayer(nav: NavHandlers): EditorLayer {
   return { plugins: [keymap(formatKeymap), formattingPlugin(nav)] }
 }
 
-// Slash-command trigger detection. Keyless (the React SlashMenu owns keyboard
-// selection); this only exposes the "/query" trigger state to the host.
+// Autocomplete trigger detection (slash commands + `[[` wiki-links). Keyless
+// (the React popups own keyboard selection via capture-phase listeners); these
+// only expose the "/query" and "[[query" trigger state to the host.
 export function slashMenuLayer(): EditorLayer {
-  return { plugins: [slashMenuPlugin()] }
+  return { plugins: [slashMenuPlugin(), wikiLinkPlugin()] }
 }
 
 // Compose layers into the flat ({ plugins, nodeViews }) ProseMirror expects.
