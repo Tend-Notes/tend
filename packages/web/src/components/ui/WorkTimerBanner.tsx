@@ -3,10 +3,9 @@
 
 import { useShallow } from 'zustand/react/shallow'
 import { useState, useEffect, useCallback } from 'react'
-import { useWorkSessionStore, type WorkLogEntry, type WorkSession } from '../../stores/workSessionStore'
+import { useWorkSessionStore } from '../../stores/workSessionStore'
 import { usePageStore } from '../../stores/pageStore'
-import { pages, journals, sheets, pageBlocksToApiFormat } from '../../lib/api'
-import type { Page } from '../../types'
+import { saveWorkLogToBlock } from '../../lib/workSession'
 
 // Format milliseconds as HH:MM:SS
 function formatDuration(ms: number): string {
@@ -19,65 +18,6 @@ function formatDuration(ms: number): string {
     return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
   }
   return `${minutes}:${seconds.toString().padStart(2, '0')}`
-}
-
-// Fetch a page by its session info (handles all content types)
-async function fetchPage(session: WorkSession): Promise<Page> {
-  const { pageName, contentType, sheetDate } = session
-  if (contentType === 'journal') {
-    return journals.get(pageName)
-  } else if (contentType === 'page') {
-    return pages.get(pageName)
-  } else {
-    return sheets.get(contentType, pageName, sheetDate)
-  }
-}
-
-// Save a page by its session info (handles all content types)
-async function savePage(session: WorkSession, page: Page): Promise<void> {
-  const { pageName, contentType, sheetDate } = session
-  const blockData = pageBlocksToApiFormat(page)
-  if (contentType === 'journal') {
-    await journals.update(pageName, blockData, page.version)
-  } else if (contentType === 'page') {
-    await pages.update(pageName, blockData, page.version)
-  } else {
-    await sheets.update(contentType, pageName, blockData, page.version, sheetDate)
-  }
-}
-
-// Save work log entry to block properties
-async function saveWorkLogToBlock(
-  session: WorkSession,
-  entry: WorkLogEntry
-): Promise<void> {
-  const page = await fetchPage(session)
-
-  // Find the block
-  const block = page.blocks[session.blockUuid]
-  if (!block) {
-    console.error('Block not found for work log:', session.blockUuid)
-    return
-  }
-
-  // Parse existing work log or create new array
-  let workLog: WorkLogEntry[] = []
-  if (block.properties.work_log) {
-    try {
-      workLog = JSON.parse(block.properties.work_log)
-    } catch {
-      // Invalid JSON, start fresh
-    }
-  }
-
-  // Add new entry
-  workLog.push(entry)
-
-  // Update block properties
-  block.properties.work_log = JSON.stringify(workLog)
-
-  // Save the page
-  await savePage(session, page)
 }
 
 export function WorkTimerBanner() {
