@@ -4,7 +4,7 @@
 import { useCallback } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import type { Page, Block } from '../../types'
-import { Plots } from './plots/Plots'
+import { OutlineEditorV2 } from './outline2/OutlineEditorV2'
 
 interface TemplateEditorProps {
   contentTypeName: string
@@ -110,7 +110,7 @@ export function TemplateEditor({
           </div>
 
           {/* The editor - using Plots with custom onBlocksChange */}
-          <Plots page={page} onBlocksChange={handleBlocksChange} />
+          <OutlineEditorV2 page={page} onBlocksChange={handleBlocksChange} />
         </div>
       </div>
     </div>

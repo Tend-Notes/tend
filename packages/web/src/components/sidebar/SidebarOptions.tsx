@@ -176,8 +176,6 @@ function AppearanceSection() {
     setFontSizePreset,
     customFontSize,
     setCustomFontSize,
-    useLegacyEditor,
-    setUseLegacyEditor,
   } = useSettingsStore(
     useShallow((s) => ({
       themeMode: s.themeMode,
@@ -194,8 +192,6 @@ function AppearanceSection() {
       setFontSizePreset: s.setFontSizePreset,
       customFontSize: s.customFontSize,
       setCustomFontSize: s.setCustomFontSize,
-      useLegacyEditor: s.useLegacyEditor,
-      setUseLegacyEditor: s.setUseLegacyEditor,
     }))
   )
 
@@ -223,14 +219,6 @@ function AppearanceSection() {
 
   return (
     <div className="space-y-3">
-      {/* Fallback to the legacy CodeMirror editor (default is the new one) */}
-      <SettingsRow label="Use legacy editor">
-        <Toggle checked={useLegacyEditor} onChange={setUseLegacyEditor} />
-      </SettingsRow>
-      <p className="text-xs text-base-03">
-        Fall back to the old per-block editor. Flips live on the current page.
-      </p>
-
       {/* Theme mode */}
       <SettingsRow label="Mode">
         <div className="flex gap-1">
