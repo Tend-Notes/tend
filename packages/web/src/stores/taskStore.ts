@@ -154,11 +154,23 @@ export const useTaskStore = create<TaskState>()(
           }
         }
       })
+      const msg = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+      // 1) The status/property change — the important part.
+      let statusUpdated = false
       try {
         await blocksApi.update(uuid, { ...patch, pageName })
-        // Status ⇄ DOING drives the work timer: entering DOING starts timing this
-        // task (auto-stopping whatever else was running); leaving DOING stops it.
-        if (task && newStatus && newStatus !== oldStatus) {
+        statusUpdated = true
+      } catch (err) {
+        useToastStore.getState().addToast(`Couldn't update task: ${msg(err)}`, 4000)
+      }
+
+      // 2) The work timer is a BEST-EFFORT side effect of a *successful* status
+      // change: entering DOING starts timing this task (auto-stopping whatever
+      // else was running); leaving DOING stops it. A timer failure must never
+      // read as "couldn't update the task" — the task already updated.
+      if (statusUpdated && task && newStatus && newStatus !== oldStatus) {
+        try {
           const ws = useWorkSessionStore.getState()
           if (newStatus === 'DOING') {
             if (ws.activeSession?.blockUuid !== uuid) {
@@ -170,15 +182,14 @@ export const useTaskStore = create<TaskState>()(
           } else if (oldStatus === 'DOING' && ws.activeSession?.blockUuid === uuid) {
             await stopAndLogActiveSession()
           }
+        } catch (err) {
+          useToastStore
+            .getState()
+            .addToast(`Task updated, but its timer entry couldn't be saved: ${msg(err)}`, 6000)
         }
-      } catch (err) {
-        // Surface the failure instead of silently snapping the row back.
-        useToastStore
-          .getState()
-          .addToast(`Couldn't update task: ${err instanceof Error ? err.message : String(err)}`, 4000)
-      } finally {
-        await get().refresh()
       }
+
+      await get().refresh()
     },
   }))
 )
