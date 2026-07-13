@@ -17,7 +17,9 @@ import { focusBlock, blockUuidAtSelection } from './pmUtil'
 import { hasFinePointer } from '../../../lib/pointer'
 import { textLayer, outlinerLayer, formattingLayer, slashMenuLayer, composeLayers } from './layers'
 import { slashMenuKey, type SlashTrigger } from './slashMenuPlugin'
+import { wikiLinkKey, type WikiTrigger } from './wikiLinkPlugin'
 import { SlashMenu } from './SlashMenu'
+import { WikiLinkPopup } from '../WikiLinkPopup'
 // ProseMirror's required base styles — without these Firefox mis-renders the
 // contentEditable and shows no caret (Chromium tolerates their absence).
 import 'prosemirror-view/style/prosemirror.css'
@@ -40,6 +42,16 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
   const [slashTrigger, setSlashTrigger] = useState<SlashTrigger | null>(null)
   const setSlashTriggerRef = useRef(setSlashTrigger)
   setSlashTriggerRef.current = setSlashTrigger
+
+  // `[[` wiki-link menu trigger, same lift-from-plugin pattern. `wikiDismissedFrom`
+  // remembers a trigger the user Escaped so it doesn't immediately reopen.
+  const [wikiTrigger, setWikiTrigger] = useState<WikiTrigger | null>(null)
+  const setWikiTriggerRef = useRef(setWikiTrigger)
+  setWikiTriggerRef.current = setWikiTrigger
+  const [wikiDismissedFrom, setWikiDismissedFrom] = useState<number | null>(null)
+  useEffect(() => {
+    if (!wikiTrigger) setWikiDismissedFrom(null)
+  }, [wikiTrigger])
 
   // Keep the latest save target in a ref so the view's dispatch closure (built
   // once on mount) always calls the current one.
@@ -95,6 +107,7 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
         if (tr.docChanged) scheduleSave(view)
         if (tr.selectionSet || tr.docChanged) syncFocusedBlock()
         setSlashTriggerRef.current(slashMenuKey.getState(view.state) ?? null)
+        setWikiTriggerRef.current(wikiLinkKey.getState(view.state) ?? null)
       },
     })
     viewRef.current = view
@@ -165,12 +178,41 @@ export function OutlineEditorV2({ page, readonly = false, onBlocksChange }: Outl
     // only editor of this page) to avoid clobbering the caret. eslint-disable-next-line
   }, [])
 
+  // `[[` popup: anchored under the caret; selecting inserts a full wiki-link.
+  const wikiView = viewRef.current
+  let wikiPopup: JSX.Element | null = null
+  if (wikiTrigger && wikiView && wikiTrigger.from !== wikiDismissedFrom) {
+    const trig = wikiTrigger
+    let coords: { left: number; bottom: number } | null = null
+    try {
+      coords = wikiView.coordsAtPos(trig.from)
+    } catch {
+      coords = null
+    }
+    if (coords) {
+      wikiPopup = (
+        <WikiLinkPopup
+          query={trig.query}
+          position={{ top: coords.bottom, left: coords.left }}
+          onSelect={(pageName) => {
+            wikiView.dispatch(
+              wikiView.state.tr.insertText(`[[${pageName}]]`, trig.from, trig.to).scrollIntoView()
+            )
+            wikiView.focus()
+          }}
+          onClose={() => setWikiDismissedFrom(trig.from)}
+        />
+      )
+    }
+  }
+
   return (
     <>
       <div ref={mountRef} className="outline2" />
       {slashTrigger && viewRef.current && (
         <SlashMenu view={viewRef.current} trigger={slashTrigger} />
       )}
+      {wikiPopup}
     </>
   )
 }

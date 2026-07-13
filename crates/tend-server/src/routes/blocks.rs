@@ -297,6 +297,12 @@ pub struct UpdateBlockRequest {
     /// match, returns 409 Conflict. If omitted, applies to the current on-disk state.
     #[serde(default)]
     pub version: Option<u64>,
+    /// The origin page/journal/sheet name for this block, if the client already
+    /// knows it (the task manager gets it from `/todos`). When present, the page is
+    /// loaded directly instead of via the block index — so this works on encrypted
+    /// gardens, where the block index is unavailable.
+    #[serde(default)]
+    pub page_name: Option<String>,
 }
 
 /// Response for a successful block update.
@@ -325,42 +331,46 @@ pub async fn update_block(
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
-    // Block index (and thus lookup) is unavailable for encrypted gardens.
-    let Some(block_index) = &garden.block_index else {
-        return Ok((
-            StatusCode::FORBIDDEN,
-            Json(ErrorResponse {
-                error: "feature_disabled".to_string(),
-                reason: Some("block_references_require_unencrypted_garden".to_string()),
-            }),
-        )
-            .into_response());
-    };
-
-    // Locate the block's page by uuid.
-    let block_ref = {
-        let index = block_index.lock().await;
-        match index.lookup(&uuid) {
-            Ok(Some(block_ref)) => block_ref,
-            Ok(None) => {
-                return Ok((
-                    StatusCode::NOT_FOUND,
-                    Json(ErrorResponse {
-                        error: "block_not_found".to_string(),
-                        reason: None,
-                    }),
-                )
-                    .into_response());
+    // Locate the block's owning page. Prefer a client-supplied page name (the task
+    // manager knows it from /todos) so the edit works on encrypted gardens; only
+    // fall back to a block-index lookup by uuid, which requires an unencrypted
+    // garden.
+    let (mut page, target) = if let Some(page_name) = req.page_name.as_deref() {
+        load_page_for_block(&garden, &user.username, page_name).await?
+    } else {
+        // Block index (and thus uuid lookup) is unavailable for encrypted gardens.
+        let Some(block_index) = &garden.block_index else {
+            return Ok((
+                StatusCode::FORBIDDEN,
+                Json(ErrorResponse {
+                    error: "feature_disabled".to_string(),
+                    reason: Some("block_references_require_unencrypted_garden".to_string()),
+                }),
+            )
+                .into_response());
+        };
+        let block_ref = {
+            let index = block_index.lock().await;
+            match index.lookup(&uuid) {
+                Ok(Some(block_ref)) => block_ref,
+                Ok(None) => {
+                    return Ok((
+                        StatusCode::NOT_FOUND,
+                        Json(ErrorResponse {
+                            error: "block_not_found".to_string(),
+                            reason: None,
+                        }),
+                    )
+                        .into_response());
+                }
+                Err(e) => {
+                    tracing::error!("Block index lookup error: {}", e);
+                    return Err(AppError::Internal(format!("Block index error: {}", e)));
+                }
             }
-            Err(e) => {
-                tracing::error!("Block index lookup error: {}", e);
-                return Err(AppError::Internal(format!("Block index error: {}", e)));
-            }
-        }
+        };
+        load_page_for_block(&garden, &user.username, &block_ref.page_name).await?
     };
-
-    let (mut page, target) =
-        load_page_for_block(&garden, &user.username, &block_ref.page_name).await?;
 
     // Optional optimistic-concurrency check.
     if let Some(expected) = req.version {

@@ -6,6 +6,9 @@ import { immer } from 'zustand/middleware/immer'
 import { todos as todosApi, blocks as blocksApi, type TaskItem } from '../lib/api'
 import type { BlockUpdate } from '../types'
 import { formatDateYMD } from '../lib/dateUtils'
+import { useToastStore } from './toastStore'
+import { useWorkSessionStore } from './workSessionStore'
+import { stopAndLogActiveSession } from '../lib/workSession'
 
 export type Task = TaskItem
 
@@ -127,6 +130,12 @@ export const useTaskStore = create<TaskState>()(
     },
 
     updateTask: async (uuid, patch) => {
+      // The task carries its origin page (from /todos); pass it so the server can
+      // locate the block without the block index (works on encrypted gardens).
+      const task = get().tasks.find((x) => x.uuid === uuid)
+      const pageName = task?.pageName
+      const oldStatus = task?.status
+      const newStatus = patch.content !== undefined ? splitContent(patch.content).status : undefined
       // Optimistically reflect the edit so the row updates immediately; refresh
       // below reconciles with (or reverts to) server truth.
       set((state) => {
@@ -146,7 +155,27 @@ export const useTaskStore = create<TaskState>()(
         }
       })
       try {
-        await blocksApi.update(uuid, patch)
+        await blocksApi.update(uuid, { ...patch, pageName })
+        // Status ⇄ DOING drives the work timer: entering DOING starts timing this
+        // task (auto-stopping whatever else was running); leaving DOING stops it.
+        if (task && newStatus && newStatus !== oldStatus) {
+          const ws = useWorkSessionStore.getState()
+          if (newStatus === 'DOING') {
+            if (ws.activeSession?.blockUuid !== uuid) {
+              await stopAndLogActiveSession()
+              useWorkSessionStore
+                .getState()
+                .startSession(uuid, task.pageName, task.contentType, task.journalDate ?? undefined, splitContent(patch.content!).text)
+            }
+          } else if (oldStatus === 'DOING' && ws.activeSession?.blockUuid === uuid) {
+            await stopAndLogActiveSession()
+          }
+        }
+      } catch (err) {
+        // Surface the failure instead of silently snapping the row back.
+        useToastStore
+          .getState()
+          .addToast(`Couldn't update task: ${err instanceof Error ? err.message : String(err)}`, 4000)
       } finally {
         await get().refresh()
       }
