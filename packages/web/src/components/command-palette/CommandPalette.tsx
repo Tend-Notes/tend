@@ -350,7 +350,8 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             const ct = linkingSheet.contentType
             const isDated = usesDate(ct)
             const isNamespaced = ct.organization === 'namespaced'
-            const nameOf = (s: PageMeta) => (s.title || s.name.split('/').pop() || '')
+            const nameOf = (s: PageMeta) =>
+              isNamespaced ? (s.name.split('/').pop() || s.title || '') : (s.title || s.name.split('/').pop() || '')
             // A listed sheet's namespace ("book"): the first path segment after the directory.
             const nsOf = (s: PageMeta) => {
               const rel = s.name.startsWith(ct.directory + '/') ? s.name.slice(ct.directory.length + 1) : s.name
@@ -479,9 +480,12 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                             }}
                             className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
                           >
-                            <span>{sheet.title}</span>
+                            <span>{nameOf(sheet)}</span>
                             {sheet.journalDate && (
                               <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
+                            )}
+                            {isNamespaced && nsOf(sheet) && (
+                              <span className="ml-2 text-xs text-base-04">{nsOf(sheet)}</span>
                             )}
                           </Command.Item>
                         )
