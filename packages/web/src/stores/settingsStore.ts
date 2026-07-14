@@ -44,7 +44,7 @@ export const TASK_STATUS_SETS: Record<TaskStatusSet, TaskStatus[]> = {
 // How a content type's sheets are named/foldered on disk. Mirrors the backend
 // `Organization` enum (replaces the old `saveByDate` boolean, which couldn't
 // express journals: flat directory, but the filename IS the date).
-export type Organization = 'flat' | 'dateNamed' | 'dateFoldered'
+export type Organization = 'flat' | 'dateNamed' | 'dateFoldered' | 'namespaced'
 
 // Content type definition
 export interface ContentType {

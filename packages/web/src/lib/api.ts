@@ -435,7 +435,7 @@ export interface ContentType {
   id: string
   name: string
   directory: string
-  organization: 'flat' | 'dateNamed' | 'dateFoldered'
+  organization: 'flat' | 'dateNamed' | 'dateFoldered' | 'namespaced'
   template: string
 }
 

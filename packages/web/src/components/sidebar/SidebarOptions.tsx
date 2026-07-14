@@ -4,7 +4,7 @@
 import { useShallow } from 'zustand/react/shallow'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useSettingsStore, usesDate, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
+import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
@@ -1387,16 +1387,22 @@ function ContentTypeRow({
                 />
               </div>
               <div className="flex items-center gap-2">
-                <label className="text-xs text-base-04 w-16">By date</label>
-                <div className={isBuiltIn ? 'opacity-50' : ''}>
-                  <Toggle
-                    checked={usesDate(type)}
-                    onChange={(checked) => !isBuiltIn && onUpdate({ organization: checked ? 'dateFoldered' : 'flat' })}
-                  />
-                </div>
-                <span className="text-xs text-base-03">
-                  {type.id === 'journal' ? 'Date as filename' : 'Create date subfolders'}
-                </span>
+                <label className="text-xs text-base-04 w-16">Storage</label>
+                {isBuiltIn ? (
+                  <span className="text-xs text-base-04">
+                    {type.id === 'journal' ? 'Date as filename' : 'Flat'}
+                  </span>
+                ) : (
+                  <select
+                    value={type.organization}
+                    onChange={(e) => onUpdate({ organization: e.target.value as ContentType['organization'] })}
+                    className="text-xs bg-base-01 border border-base-02 rounded px-2 py-1 text-base-05"
+                  >
+                    <option value="flat">Flat (one folder)</option>
+                    <option value="dateFoldered">By date (date subfolders)</option>
+                    <option value="namespaced">Compilation (namespace subfolders)</option>
+                  </select>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <label className="text-xs text-base-04 w-16">Template</label>
