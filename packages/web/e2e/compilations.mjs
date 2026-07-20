@@ -46,10 +46,18 @@ try {
   await page.getByText('Link or create Book', { exact: false }).first().click()
   await page.waitForTimeout(400)
 
-  // The namespaced flow shows a Book field + an Entry title field.
-  check('Book field present', (await page.getByPlaceholder('Book…').count()) === 1)
-  await page.getByPlaceholder('Book…').fill('MyNovel')
-  await page.getByPlaceholder('Entry title…').fill('Chapter One')
+  // The namespaced flow shows two levels: a Compilation field on top, then a File
+  // field below it. The File level is inert until a compilation is chosen.
+  check('Compilation field present', (await page.getByPlaceholder('Choose or create a book…').count()) === 1)
+  check(
+    'file level prompts for a compilation first',
+    (await page.getByText('Choose or create a compilation first', { exact: false }).count()) === 1,
+  )
+  check('file field hidden before a compilation is chosen', (await page.getByPlaceholder('Choose or create a file…').count()) === 0)
+  await page.getByPlaceholder('Choose or create a book…').fill('MyNovel')
+  await page.waitForTimeout(200)
+  check('file field appears once a compilation is chosen', (await page.getByPlaceholder('Choose or create a file…').count()) === 1)
+  await page.getByPlaceholder('Choose or create a file…').fill('Chapter One')
   await page.waitForTimeout(300)
   await page.getByText('Create "Chapter One" in MyNovel', { exact: false }).click()
   await page.waitForTimeout(600)
@@ -78,8 +86,9 @@ try {
   await page.waitForTimeout(300)
   await page.getByText('Link or create Book', { exact: false }).first().click()
   await page.waitForTimeout(400)
-  await page.getByPlaceholder('Book…').fill('MyNovel')
-  await page.getByPlaceholder('Entry title…').fill('One')
+  await page.getByPlaceholder('Choose or create a book…').fill('MyNovel')
+  await page.waitForTimeout(200)
+  await page.getByPlaceholder('Choose or create a file…').fill('One')
   await page.waitForTimeout(300)
   check(
     'create offered despite an existing entry that contains the query',
@@ -88,7 +97,7 @@ try {
 
   // And a true same-path collision (same book + same title) correctly hides create —
   // there you link the existing sheet instead of creating a duplicate at the same path.
-  await page.getByPlaceholder('Entry title…').fill('Chapter One')
+  await page.getByPlaceholder('Choose or create a file…').fill('Chapter One')
   await page.waitForTimeout(300)
   check(
     'create hidden on exact same-path collision',
