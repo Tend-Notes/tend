@@ -367,18 +367,21 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               .filter(s => !linkDate || s.journalDate === linkDate)
               .filter(s => !isNamespaced || !linkNamespace.trim() || nsOf(s) === linkNamespace.trim())
               .slice(0, 15)
-            // Offer "create" only when the search matches nothing, or every match is a
-            // prefix of the search (recurring/new name). Namespaced types also need a
-            // chosen namespace. Deliberately independent of the date filter.
-            const showCreate =
-              query.length > 0 &&
-              (!isNamespaced || linkNamespace.trim().length > 0) &&
-              (nameMatches.length === 0 || nameMatches.every(s => nameOf(s).toLowerCase().startsWith(query)))
             // Create on the picked date if set, else today (date-organized types only).
             const createDate = isDated ? (linkDate || new Date().toISOString().slice(0, 10)) : undefined
             const newSheetPath = isNamespaced
               ? qualifyName(ct, `${linkNamespace.trim()}/${search.trim()}`)
               : qualifyName(ct, search.trim(), createDate)
+            // Offer "create" whenever the target path is free. Recurring names are
+            // legitimate for by-date and namespaced types (many "Team Meeting", many
+            // "Chapter 1" across dates/books), so an exact name match must NOT hide
+            // create — only a real collision at the exact target path does, and there
+            // you'd link the existing sheet instead. Namespaced types also need a
+            // chosen namespace first.
+            const showCreate =
+              query.length > 0 &&
+              (!isNamespaced || linkNamespace.trim().length > 0) &&
+              !linkingSheet.sheets.some(s => s.name === newSheetPath)
             return (
               <>
                 <div className="flex items-center border-b border-base-02">
