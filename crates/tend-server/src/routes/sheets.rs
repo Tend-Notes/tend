@@ -301,13 +301,11 @@ pub async fn create_sheet(
     // Use the full path as the page name for block index storage
     let full_page_name = build_sheet_page_name(&content_type, &req.name, date);
     let mut page = Page::new_sheet(&full_page_name, &content_type_id, date);
-    // Title is the display name: for a namespaced entry that's just the leaf
-    // ("Chapter 14"), otherwise the bare name as given.
-    page.title = if content_type.is_namespaced() {
-        req.name.rsplit('/').next().unwrap_or(&req.name).to_string()
-    } else {
-        req.name.clone()
-    };
+    // Title is the display name = the bare name as given. For a namespaced entry
+    // that's "{compilation}/{leaf}" (e.g. "Acme/Chapter 14") — the same form
+    // list_sheets derives, so the sidebar shows the compilation on first visit
+    // rather than only after a re-list overwrites a leaf-only title.
+    page.title = req.name.clone();
 
     // Track cursor position from template {{cursor}} marker
     let mut cursor_position: Option<CursorPosition> = None;
