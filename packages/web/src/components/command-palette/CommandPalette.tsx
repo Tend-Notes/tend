@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { useShallow } from 'zustand/react/shallow'
 import { Command } from 'cmdk'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore, usesDate, type ContentType } from '../../stores/settingsStore'
@@ -88,6 +88,9 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [showLinkCal, setShowLinkCal] = useState(false)
   // Selected namespace ("book") for namespaced/Compilation content types.
   const [linkNamespace, setLinkNamespace] = useState('')
+  // The file-title input in the namespaced link panel — focused after a
+  // compilation is chosen so the two levels flow top-to-bottom.
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
@@ -382,6 +385,150 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               query.length > 0 &&
               (!isNamespaced || linkNamespace.trim().length > 0) &&
               !linkingSheet.sheets.some(s => s.name === newSheetPath)
+            // Insert a wikilink for the chosen/created target and close the panel.
+            const insertLink = (target: string) => {
+              const wikiLink = `[[${target}]]`
+              onOpenChange(false)
+              setLinkingSheet(null)
+              setTimeout(() => {
+                if (onSheetCreated) {
+                  onSheetCreated(wikiLink)
+                } else if (insertTextAtCursor) {
+                  insertTextAtCursor(wikiLink + ' ')
+                }
+              }, 0)
+            }
+            // Canonical link path for an existing sheet (its name may or may not
+            // already carry the content-type directory prefix).
+            const linkPathOf = (s: PageMeta) =>
+              s.name.startsWith(ct.directory + '/') ? s.name : `${ct.directory}/${s.name}`
+            // The file input mounts only once a compilation is chosen, so defer focus.
+            const focusFile = () => setTimeout(() => fileInputRef.current?.focus(), 0)
+
+            // Namespaced/Compilation types get a dedicated two-level panel: first
+            // choose or create a compilation (the middle folder), then choose or
+            // create a file within it. The content type was already chosen in the
+            // Ctrl-K menu and is not revisited here.
+            if (isNamespaced) {
+              const compilation = linkNamespace.trim()
+              const hasCompilation = compilation.length > 0
+              const compilationMatches = namespaces.filter(n =>
+                n.toLowerCase().includes(compilation.toLowerCase())
+              )
+              const compilationExists = namespaces.some(
+                n => n.toLowerCase() === compilation.toLowerCase()
+              )
+              const exactFile = filtered.find(s => nameOf(s).toLowerCase() === query)
+              return (
+                <>
+                  {/* Level 1 — the compilation */}
+                  <div className="border-b border-base-02 p-2">
+                    <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">
+                      Compilation
+                    </div>
+                    <input
+                      autoFocus
+                      value={linkNamespace}
+                      onChange={(e) => setLinkNamespace(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Escape') setLinkingSheet(null)
+                        else if (e.key === 'Enter' && hasCompilation) {
+                          e.preventDefault()
+                          focusFile()
+                        }
+                      }}
+                      placeholder={`Choose or create a ${ct.name.toLowerCase()}…`}
+                      className="w-full px-3 py-2 bg-base-01 border border-base-02 rounded text-sm text-base-05 placeholder:text-base-04 focus:outline-none focus:border-base-04"
+                    />
+                    <div className="mt-1 max-h-32 overflow-y-auto">
+                      {compilationMatches.map((ns) => (
+                        <div
+                          key={ns}
+                          onClick={() => {
+                            setLinkNamespace(ns)
+                            focusFile()
+                          }}
+                          className={`px-3 py-1.5 text-sm rounded cursor-pointer hover:bg-base-02 ${
+                            ns.toLowerCase() === compilation.toLowerCase() ? 'bg-base-02 text-base-05' : 'text-base-05'
+                          }`}
+                        >
+                          {ns}
+                        </div>
+                      ))}
+                      {hasCompilation && !compilationExists && (
+                        <div
+                          onClick={() => focusFile()}
+                          className="px-3 py-1.5 text-sm rounded cursor-pointer text-base-0D hover:bg-base-02"
+                        >
+                          Create {ct.name.toLowerCase()} "{compilation}"
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Level 2 — the file within the compilation */}
+                  <div className="p-2">
+                    <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">
+                      {hasCompilation ? (
+                        <>
+                          File in <span className="normal-case text-base-05">{compilation}</span>
+                        </>
+                      ) : (
+                        'File'
+                      )}
+                    </div>
+                    {!hasCompilation ? (
+                      <div className="px-3 py-4 text-center text-sm text-base-04">
+                        Choose or create a compilation first.
+                      </div>
+                    ) : (
+                      <>
+                        <input
+                          ref={fileInputRef}
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Escape') setLinkingSheet(null)
+                            else if (e.key === 'Enter') {
+                              e.preventDefault()
+                              if (exactFile) insertLink(linkPathOf(exactFile))
+                              else if (showCreate) insertLink(newSheetPath)
+                              else if (filtered[0]) insertLink(linkPathOf(filtered[0]))
+                            }
+                          }}
+                          placeholder="Choose or create a file…"
+                          className="w-full px-3 py-2 bg-base-01 border border-base-02 rounded text-sm text-base-05 placeholder:text-base-04 focus:outline-none focus:border-base-04"
+                        />
+                        <div className="mt-1 max-h-56 overflow-y-auto">
+                          {filtered.map((sheet) => (
+                            <div
+                              key={sheet.name}
+                              onClick={() => insertLink(linkPathOf(sheet))}
+                              className="px-3 py-1.5 text-sm rounded cursor-pointer hover:bg-base-02 text-base-05"
+                            >
+                              {nameOf(sheet)}
+                            </div>
+                          ))}
+                          {showCreate && (
+                            <div
+                              onClick={() => insertLink(newSheetPath)}
+                              className="px-3 py-1.5 text-sm rounded cursor-pointer text-base-0D hover:bg-base-02"
+                            >
+                              Create "{search.trim()}" in {compilation}
+                            </div>
+                          )}
+                          {filtered.length === 0 && !showCreate && (
+                            <div className="px-3 py-3 text-center text-sm text-base-04">
+                              Type a title to create a file.
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </>
+              )
+            }
+
             return (
               <>
                 <div className="flex items-center border-b border-base-02">
@@ -389,7 +536,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     autoFocus
                     value={search}
                     onValueChange={setSearch}
-                    placeholder={isNamespaced ? 'Entry title…' : `Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
+                    placeholder={`Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
                     className="flex-1 px-4 py-3 bg-transparent text-base-05 placeholder:text-base-04 focus:outline-none"
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') setLinkingSheet(null)
@@ -430,22 +577,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       )}
                     </div>
                   )}
-                  {isNamespaced && (
-                    <div className="flex items-center gap-1 pr-3">
-                      <input
-                        list="link-namespaces"
-                        value={linkNamespace}
-                        onChange={(e) => setLinkNamespace(e.target.value)}
-                        placeholder="Book…"
-                        className="w-28 text-xs px-2 py-1 bg-base-01 border border-base-02 rounded text-base-05 placeholder:text-base-04 focus:outline-none"
-                      />
-                      <datalist id="link-namespaces">
-                        {namespaces.map((ns) => (
-                          <option key={ns} value={ns} />
-                        ))}
-                      </datalist>
-                    </div>
-                  )}
                 </div>
                 <Command.List
                   className="max-h-80 overflow-y-auto p-2"
@@ -461,62 +592,30 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                   )}
                   {filtered.length > 0 && (
                     <Command.Group heading="Existing" className="mb-2">
-                      {filtered.map((sheet) => {
-                        const linkPath = sheet.name.startsWith(linkingSheet.contentType.directory + '/')
-                          ? sheet.name
-                          : `${linkingSheet.contentType.directory}/${sheet.name}`
-                        return (
-                          <Command.Item
-                            key={sheet.name}
-                            value={sheet.name}
-                            onSelect={() => {
-                              const wikiLink = `[[${linkPath}]]`
-                              onOpenChange(false)
-                              setLinkingSheet(null)
-                              setTimeout(() => {
-                                if (onSheetCreated) {
-                                  onSheetCreated(wikiLink)
-                                } else if (insertTextAtCursor) {
-                                  insertTextAtCursor(wikiLink + ' ')
-                                }
-                              }, 0)
-                            }}
-                            className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
-                          >
-                            <span>{nameOf(sheet)}</span>
-                            {sheet.journalDate && (
-                              <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
-                            )}
-                            {isNamespaced && nsOf(sheet) && (
-                              <span className="ml-2 text-xs text-base-04">{nsOf(sheet)}</span>
-                            )}
-                          </Command.Item>
-                        )
-                      })}
+                      {filtered.map((sheet) => (
+                        <Command.Item
+                          key={sheet.name}
+                          value={sheet.name}
+                          onSelect={() => insertLink(linkPathOf(sheet))}
+                          className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
+                        >
+                          <span>{nameOf(sheet)}</span>
+                          {sheet.journalDate && (
+                            <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
+                          )}
+                        </Command.Item>
+                      ))}
                     </Command.Group>
                   )}
                   {showCreate && (
                     <Command.Group heading="Create new" className="mb-2">
                       <Command.Item
                         value={`create-${search}`}
-                        onSelect={() => {
-                          const wikiLink = `[[${newSheetPath}]]`
-                          onOpenChange(false)
-                          setLinkingSheet(null)
-                          setTimeout(() => {
-                            if (onSheetCreated) {
-                              onSheetCreated(wikiLink)
-                            } else if (insertTextAtCursor) {
-                              insertTextAtCursor(wikiLink + ' ')
-                            }
-                          }, 0)
-                        }}
+                        onSelect={() => insertLink(newSheetPath)}
                         className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
                       >
                         <span>
-                          {isNamespaced
-                            ? `Create "${search.trim()}" in ${linkNamespace.trim()}`
-                            : `Create "${search.trim()}" (${linkingSheet.contentType.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
+                          {`Create "${search.trim()}" (${linkingSheet.contentType.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
                         </span>
                       </Command.Item>
                     </Command.Group>
