@@ -354,7 +354,14 @@ impl EncryptedFileManager {
     /// Get path to an encrypted sheet file for a content type
     fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.is_date_foldered() {
+        if content_type.is_namespaced() {
+            if let Some((namespace, leaf)) = name.rsplit_once('/') {
+                dir.join(namespace)
+                    .join(format!("{}.{}", encode_filename(leaf), ENCRYPTED_EXT))
+            } else {
+                dir.join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
+            }
+        } else if content_type.is_date_foldered() {
             let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
             dir.join(d.format("%Y-%m-%d").to_string())
                 .join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
@@ -366,7 +373,13 @@ impl EncryptedFileManager {
     /// Raw (unencoded) sheet path for backwards compatibility
     fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.is_date_foldered() {
+        if content_type.is_namespaced() {
+            if let Some((namespace, leaf)) = name.rsplit_once('/') {
+                dir.join(namespace).join(format!("{}.{}", leaf, ENCRYPTED_EXT))
+            } else {
+                dir.join(format!("{}.{}", name, ENCRYPTED_EXT))
+            }
+        } else if content_type.is_date_foldered() {
             let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
             dir.join(d.format("%Y-%m-%d").to_string())
                 .join(format!("{}.{}", name, ENCRYPTED_EXT))
@@ -475,6 +488,34 @@ impl EncryptedFileManager {
                             if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
                                 refs.push((decode_filename(raw_name), date, path.clone()));
                             }
+                        }
+                    }
+                }
+            }
+        } else if content_type.is_namespaced() {
+            // Walk namespace subfolders (any depth); bare name = relative path
+            // with the leaf decoded ("MyBook/Chapter 14").
+            let mut stack: Vec<(PathBuf, String)> = vec![(base_dir.clone(), String::new())];
+            while let Some((dir, rel)) = stack.pop() {
+                let mut entries = tokio::fs::read_dir(&dir).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let seg = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                        let next_rel = if rel.is_empty() {
+                            seg.to_string()
+                        } else {
+                            format!("{}/{}", rel, seg)
+                        };
+                        stack.push((path, next_rel));
+                    } else if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                        if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
+                            let bare = if rel.is_empty() {
+                                decode_filename(raw_name)
+                            } else {
+                                format!("{}/{}", rel, decode_filename(raw_name))
+                            };
+                            refs.push((bare, None, path.clone()));
                         }
                     }
                 }

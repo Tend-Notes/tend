@@ -86,6 +86,8 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // date (journalDate) for date-organized content types. '' = no date filter.
   const [linkDate, setLinkDate] = useState('')
   const [showLinkCal, setShowLinkCal] = useState(false)
+  // Selected namespace ("book") for namespaced/Compilation content types.
+  const [linkNamespace, setLinkNamespace] = useState('')
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
@@ -106,6 +108,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setShowCommitInput(false)
       setLinkingSheet(null)
       setLinkDate('')
+      setLinkNamespace('')
       setShowLinkCal(false)
       setReindexing(false)
       clearPendingContentType()
@@ -115,6 +118,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const handleStartLinkSheet = useCallback(async (ct: ContentType) => {
     setSearch('')
     setLinkDate('')
+    setLinkNamespace('')
     setShowLinkCal(false)
     try {
       const sheets = await api.sheets.list(ct.id)
@@ -343,25 +347,41 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
           // Link to existing sheet UI
           (() => {
             const query = search.toLowerCase().trim()
-            const isDated = usesDate(linkingSheet.contentType)
-            const nameOf = (s: PageMeta) => (s.title || s.name.split('/').pop() || '')
-            // Text matches, IGNORING the date filter — this drives the create gate.
+            const ct = linkingSheet.contentType
+            const isDated = usesDate(ct)
+            const isNamespaced = ct.organization === 'namespaced'
+            const nameOf = (s: PageMeta) =>
+              isNamespaced ? (s.name.split('/').pop() || s.title || '') : (s.title || s.name.split('/').pop() || '')
+            // A listed sheet's namespace ("book"): the first path segment after the directory.
+            const nsOf = (s: PageMeta) => {
+              const rel = s.name.startsWith(ct.directory + '/') ? s.name.slice(ct.directory.length + 1) : s.name
+              return rel.includes('/') ? rel.split('/')[0] : ''
+            }
+            const namespaces = [...new Set(linkingSheet.sheets.map(nsOf).filter(Boolean))].sort()
+            // Text matches, IGNORING the date/namespace filter — this drives the create gate.
             const nameMatches = linkingSheet.sheets.filter(
               s => nameOf(s).toLowerCase().includes(query) || s.name.toLowerCase().includes(query)
             )
-            // The shown list also applies the date filter (the second layer).
+            // The shown list also applies the date/namespace filter (the second layer).
             const filtered = nameMatches
               .filter(s => !linkDate || s.journalDate === linkDate)
+              .filter(s => !isNamespaced || !linkNamespace.trim() || nsOf(s) === linkNamespace.trim())
               .slice(0, 15)
-            // Offer "create" only when the search matches nothing, or every match is a
-            // prefix of the search (search + extra chars, e.g. standup / standupFollowUp)
-            // — a recurring or new name. Deliberately independent of the date filter.
-            const showCreate =
-              query.length > 0 &&
-              (nameMatches.length === 0 || nameMatches.every(s => nameOf(s).toLowerCase().startsWith(query)))
             // Create on the picked date if set, else today (date-organized types only).
             const createDate = isDated ? (linkDate || new Date().toISOString().slice(0, 10)) : undefined
-            const newSheetPath = qualifyName(linkingSheet.contentType, search.trim(), createDate)
+            const newSheetPath = isNamespaced
+              ? qualifyName(ct, `${linkNamespace.trim()}/${search.trim()}`)
+              : qualifyName(ct, search.trim(), createDate)
+            // Offer "create" whenever the target path is free. Recurring names are
+            // legitimate for by-date and namespaced types (many "Team Meeting", many
+            // "Chapter 1" across dates/books), so an exact name match must NOT hide
+            // create — only a real collision at the exact target path does, and there
+            // you'd link the existing sheet instead. Namespaced types also need a
+            // chosen namespace first.
+            const showCreate =
+              query.length > 0 &&
+              (!isNamespaced || linkNamespace.trim().length > 0) &&
+              !linkingSheet.sheets.some(s => s.name === newSheetPath)
             return (
               <>
                 <div className="flex items-center border-b border-base-02">
@@ -369,7 +389,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     autoFocus
                     value={search}
                     onValueChange={setSearch}
-                    placeholder={`Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
+                    placeholder={isNamespaced ? 'Entry title…' : `Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
                     className="flex-1 px-4 py-3 bg-transparent text-base-05 placeholder:text-base-04 focus:outline-none"
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') setLinkingSheet(null)
@@ -410,6 +430,22 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       )}
                     </div>
                   )}
+                  {isNamespaced && (
+                    <div className="flex items-center gap-1 pr-3">
+                      <input
+                        list="link-namespaces"
+                        value={linkNamespace}
+                        onChange={(e) => setLinkNamespace(e.target.value)}
+                        placeholder="Book…"
+                        className="w-28 text-xs px-2 py-1 bg-base-01 border border-base-02 rounded text-base-05 placeholder:text-base-04 focus:outline-none"
+                      />
+                      <datalist id="link-namespaces">
+                        {namespaces.map((ns) => (
+                          <option key={ns} value={ns} />
+                        ))}
+                      </datalist>
+                    </div>
+                  )}
                 </div>
                 <Command.List
                   className="max-h-80 overflow-y-auto p-2"
@@ -447,9 +483,12 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                             }}
                             className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
                           >
-                            <span>{sheet.title}</span>
+                            <span>{nameOf(sheet)}</span>
                             {sheet.journalDate && (
                               <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
+                            )}
+                            {isNamespaced && nsOf(sheet) && (
+                              <span className="ml-2 text-xs text-base-04">{nsOf(sheet)}</span>
                             )}
                           </Command.Item>
                         )
@@ -474,7 +513,11 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                         }}
                         className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
                       >
-                        <span>Create "{search.trim()}" ({linkingSheet.contentType.name}){isDated && linkDate ? ` on ${linkDate}` : ''}</span>
+                        <span>
+                          {isNamespaced
+                            ? `Create "${search.trim()}" in ${linkNamespace.trim()}`
+                            : `Create "${search.trim()}" (${linkingSheet.contentType.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
+                        </span>
                       </Command.Item>
                     </Command.Group>
                   )}

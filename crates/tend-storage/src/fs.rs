@@ -342,7 +342,15 @@ impl FileManager {
     /// Otherwise: {directory}/{name}.md
     pub fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.is_date_foldered() {
+        if content_type.is_namespaced() {
+            // `name` is "namespace/leaf"; the namespace is a real subfolder, only
+            // the leaf filename is encoded.
+            if let Some((namespace, leaf)) = name.rsplit_once('/') {
+                dir.join(namespace).join(format!("{}.md", encode_filename(leaf)))
+            } else {
+                dir.join(format!("{}.md", encode_filename(name)))
+            }
+        } else if content_type.is_date_foldered() {
             if let Some(d) = date {
                 dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", encode_filename(name)))
             } else {
@@ -357,7 +365,13 @@ impl FileManager {
     /// Raw (unencoded) sheet path for backwards compatibility with pre-encoding files
     fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
         let dir = self.root.join(&content_type.directory);
-        if content_type.is_date_foldered() {
+        if content_type.is_namespaced() {
+            if let Some((namespace, leaf)) = name.rsplit_once('/') {
+                dir.join(namespace).join(format!("{}.md", leaf))
+            } else {
+                dir.join(format!("{}.md", name))
+            }
+        } else if content_type.is_date_foldered() {
             if let Some(d) = date {
                 dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", name))
             } else {
@@ -419,6 +433,35 @@ impl FileManager {
                             if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
                                 refs.push((decode_filename(raw_name), date, path));
                             }
+                        }
+                    }
+                }
+            }
+        } else if content_type.is_namespaced() {
+            // Walk namespace subfolders (any depth). Each .md file's bare name is
+            // its path relative to the content-type dir, leaf decoded:
+            // "MyBook/Chapter 14".
+            let mut stack: Vec<(PathBuf, String)> = vec![(base_dir.clone(), String::new())];
+            while let Some((dir, rel)) = stack.pop() {
+                let mut entries = tokio::fs::read_dir(&dir).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        let seg = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+                        let next_rel = if rel.is_empty() {
+                            seg.to_string()
+                        } else {
+                            format!("{}/{}", rel, seg)
+                        };
+                        stack.push((path, next_rel));
+                    } else if path.extension().is_some_and(|e| e == "md") {
+                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                            let bare = if rel.is_empty() {
+                                decode_filename(stem)
+                            } else {
+                                format!("{}/{}", rel, decode_filename(stem))
+                            };
+                            refs.push((bare, None, path));
                         }
                     }
                 }
@@ -737,6 +780,11 @@ mod tests {
         ct.organization = Organization::DateFoldered;
         ct
     }
+    fn namespaced_type() -> ContentType {
+        let mut ct = ContentType::new("book", "Book", "books");
+        ct.organization = Organization::Namespaced;
+        ct
+    }
 
     #[tokio::test]
     async fn test_sheet_roundtrip_flat_custom_type() {
@@ -794,6 +842,42 @@ mod tests {
         let list = fm.list_sheets(&ct).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "meeting/2026-01-30/Standup");
+    }
+
+    #[tokio::test]
+    async fn test_sheet_roundtrip_namespaced_custom_type() {
+        let (temp_dir, fm) = setup().await;
+        let ct = namespaced_type();
+
+        let mut page = Page::new_sheet("books/MyBook/Chapter 14", "book", None);
+        page.add_block(tend_core::Block::new("Once upon a time"));
+        fm.write_sheet(&ct, &page, None).await.unwrap();
+
+        // Stored under the namespace subfolder, leaf as the filename.
+        assert!(temp_dir
+            .path()
+            .join("books")
+            .join("MyBook")
+            .join("Chapter 14.md")
+            .exists());
+
+        let read = fm.read_sheet(&ct, "MyBook/Chapter 14", None).await.unwrap();
+        assert_eq!(read.name, "books/MyBook/Chapter 14");
+        assert_eq!(read.content_type, "book");
+        assert_eq!(read.journal_date, None);
+        assert_eq!(read.blocks.len(), 1);
+
+        // A second book nests independently.
+        let mut p2 = Page::new_sheet("books/OtherBook/Intro", "book", None);
+        p2.add_block(tend_core::Block::new("hi"));
+        fm.write_sheet(&ct, &p2, None).await.unwrap();
+
+        let mut list = fm.list_sheets(&ct).await.unwrap();
+        list.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].name, "books/MyBook/Chapter 14");
+        assert_eq!(list[1].name, "books/OtherBook/Intro");
+        assert!(list.iter().all(|m| m.journal_date.is_none()));
     }
 
     #[tokio::test]

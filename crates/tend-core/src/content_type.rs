@@ -21,6 +21,11 @@ pub enum Organization {
     DateNamed,
     /// `{directory}/{YYYY-MM-DD}/{name}.md` — date subfolder + freeform name. (custom by-date)
     DateFoldered,
+    /// `{directory}/{namespace}/{name}.md` — a named subfolder + freeform name.
+    /// Like `DateFoldered` but the subfolder is a freeform namespace (a "book"),
+    /// not a date. The namespace rides inside the sheet's `bare_name`
+    /// (`"MyBook/Chapter 14"`). (Compilations)
+    Namespaced,
 }
 
 /// A content type defines how a category of sheets is stored and organized.
@@ -88,6 +93,13 @@ impl ContentType {
     /// Whether the filename itself is a date (`YYYY-MM-DD`), as for journals.
     pub fn is_date_named(&self) -> bool {
         matches!(self.organization, Organization::DateNamed)
+    }
+
+    /// Whether sheets are foldered into a freeform namespace subdirectory
+    /// (`{dir}/{namespace}/{name}.md`) — Compilations. The namespace rides inside
+    /// the sheet's bare name (`"MyBook/Chapter 14"`).
+    pub fn is_namespaced(&self) -> bool {
+        matches!(self.organization, Organization::Namespaced)
     }
 
     /// Whether this type associates a date with each sheet (named or foldered).

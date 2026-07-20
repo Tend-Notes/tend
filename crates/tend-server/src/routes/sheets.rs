@@ -279,6 +279,13 @@ pub async fn create_sheet(
         date
     };
 
+    // Namespaced (Compilation) entries must carry a namespace: "namespace/name".
+    if content_type.is_namespaced() && !req.name.contains('/') {
+        return Err(AppError::BadRequest(
+            "A Compilation entry needs a namespace, e.g. \"MyBook/Chapter 14\"".to_string(),
+        ));
+    }
+
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
 
@@ -294,8 +301,13 @@ pub async fn create_sheet(
     // Use the full path as the page name for block index storage
     let full_page_name = build_sheet_page_name(&content_type, &req.name, date);
     let mut page = Page::new_sheet(&full_page_name, &content_type_id, date);
-    // Keep the title as just the name (without directory) for display
-    page.title = req.name.clone();
+    // Title is the display name: for a namespaced entry that's just the leaf
+    // ("Chapter 14"), otherwise the bare name as given.
+    page.title = if content_type.is_namespaced() {
+        req.name.rsplit('/').next().unwrap_or(&req.name).to_string()
+    } else {
+        req.name.clone()
+    };
 
     // Track cursor position from template {{cursor}} marker
     let mut cursor_position: Option<CursorPosition> = None;
