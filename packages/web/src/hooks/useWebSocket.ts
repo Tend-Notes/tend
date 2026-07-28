@@ -8,6 +8,7 @@ import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 import { useRecentSheetsStore } from '../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi, isDemoMode } from '../lib/api'
+import { useAuthStore } from '../stores/authStore'
 import { clearUserScopedContent } from '../lib/cacheReset'
 
 // WebSocket event types (must match server-side WsEvent enum)
@@ -84,6 +85,7 @@ export function useWebSocket() {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closingIntentionallyRef = useRef(false)
+  const failedAttemptsRef = useRef(0)
 
   useEffect(() => {
     // Skip WebSocket in demo mode - no backend server
@@ -106,7 +108,8 @@ export function useWebSocket() {
       wsRef.current = ws
 
       ws.onopen = () => {
-        // Connected
+        // Connected - reset the backoff
+        failedAttemptsRef.current = 0
       }
 
       ws.onmessage = (event) => {
@@ -230,10 +233,22 @@ export function useWebSocket() {
       ws.onclose = () => {
         wsRef.current = null
 
-        // Only reconnect if this wasn't an intentional close
-        if (!closingIntentionallyRef.current) {
-          reconnectTimeoutRef.current = setTimeout(connect, 3000)
+        if (closingIntentionallyRef.current) return
+
+        failedAttemptsRef.current += 1
+
+        // The server verifies the handshake against the auth service, so an
+        // expired session closes the socket immediately and forever. After a
+        // couple of failures, ask whoami whether this is an auth problem
+        // rather than a server that's simply down.
+        if (failedAttemptsRef.current === 2) {
+          void useAuthStore.getState().verifySession()
         }
+
+        // Exponential backoff, capped. The old fixed 3s retry hammered the
+        // server for as long as the tab stayed open on a dead session.
+        const delay = Math.min(3000 * 2 ** (failedAttemptsRef.current - 1), 60000)
+        reconnectTimeoutRef.current = setTimeout(connect, delay)
       }
 
       ws.onerror = () => {

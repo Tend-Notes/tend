@@ -72,9 +72,12 @@ export default defineConfig({
               // Mobile browsers can have higher latency even on WiFi
               // 15 seconds allows for slow connections while still enabling offline fallback
               networkTimeoutSeconds: 15,
-              // Only cache successful responses (prevents caching error pages)
+              // Only cache real successes. Status 0 is an opaque response —
+              // which is exactly what a bounce to the auth portal produces once
+              // the session expires — so caching it would store a login page as
+              // if it were sheet content.
               cacheableResponse: {
-                statuses: [0, 200],
+                statuses: [200],
               },
             },
           },
@@ -89,7 +92,7 @@ export default defineConfig({
               },
               networkTimeoutSeconds: 15,
               cacheableResponse: {
-                statuses: [0, 200],
+                statuses: [200],
               },
             },
           },

@@ -89,6 +89,10 @@ interface PageState {
   dismissConflict: () => void
   // Flush any pending saves immediately (called before navigation)
   flushPendingSave: () => Promise<void>
+  // Write the current page to IndexedDB as a draft right now, skipping the
+  // server. Used before a forced reload (e.g. re-authentication) where a
+  // server save would fail anyway.
+  persistDraftNow: () => Promise<void>
   // Clear the recent files history
   clearRecentFiles: () => void
   // Reset all state to initial values (for switching gardens)
@@ -904,6 +908,35 @@ export const usePageStore = create<PageState>()(
           // Just log the error - the draft is still saved locally
           console.warn('Failed to flush pending save:', e)
         }
+      }
+    },
+
+    persistDraftNow: async () => {
+      // Cancel the debounced writes - we are writing right now, and the server
+      // save must not fire (it would fail, and we are about to leave the page).
+      if (saveTimeout) {
+        clearTimeout(saveTimeout)
+        saveTimeout = null
+      }
+      if (draftTimeout) {
+        clearTimeout(draftTimeout)
+        draftTimeout = null
+      }
+      if (!pendingSaveData) return
+      pendingSaveData = null
+
+      const page = get().currentPage
+      if (!page) return
+
+      try {
+        // Sentinel serverVersion: the server never received these blocks, so
+        // the draft is stale against *any* real modifiedAt. An empty string can
+        // never equal an ISO timestamp, which makes the load path
+        // (navigateToPage/navigateToJournal) offer the draft back through the
+        // existing DraftRecoveryDialog once the user is signed in again.
+        await draftStore.saveDraft(page.name, orderedBlocksFromPage(page), page.rootBlocks, '')
+      } catch (e) {
+        console.warn('Failed to persist draft before reload:', e)
       }
     },
 

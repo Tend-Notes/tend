@@ -47,6 +47,84 @@ export class VersionConflictError extends Error {
   }
 }
 
+/**
+ * Error thrown when the request was rejected because the session is no longer
+ * authenticated. Tend sits behind a reverse proxy (e.g. Authelia) that expires
+ * sessions independently of the app, so any request can come back like this
+ * long after the page was loaded.
+ */
+export class AuthExpiredError extends Error {
+  constructor(message = 'Session expired') {
+    super(message)
+    this.name = 'AuthExpiredError'
+  }
+}
+
+// Listeners notified the first time a response looks like an expired session.
+// Kept here (rather than importing a store) so this module has no dependency
+// on the store layer - the auth store registers itself instead.
+type AuthExpiredListener = () => void
+const authExpiredListeners = new Set<AuthExpiredListener>()
+
+export function onAuthExpired(listener: AuthExpiredListener): () => void {
+  authExpiredListeners.add(listener)
+  return () => authExpiredListeners.delete(listener)
+}
+
+function notifyAuthExpired(): void {
+  for (const listener of authExpiredListeners) {
+    try {
+      listener()
+    } catch {
+      // A listener must never break the request path
+    }
+  }
+}
+
+function currentOrigin(): string | null {
+  return typeof globalThis.location !== 'undefined' ? globalThis.location.origin : null
+}
+
+/**
+ * Decide whether a response means "you are no longer signed in".
+ *
+ * An expired proxy session shows up in more than one shape depending on how
+ * the proxy is configured and how the browser handled the redirect:
+ *  - a plain 401/403 from the proxy or from Tend's own auth middleware
+ *  - a redirect that landed on the login portal (a different origin)
+ *  - an opaque redirect the browser refused to expose
+ *  - the portal's HTML login page returned where JSON was expected
+ */
+export function isAuthExpiredResponse(res: Response, origin = currentOrigin()): boolean {
+  if (res.status === 401 || res.status === 403) return true
+  if (res.type === 'opaqueredirect') return true
+
+  if (res.redirected && res.url && origin) {
+    try {
+      if (new URL(res.url, origin).origin !== origin) return true
+    } catch {
+      // Unparseable URL - fall through to the content-type check
+    }
+  }
+
+  // A successful-looking response that is HTML instead of JSON is the login
+  // page coming back through fetch.
+  const contentType = res.headers.get('content-type') ?? ''
+  if (res.ok && contentType.includes('text/html')) return true
+
+  return false
+}
+
+/**
+ * Throw AuthExpiredError (and notify listeners once) if this response means
+ * the session is gone. Call this from every API response path.
+ */
+export function checkAuthResponse(res: Response): void {
+  if (!isAuthExpiredResponse(res)) return
+  notifyAuthExpired()
+  throw new AuthExpiredError()
+}
+
 // Helper for JSON requests
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -56,6 +134,8 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
       ...options?.headers,
     },
   })
+
+  checkAuthResponse(res)
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: res.statusText }))
@@ -295,6 +375,7 @@ const _git = {
 
   removeRemote: () =>
     fetch(`${API_BASE}/git/remote`, { method: 'DELETE' }).then((res) => {
+      checkAuthResponse(res)
       if (!res.ok) throw new Error('Failed to remove remote')
     }),
 
@@ -522,6 +603,7 @@ const _user = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(prefs),
     }).then((res) => {
+      checkAuthResponse(res)
       if (!res.ok) throw new Error('Failed to save preferences')
     }),
 
@@ -533,6 +615,7 @@ const _user = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state),
     }).then((res) => {
+      checkAuthResponse(res)
       if (!res.ok) throw new Error('Failed to save state')
     }),
 }
@@ -548,6 +631,8 @@ const _blocks = {
     const res = await fetch(`${API_BASE}/blocks/${encodeURIComponent(uuid)}`, {
       headers: { 'Content-Type': 'application/json' },
     })
+
+    checkAuthResponse(res)
 
     if (res.status === 404) {
       return null
@@ -632,6 +717,8 @@ const _importApi = {
       method: 'POST',
       body: formData,
     })
+
+    checkAuthResponse(response)
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }))

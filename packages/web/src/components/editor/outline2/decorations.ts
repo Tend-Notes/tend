@@ -12,6 +12,7 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
 import { useTagStore } from '../../../stores/tagStore'
+import { useSettingsStore } from '../../../stores/settingsStore'
 import { nextStatusKeyword } from '../../../lib/taskStatus'
 import { isCodeFenceText } from './codeFence'
 
@@ -41,6 +42,8 @@ function activeLinePos(state: EditorState, focused: boolean): number {
 // gates tags between editable text (caret inside) and the collapsed pill.
 function decorationsForDoc(doc: PMNode, activePos: number, caretHead: number): DecorationSet {
   const decos: Decoration[] = []
+  // Content types drive Compilation-aware wikilink labels ("{compilation}/{leaf}").
+  const contentTypes = useSettingsStore.getState().contentTypes
 
   doc.descendants((node, pos) => {
     if (node.type.name !== 'line') return
@@ -58,7 +61,7 @@ function decorationsForDoc(doc: PMNode, activePos: number, caretHead: number): D
       if (to > contentTo) decos.push(Decoration.inline(contentTo, to, { class: delimClass }))
     }
 
-    for (const tok of parseContent(text)) {
+    for (const tok of parseContent(text, contentTypes)) {
       const { srcFrom, srcLen, lead, renderedLen } = tok.span
       const from = base + srcFrom
       const to = base + srcFrom + srcLen
