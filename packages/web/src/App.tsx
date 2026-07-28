@@ -26,7 +26,9 @@ import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
 import { useWebSocket } from './hooks/useWebSocket'
 import { useTheme } from './hooks/useTheme'
-import { contentTypes as contentTypesApi, identity, isDemoMode } from './lib/api'
+import { contentTypes as contentTypesApi, identity, isDemoMode, AuthExpiredError } from './lib/api'
+import { useAuthStore } from './stores/authStore'
+import { SessionExpiredOverlay } from './components/ui/SessionExpiredOverlay'
 import { initUserSync } from './lib/userSync'
 import { clearUserScopedContent } from './lib/cacheReset'
 
@@ -125,6 +127,7 @@ function App() {
       localStorage.setItem('tend-last-mode', 'server')
       identity.whoami()
         .then(async ({ username }) => {
+          useAuthStore.getState().markSessionValid()
           const lastUser = localStorage.getItem('tend-last-user')
           if (lastUser && lastUser !== username) {
             // Clear ALL localStorage caches - different user, different data
@@ -148,7 +151,19 @@ function App() {
           // Initialize page from URL AFTER user sync (URL may have been redirected)
           initializeFromUrl()
         })
-        .catch((err) => console.error('Failed to get current user:', err))
+        .catch((err) => {
+          console.error('Failed to get current user:', err)
+          if (err instanceof AuthExpiredError) {
+            // api.ts already raised the session-expired flag; the overlay takes
+            // over from here.
+            return
+          }
+          // Any other failure must still initialize the page. Otherwise
+          // pageStore.initialized stays false and MainContent shows "Loading..."
+          // forever with no way out - which is exactly what an expired session
+          // used to look like.
+          initializeFromUrl()
+        })
 
       // Load content types from API (needed for content type routing)
       contentTypesApi.list()
@@ -159,6 +174,46 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) // Run only on mount - these are stable store actions
+
+  // Re-check the session when the app comes back to the foreground.
+  //
+  // The common failure is a tab (or installed app) left open for days: the
+  // proxy session lapses while nothing is running, and the user finds out only
+  // when their next click quietly fails. Checking on wake surfaces it up front.
+  useEffect(() => {
+    if (isDemoMode) return
+
+    const HIDDEN_THRESHOLD_MS = 5 * 60 * 1000
+    let hiddenSince: number | null = null
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenSince = Date.now()
+        return
+      }
+      // Became visible. Only bother the server if we were away a while - the
+      // check is cheap but pointless on a quick tab switch.
+      const away = hiddenSince === null ? Infinity : Date.now() - hiddenSince
+      hiddenSince = null
+      if (away < HIDDEN_THRESHOLD_MS) return
+      void useAuthStore.getState().verifySession()
+    }
+
+    // iOS restores a backgrounded app from the back/forward cache, which fires
+    // pageshow rather than a useful visibilitychange - check there too.
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return
+      hiddenSince = null
+      void useAuthStore.getState().verifySession()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [])
 
   // Handle browser back/forward navigation
   useEffect(() => {
@@ -307,6 +362,9 @@ function App() {
           onClose={() => setKeyboardHelpOpen(false)}
         />
       </Suspense>
+
+      {/* Session expired - blocks the UI and offers a trip to the login page */}
+      <SessionExpiredOverlay />
 
       {/* Draft recovery dialog */}
       <DraftRecoveryDialog />

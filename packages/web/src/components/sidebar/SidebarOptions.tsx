@@ -9,7 +9,7 @@ import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
-import { contentTypes as contentTypesApi, isDemoMode } from '../../lib/api'
+import { contentTypes as contentTypesApi, isDemoMode, checkAuthResponse } from '../../lib/api'
 import {
   getDarkThemes,
   getLightThemes,
@@ -1478,6 +1478,7 @@ function GardensSection() {
       setLoading(true)
       setError(null)
       const response = await fetch('/api/v1/gardens')
+      checkAuthResponse(response)
       if (!response.ok) throw new Error('Failed to fetch gardens')
       const data = await response.json()
       setGardens(data.gardens)
@@ -1532,6 +1533,8 @@ function GardensSection() {
         }),
       })
 
+      checkAuthResponse(response)
+
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to create garden')
@@ -1572,6 +1575,8 @@ function GardensSection() {
       })
 
       clearTimeout(timeoutId)
+
+      checkAuthResponse(response)
 
       if (!response.ok) {
         const data = await response.json()
@@ -1623,6 +1628,8 @@ function GardensSection() {
     try {
       setUnlocking(true)
       setError(null)
+      // No checkAuthResponse here: this endpoint answers a wrong passphrase
+      // with 401, which has nothing to do with the proxy session.
       const response = await fetch('/api/v1/gardens/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1670,6 +1677,7 @@ function GardensSection() {
       const response = await fetch(`/api/v1/gardens/${encodeURIComponent(id)}`, {
         method: 'DELETE',
       })
+      checkAuthResponse(response)
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to archive garden')
@@ -1691,6 +1699,7 @@ function GardensSection() {
       const response = await fetch(`/api/v1/gardens/${encodeURIComponent(id)}/restore`, {
         method: 'POST',
       })
+      checkAuthResponse(response)
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to restore garden')
@@ -1708,6 +1717,7 @@ function GardensSection() {
       const response = await fetch(`/api/v1/gardens/${encodeURIComponent(id)}/permanent`, {
         method: 'DELETE',
       })
+      checkAuthResponse(response)
       if (!response.ok) {
         const data = await response.json()
         throw new Error(data.error || 'Failed to delete garden')
