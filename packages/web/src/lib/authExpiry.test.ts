@@ -32,8 +32,15 @@ describe('isAuthExpiredResponse', () => {
     expect(isAuthExpiredResponse(res({ status: 401 }))).toBe(true)
   })
 
-  it('treats 403 as expired', () => {
-    expect(isAuthExpiredResponse(res({ status: 403 }))).toBe(true)
+  // Regression: Tend answers routine "feature off for this garden" cases with
+  // 403 (block lookups in an encrypted garden). Treating those as an expired
+  // session blocked the app on a valid login.
+  it('does not treat 403 as expired', () => {
+    expect(isAuthExpiredResponse(res({ status: 403 }))).toBe(false)
+  })
+
+  it('does not treat a 403 feature_disabled body as expired', () => {
+    expect(isAuthExpiredResponse(res({ status: 403, contentType: 'application/json' }))).toBe(false)
   })
 
   it('treats an opaque redirect as expired', () => {

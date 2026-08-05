@@ -106,5 +106,60 @@ const browser = await launch()
   await page.close()
 }
 
+// --- A valid session must never be interrupted -------------------------
+// Regression: Tend answers routine "feature off for this garden" cases with
+// 403 (block lookups in an encrypted garden), and a 401 can also come from a
+// wrong garden passphrase. Neither means the proxy signed us out, and treating
+// them that way made the app unusable on a perfectly valid login.
+{
+  const page = await browser.newPage()
+  await page.goto(APP, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(2000)
+
+  // Everything except whoami fails the way a locked-down feature does. whoami
+  // keeps answering normally, because the session is genuinely fine.
+  await page.route('**/api/v1/**', (route) => {
+    if (route.request().url().includes('/whoami')) return route.fallback()
+    route.fulfill({
+      status: 403,
+      contentType: 'application/json',
+      body: '{"error":"feature_disabled","reason":"block_references_require_unencrypted_garden"}',
+    })
+  })
+
+  await page.evaluate(() => {
+    window.history.pushState(null, '', '/page/Anything')
+    window.dispatchEvent(new PopStateEvent('popstate', { state: null }))
+  })
+  await page.waitForTimeout(4000)
+
+  check(
+    'valid session: a routine 403 does not claim the session expired',
+    !(await page.getByRole('heading', { name: 'Session expired' }).isVisible().catch(() => false))
+  )
+  await page.close()
+}
+
+// --- The dialog is escapable -------------------------------------------
+{
+  const page = await browser.newPage()
+  await page.route('**/api/v1/whoami', (route) =>
+    route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"Authentication required"}' })
+  )
+  await page.goto(APP, { waitUntil: 'domcontentloaded' })
+
+  const overlay = page.getByRole('heading', { name: 'Session expired' })
+  await overlay.waitFor({ timeout: 10000 }).catch(() => {})
+  await page.getByRole('button', { name: /keep working/i }).click()
+  await page.waitForTimeout(1000)
+
+  check('dialog can be dismissed', !(await overlay.isVisible().catch(() => false)))
+  check(
+    'dismissed dialog leaves a usable screen, not a spinner',
+    !(await page.getByText('Loading...', { exact: true }).isVisible().catch(() => false))
+  )
+  await page.close()
+}
+
 await browser.close()
 done()
