@@ -3,14 +3,17 @@ import { useState } from 'react'
 import { useAuthStore } from '../../stores/authStore'
 
 /**
- * Blocking dialog shown when the reverse proxy's session has expired.
+ * Dialog shown when /whoami has confirmed the reverse proxy signed us out.
  *
- * Deliberately not dismissable: every request is failing at this point, so
- * dismissing it would just return the user to a UI that silently does nothing.
+ * "Keep working" is not decoration. If this dialog ever appears wrongly it
+ * would otherwise brick the app, and a wrongly-blocked UI is worse than the
+ * spinner this whole path exists to fix. Dismissing stops it reappearing for
+ * the rest of the session.
  */
 export function SessionExpiredOverlay() {
   const sessionExpired = useAuthStore((state) => state.sessionExpired)
   const reauthenticate = useAuthStore((state) => state.reauthenticate)
+  const dismiss = useAuthStore((state) => state.dismiss)
   const [signingIn, setSigningIn] = useState(false)
 
   if (!sessionExpired) return null
@@ -35,7 +38,14 @@ export function SessionExpiredOverlay() {
           Unsaved changes on this page are kept on this device and offered back
           after you sign in.
         </p>
-        <div className="flex justify-end">
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={dismiss}
+            disabled={signingIn}
+            className="px-4 py-2 text-sm text-base-04 hover:text-base-05 transition-colors"
+          >
+            Keep working
+          </button>
           <button
             onClick={handleSignIn}
             disabled={signingIn}

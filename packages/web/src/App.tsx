@@ -154,14 +154,14 @@ function App() {
         .catch((err) => {
           console.error('Failed to get current user:', err)
           if (err instanceof AuthExpiredError) {
-            // api.ts already raised the session-expired flag; the overlay takes
-            // over from here.
-            return
+            // whoami is the authority on the session, so no second opinion is
+            // needed here.
+            useAuthStore.getState().markSessionExpiredConfirmed()
           }
-          // Any other failure must still initialize the page. Otherwise
-          // pageStore.initialized stays false and MainContent shows "Loading..."
-          // forever with no way out - which is exactly what an expired session
-          // used to look like.
+          // Initialize regardless. Otherwise pageStore.initialized stays false
+          // and MainContent shows "Loading..." forever with no way out - which
+          // is exactly what an expired session used to look like. It also means
+          // dismissing the dialog leaves a usable screen behind it.
           initializeFromUrl()
         })
 

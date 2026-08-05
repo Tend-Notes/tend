@@ -60,7 +60,10 @@ export class AuthExpiredError extends Error {
   }
 }
 
-// Listeners notified the first time a response looks like an expired session.
+// Listeners notified when a response *looks* like an expired session. This is
+// a suspicion to be checked, not a conclusion - the auth store confirms it
+// against /whoami before telling the user anything.
+//
 // Kept here (rather than importing a store) so this module has no dependency
 // on the store layer - the auth store registers itself instead.
 type AuthExpiredListener = () => void
@@ -86,17 +89,26 @@ function currentOrigin(): string | null {
 }
 
 /**
- * Decide whether a response means "you are no longer signed in".
+ * Decide whether a response *might* mean "you are no longer signed in".
  *
  * An expired proxy session shows up in more than one shape depending on how
  * the proxy is configured and how the browser handled the redirect:
- *  - a plain 401/403 from the proxy or from Tend's own auth middleware
+ *  - a 401 from the proxy or from Tend's own auth middleware
  *  - a redirect that landed on the login portal (a different origin)
  *  - an opaque redirect the browser refused to expose
  *  - the portal's HTML login page returned where JSON was expected
+ *
+ * This is a suspicion, not a verdict. 401 in particular has non-session uses
+ * (a wrong garden passphrase), so nothing acts on this without confirming
+ * against /whoami first - see the auth store.
+ *
+ * 403 is deliberately NOT here. Tend answers routine "this feature is off for
+ * this garden" cases with 403 (block lookups in an encrypted garden, see
+ * crates/tend-server/src/routes/blocks.rs), and treating those as an expired
+ * session locked users out of a perfectly valid session.
  */
 export function isAuthExpiredResponse(res: Response, origin = currentOrigin()): boolean {
-  if (res.status === 401 || res.status === 403) return true
+  if (res.status === 401) return true
   if (res.type === 'opaqueredirect') return true
 
   if (res.redirected && res.url && origin) {

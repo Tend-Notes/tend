@@ -7,55 +7,86 @@
 // Nothing in the app can renew that session from JavaScript - only a full page
 // navigation makes the proxy issue its login redirect - so the job here is to
 // notice the expiry and offer that navigation.
+//
+// The hard part is not noticing, it is *not crying wolf*. Blocking the UI on a
+// misread response makes the app unusable, which is strictly worse than the
+// spinner this was written to fix. So a suspicious response never sets the flag
+// on its own: it triggers a /whoami check, and only whoami's answer counts.
 
 import { create } from 'zustand'
 import { identity, isDemoMode, onAuthExpired, AuthExpiredError } from '../lib/api'
 import { usePageStore } from './pageStore'
 
 interface AuthState {
-  /** True once a request has come back looking like an expired session. */
+  /** True once /whoami has confirmed we are signed out. */
   sessionExpired: boolean
   /** Last time we successfully confirmed the session, epoch ms. */
   lastVerifiedAt: number | null
 
-  markSessionExpired: () => void
   markSessionValid: () => void
+  /**
+   * Record an expiry that /whoami itself reported. Only for callers holding
+   * whoami's own answer - everything else must go through verifySession.
+   */
+  markSessionExpiredConfirmed: () => void
   /** Ask the server who we are; flips sessionExpired when auth has lapsed. */
   verifySession: () => Promise<boolean>
   /** Save unsaved work locally, then navigate so the proxy can sign us in. */
   reauthenticate: () => Promise<void>
+  /** Let the user out of the dialog if we got it wrong. */
+  dismiss: () => void
 }
+
+// A single in-flight whoami shared by every suspicious response, so a burst of
+// failing requests produces one check rather than one per request.
+let confirmInFlight: Promise<boolean> | null = null
+// While the confirming whoami is running, its own failure must not re-enter
+// this path - that would recurse.
+let confirming = false
+// Set when the user dismisses the dialog: stop nagging for the rest of the
+// session rather than re-showing on the next request.
+let suppressed = false
 
 export const useAuthStore = create<AuthState>()((set, get) => ({
   sessionExpired: false,
   lastVerifiedAt: null,
 
-  markSessionExpired: () => {
-    // Demo mode has no backend and no auth - never block the UI there.
-    if (isDemoMode) return
-    if (get().sessionExpired) return
-    set({ sessionExpired: true })
-  },
-
   markSessionValid: () => {
     set({ sessionExpired: false, lastVerifiedAt: Date.now() })
   },
 
+  markSessionExpiredConfirmed: () => {
+    if (isDemoMode || suppressed) return
+    set({ sessionExpired: true })
+  },
+
   verifySession: async () => {
+    // Demo mode has no backend and no auth - never block the UI there.
     if (isDemoMode) return true
-    try {
-      await identity.whoami()
-      get().markSessionValid()
-      return true
-    } catch (e) {
-      if (e instanceof AuthExpiredError) {
-        get().markSessionExpired()
-        return false
+    if (confirmInFlight) return confirmInFlight
+
+    confirmInFlight = (async () => {
+      confirming = true
+      try {
+        await identity.whoami()
+        get().markSessionValid()
+        return true
+      } catch (e) {
+        if (e instanceof AuthExpiredError) {
+          // whoami is the authority: the session really is gone.
+          if (!suppressed) set({ sessionExpired: true })
+          return false
+        }
+        // Anything else (server down, offline, DNS, a 500) is not an auth
+        // problem. Leave the session alone rather than blocking the app.
+        return true
+      } finally {
+        confirming = false
+        confirmInFlight = null
       }
-      // Anything else (server down, offline, DNS) is not an auth problem.
-      // Leave the session alone rather than throwing up a misleading dialog.
-      return true
-    }
+    })()
+
+    return confirmInFlight
   },
 
   reauthenticate: async () => {
@@ -74,10 +105,17 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     // page, where there is no easy hard reload.
     window.location.assign(window.location.href)
   },
+
+  dismiss: () => {
+    suppressed = true
+    set({ sessionExpired: false })
+  },
 }))
 
-// Any API response that looks like an expired session raises the flag. This is
-// registered once, at module load, and covers every call site in lib/api.ts.
+// A response that looks like an expired session only *starts* a check. Acting
+// on the response alone is how a routine 403/401 from an unrelated endpoint
+// ends up blocking a perfectly good session.
 onAuthExpired(() => {
-  useAuthStore.getState().markSessionExpired()
+  if (confirming || suppressed) return
+  void useAuthStore.getState().verifySession()
 })
