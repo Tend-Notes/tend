@@ -336,6 +336,9 @@ impl FileManager {
         // Ensure parent directory exists (for nested page names like "meeting/2026-01-23/Name")
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
+            // Nested subdirs get the default umask; tighten to owner-only to
+            // match the 0700 pages/ root.
+            restrict_dir(parent);
         }
 
         // Refuse to write through a symlink or outside the garden root.
@@ -347,6 +350,9 @@ impl FileManager {
 
         // Atomic rename
         tokio::fs::rename(&tmp_path, path).await?;
+
+        // Owner-only file permissions, consistent with the garden tree.
+        restrict_file(path);
 
         // Remove from pending writes after a delay to ensure file watcher
         // events are properly ignored. The delay needs to be long enough to:

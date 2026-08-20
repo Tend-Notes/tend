@@ -23,7 +23,10 @@ use crate::encryption::{
     wrap_identity, EncryptionError,
 };
 use crate::error::StorageError;
-use crate::fs::{decode_filename, encode_filename, ensure_within_root, validate_safe_name};
+use crate::fs::{
+    decode_filename, encode_filename, ensure_within_root, restrict_dir, restrict_file,
+    validate_safe_name,
+};
 
 /// File extension for encrypted files
 const ENCRYPTED_EXT: &str = "md.age";
@@ -304,6 +307,9 @@ impl EncryptedFileManager {
         // refuse to write through a symlink or outside the garden root.
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
+            // Nested subdirs (date/namespace folders) get the default umask;
+            // tighten to owner-only so they match the 0700 pages/ root.
+            restrict_dir(parent);
         }
         ensure_within_root(&self.root, path)?;
         ensure_within_root(&self.root, &tmp_path)?;
@@ -319,6 +325,10 @@ impl EncryptedFileManager {
 
         // Atomic rename
         tokio::fs::rename(&tmp_path, path).await?;
+
+        // Owner-only: the enclosing dir is already 0700, but tighten the file
+        // itself so the at-rest ciphertext never relies on the dir bit alone.
+        restrict_file(path);
 
         // Remove from pending writes after a delay to ensure file watcher
         // events are properly ignored. Using 1000ms for consistency with fs.rs.

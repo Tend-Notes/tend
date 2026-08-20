@@ -449,8 +449,16 @@ async fn process_import(
                 let page_name = urlencoding::decode(file_name.trim_end_matches(".md"))
                     .unwrap_or_else(|_| file_name.trim_end_matches(".md").into())
                     .to_string();
-                let dest_path = garden_path.join("pages").join(format!("{}.md", page_name));
-                Ok((dest_path, page_name))
+                // Decoding can reintroduce '/' or '..'; validate before the path
+                // is even probed for existence (the write later re-validates too).
+                match tend_storage::fs::validate_safe_name(&page_name) {
+                    Ok(()) => {
+                        let dest_path =
+                            garden_path.join("pages").join(format!("{}.md", page_name));
+                        Ok((dest_path, page_name))
+                    }
+                    Err(_) => Err(format!("Unsafe page name after decoding: {}", page_name)),
+                }
             }
             ImportTarget::Journal => {
                 // Convert Logseq date format to Tend format (YYYY-MM-DD.md)

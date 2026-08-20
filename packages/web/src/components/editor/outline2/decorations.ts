@@ -13,6 +13,7 @@ import { Node as PMNode } from 'prosemirror-model'
 import { parseContent } from '../contentRenderer'
 import { useTagStore } from '../../../stores/tagStore'
 import { useSettingsStore } from '../../../stores/settingsStore'
+import { safeHref } from '../../../lib/safeHref'
 import { nextStatusKeyword } from '../../../lib/taskStatus'
 import { isCodeFenceText } from './codeFence'
 
@@ -191,7 +192,13 @@ export function formattingPlugin(nav: NavHandlers): Plugin<FmtState> {
             return true
           }
           if (href) {
-            window.open(href, '_blank', 'noopener,noreferrer')
+            // Defense in depth: the URL tokenizer only emits http(s), but guard
+            // the open in case that ever changes — never launch a javascript:/
+            // data:/etc. URL.
+            const safe = safeHref(href)
+            if (safe !== '#') {
+              window.open(safe, '_blank', 'noopener,noreferrer')
+            }
             event.preventDefault()
             return true
           }
