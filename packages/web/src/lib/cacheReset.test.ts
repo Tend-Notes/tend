@@ -5,13 +5,32 @@ vi.mock('./draftStore', () => ({
   clearAllDrafts: vi.fn().mockResolvedValue(undefined),
 }))
 
-import { clearUserScopedContent } from './cacheReset'
+import { clearUserScopedContent, clearContentCaches } from './cacheReset'
 import { clearAllDrafts } from './draftStore'
 
 afterEach(() => {
   vi.clearAllMocks()
   // @ts-expect-error test cleanup
   delete globalThis.caches
+})
+
+describe('clearContentCaches', () => {
+  it('deletes the api content caches but NOT drafts (kept for recovery)', async () => {
+    const del = vi.fn().mockResolvedValue(true)
+    // @ts-expect-error minimal CacheStorage stub for the test
+    globalThis.caches = { delete: del }
+
+    await clearContentCaches()
+
+    expect(del).toHaveBeenCalledWith('api-pages')
+    expect(del).toHaveBeenCalledWith('api-journals')
+    expect(clearAllDrafts).not.toHaveBeenCalled()
+  })
+
+  it('is a no-op without Cache Storage', async () => {
+    await expect(clearContentCaches()).resolves.toBeUndefined()
+    expect(clearAllDrafts).not.toHaveBeenCalled()
+  })
 })
 
 describe('clearUserScopedContent', () => {

@@ -16,6 +16,7 @@
 import { create } from 'zustand'
 import { identity, isDemoMode, onAuthExpired, AuthExpiredError } from '../lib/api'
 import { usePageStore } from './pageStore'
+import { clearContentCaches } from '../lib/cacheReset'
 
 interface AuthState {
   /** True once /whoami has confirmed we are signed out. */
@@ -57,6 +58,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   markSessionExpiredConfirmed: () => {
     if (isDemoMode || suppressed) return
+    // Purge the note-content caches so a reload on a shared machine after the
+    // session lapses cannot serve them. Drafts are kept for post-login recovery.
+    void clearContentCaches()
     set({ sessionExpired: true })
   },
 
@@ -73,8 +77,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return true
       } catch (e) {
         if (e instanceof AuthExpiredError) {
-          // whoami is the authority: the session really is gone.
-          if (!suppressed) set({ sessionExpired: true })
+          // whoami is the authority: the session really is gone. Purge the
+          // note-content caches (drafts kept for recovery).
+          if (!suppressed) {
+            void clearContentCaches()
+            set({ sessionExpired: true })
+          }
           return false
         }
         // Anything else (server down, offline, DNS, a 500) is not an auth
