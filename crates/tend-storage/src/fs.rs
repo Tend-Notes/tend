@@ -117,6 +117,55 @@ pub(crate) fn restrict_file(path: &Path) {
 #[cfg(not(unix))]
 pub(crate) fn restrict_file(_path: &Path) {}
 
+/// Verify that `path` stays inside `root`, defending against symlinks that a
+/// foreign source (e.g. an imported or pulled remote garden) may have planted.
+///
+/// `validate_safe_name` blocks `..`/absolute names, but not a symlink *file*
+/// already sitting in the tree. Tend never creates symlinks inside a garden, so:
+/// - a symlink at the target itself is refused outright, and
+/// - the nearest existing ancestor is canonicalized and must stay within the
+///   canonicalized root, catching a symlinked intermediate directory.
+///
+/// Works for not-yet-existing targets (writes): a missing path resolves via its
+/// nearest existing ancestor. A legitimately symlinked garden *root* is fine —
+/// the root is canonicalized too.
+pub(crate) fn ensure_within_root(root: &Path, path: &Path) -> Result<(), StorageError> {
+    if let Ok(meta) = std::fs::symlink_metadata(path) {
+        if meta.file_type().is_symlink() {
+            return Err(StorageError::InvalidPath(
+                "refusing to operate on a symlink inside the garden".into(),
+            ));
+        }
+    }
+
+    let canonical_root = root.canonicalize().map_err(|e| {
+        StorageError::InvalidPath(format!("cannot canonicalize garden root: {e}"))
+    })?;
+
+    let mut ancestor = path;
+    loop {
+        match ancestor.canonicalize() {
+            Ok(canon) => {
+                return if canon.starts_with(&canonical_root) {
+                    Ok(())
+                } else {
+                    Err(StorageError::InvalidPath(
+                        "path escapes the garden root".into(),
+                    ))
+                };
+            }
+            Err(_) => match ancestor.parent() {
+                Some(parent) => ancestor = parent,
+                None => {
+                    return Err(StorageError::InvalidPath(
+                        "path has no ancestor within the garden root".into(),
+                    ))
+                }
+            },
+        }
+    }
+}
+
 /// Build a lightweight `PageMeta` for a sheet from just its name + date (no file
 /// read). Only `name` (canonicalized) and `journal_date` are meaningful; the
 /// rest are placeholders. Used by the name-only listing that resolves which
@@ -288,6 +337,10 @@ impl FileManager {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
+
+        // Refuse to write through a symlink or outside the garden root.
+        ensure_within_root(&self.root, path)?;
+        ensure_within_root(&self.root, &tmp_path)?;
 
         // Write to temp file
         tokio::fs::write(&tmp_path, &content).await?;
@@ -581,6 +634,7 @@ impl FileManager {
             }
         };
 
+        ensure_within_root(&self.root, &path)?;
         let content = tokio::fs::read_to_string(&path).await?;
         let mut page = parse_markdown(&content, name)
             .map_err(|e| StorageError::ParseError(e.to_string()))?;
@@ -725,6 +779,41 @@ mod tests {
 
         assert!(temp_dir.path().join("pages").exists());
         assert!(temp_dir.path().join("journals").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_symlink_page_is_refused() {
+        // A foreign source (imported/pulled remote garden) plants a symlink in
+        // pages/ pointing at a file outside the garden. Reading it must refuse,
+        // not follow the link.
+        let (temp_dir, fm) = setup().await;
+
+        let secret_dir = TempDir::new().unwrap();
+        let secret = secret_dir.path().join("secret.txt");
+        std::fs::write(&secret, "TOP SECRET").unwrap();
+
+        let link = temp_dir.path().join("pages").join("pwned.md");
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+
+        let result = fm.read_page("pwned").await;
+        assert!(
+            matches!(result, Err(StorageError::InvalidPath(_))),
+            "reading a symlinked page should be refused, got {:?}",
+            result.map(|p| p.name)
+        );
+
+        // Writing through the same symlink must also be refused (would otherwise
+        // overwrite the link target).
+        let page = Page::new("pwned".to_string());
+        let write = fm.write_page(&page).await;
+        assert!(
+            matches!(write, Err(StorageError::InvalidPath(_))),
+            "writing a symlinked page should be refused, got {:?}",
+            write
+        );
+        // The target was not overwritten.
+        assert_eq!(std::fs::read_to_string(&secret).unwrap(), "TOP SECRET");
     }
 
     #[cfg(unix)]

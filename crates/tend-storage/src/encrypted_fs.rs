@@ -23,7 +23,7 @@ use crate::encryption::{
     wrap_identity, EncryptionError,
 };
 use crate::error::StorageError;
-use crate::fs::{decode_filename, encode_filename, validate_safe_name};
+use crate::fs::{decode_filename, encode_filename, ensure_within_root, validate_safe_name};
 
 /// File extension for encrypted files
 const ENCRYPTED_EXT: &str = "md.age";
@@ -299,6 +299,14 @@ impl EncryptedFileManager {
             .map_err(|e| StorageError::Other(format!("Encryption failed: {}", e)))?;
 
         let tmp_path = path.with_extension("tmp");
+
+        // Ensure parent exists so the containment check can resolve it, then
+        // refuse to write through a symlink or outside the garden root.
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        ensure_within_root(&self.root, path)?;
+        ensure_within_root(&self.root, &tmp_path)?;
 
         // Mark as pending write
         {
@@ -619,6 +627,7 @@ impl EncryptedFileManager {
             }
         };
 
+        ensure_within_root(&self.root, &path)?;
         let encrypted = tokio::fs::read(&path).await?;
         let content = self.decrypt_file(&encrypted)?;
 

@@ -133,6 +133,17 @@ impl BackupManager {
             return Err(GitError::OperationFailed(stderr.to_string()));
         }
 
+        // Never materialize symlinks when checking out / pulling. A remote garden
+        // (imported or pulled) could otherwise commit a page as a symlink to a
+        // file outside the garden; with core.symlinks=false git writes the link
+        // as a regular text file instead. Defense in depth with the storage
+        // layer's symlink refusal (tend-storage::fs::ensure_within_root).
+        Command::new("git")
+            .args(["config", "core.symlinks", "false"])
+            .current_dir(&self.repo_path)
+            .output()
+            .ok();
+
         // Configure default user if not set (needed for commits in sandboxed environments)
         let check_user = Command::new("git")
             .args(["config", "user.name"])
@@ -1135,6 +1146,15 @@ impl BackupManager {
         if !self.is_git_repo() {
             return Err(GitError::RepositoryError("Not a git repository".to_string()));
         }
+
+        // Defensively disable symlink materialization for repos created before
+        // init_repo started setting this (the checkout below would otherwise
+        // honor symlink blobs committed by the remote). See init_repo.
+        Command::new("git")
+            .args(["config", "core.symlinks", "false"])
+            .current_dir(&self.repo_path)
+            .output()
+            .ok();
 
         let status = self.status()?;
         let remote_url = status.remote.clone().ok_or(GitError::NoRemote)?;
