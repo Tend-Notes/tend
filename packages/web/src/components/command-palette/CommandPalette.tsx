@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { useShallow } from 'zustand/react/shallow'
 import { Command } from 'cmdk'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore, usesDate, type ContentType } from '../../stores/settingsStore'
@@ -88,6 +88,15 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [showLinkCal, setShowLinkCal] = useState(false)
   // Selected namespace ("book") for namespaced/Compilation content types.
   const [linkNamespace, setLinkNamespace] = useState('')
+  // Link panel keyboard model. `search` is the box's live value (and the
+  // Create-new target). `linkFilter` is the last actually-TYPED query and is
+  // what filters the results — so arrowing through results fills the box for
+  // Create without reshuffling the frozen list. `linkZone` tracks which region
+  // (search / results / create) Tab and Enter act on; `resultIndex` is the
+  // highlighted result while in the results zone.
+  const [linkFilter, setLinkFilter] = useState('')
+  const [linkZone, setLinkZone] = useState<'search' | 'results' | 'create'>('search')
+  const [resultIndex, setResultIndex] = useState(0)
   // The file-title input in the namespaced link panel — focused after a
   // compilation is chosen so the two levels flow top-to-bottom.
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -110,6 +119,9 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setCommitMessage('')
       setShowCommitInput(false)
       setLinkingSheet(null)
+      setLinkFilter('')
+      setLinkZone('search')
+      setResultIndex(0)
       setLinkDate('')
       setLinkNamespace('')
       setShowLinkCal(false)
@@ -120,6 +132,9 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   const handleStartLinkSheet = useCallback(async (ct: ContentType) => {
     setSearch('')
+    setLinkFilter('')
+    setLinkZone('search')
+    setResultIndex(0)
     setLinkDate('')
     setLinkNamespace('')
     setShowLinkCal(false)
@@ -349,10 +364,14 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
         {linkingSheet ? (
           // Link to existing sheet UI
           (() => {
-            const query = search.toLowerCase().trim()
             const ct = linkingSheet.contentType
             const isDated = usesDate(ct)
             const isNamespaced = ct.organization === 'namespaced'
+            // The regular panel filters on the last TYPED query (linkFilter) so
+            // arrowing through results can fill the box (search) for Create
+            // without reshuffling the list. The namespaced panel has no such
+            // arrow-fill, so it filters on the box directly.
+            const query = (isNamespaced ? search : linkFilter).toLowerCase().trim()
             const nameOf = (s: PageMeta) =>
               isNamespaced ? (s.name.split('/').pop() || s.title || '') : (s.title || s.name.split('/').pop() || '')
             // A listed sheet's namespace ("book"): the first path segment after the directory.
@@ -381,8 +400,11 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             // create — only a real collision at the exact target path does, and there
             // you'd link the existing sheet instead. Namespaced types also need a
             // chosen namespace first.
+            // Create is offered whenever the box holds a name and the exact
+            // target path is free — gated on the box (search), not the frozen
+            // filter, so a name filled in by arrowing still offers Create.
             const showCreate =
-              query.length > 0 &&
+              search.trim().length > 0 &&
               (!isNamespaced || linkNamespace.trim().length > 0) &&
               !linkingSheet.sheets.some(s => s.name === newSheetPath)
             // Insert a wikilink for the chosen/created target and close the panel.
@@ -529,18 +551,83 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               )
             }
 
+            // ---- Keyboard model (see the linkFilter/linkZone state comment) ----
+            // Zones cycle search -> results -> create -> search with Tab
+            // (Shift-Tab reverses); Down/Up also step through them. Arrowing a
+            // result fills the box (for Create) without re-filtering the frozen
+            // list. Enter commits the active zone: a result links to it, search
+            // or create makes a new sheet with the box's text (today's date).
+            const enterResults = () => {
+              if (!filtered.length) return
+              setLinkZone('results')
+              setResultIndex(0)
+              setSearch(nameOf(filtered[0]))
+            }
+            const enterLastResult = () => {
+              if (!filtered.length) return
+              const li = filtered.length - 1
+              setLinkZone('results')
+              setResultIndex(li)
+              setSearch(nameOf(filtered[li]))
+            }
+            const toSearch = () => {
+              setLinkZone('search')
+              setSearch(linkFilter)
+            }
+            const moveResult = (delta: number) => {
+              const next = resultIndex + delta
+              if (next < 0) return toSearch()
+              if (next > filtered.length - 1) {
+                if (showCreate) setLinkZone('create')
+                return
+              }
+              setResultIndex(next)
+              setSearch(nameOf(filtered[next]))
+            }
+            const commit = () => {
+              if (linkZone === 'results' && filtered[resultIndex]) insertLink(linkPathOf(filtered[resultIndex]))
+              else if (showCreate) insertLink(newSheetPath)
+            }
+            const onSearchKeyDown = (e: ReactKeyboardEvent) => {
+              if (e.key === 'Escape') return setLinkingSheet(null)
+              if (e.key === 'Enter') { e.preventDefault(); return commit() }
+              if (e.key === 'Tab') {
+                e.preventDefault()
+                if (!e.shiftKey) {
+                  if (linkZone === 'search') { if (filtered.length) enterResults(); else if (showCreate) setLinkZone('create') }
+                  else if (linkZone === 'results') { if (showCreate) setLinkZone('create'); else toSearch() }
+                  else toSearch()
+                } else {
+                  if (linkZone === 'search') { if (showCreate) setLinkZone('create'); else enterLastResult() }
+                  else if (linkZone === 'create') { if (filtered.length) enterLastResult(); else toSearch() }
+                  else toSearch()
+                }
+                return
+              }
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                if (linkZone === 'search') enterResults()
+                else if (linkZone === 'results') moveResult(1)
+                return
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                if (linkZone === 'results') moveResult(-1)
+                else if (linkZone === 'create') enterLastResult()
+                return
+              }
+            }
+
             return (
               <>
                 <div className="flex items-center border-b border-base-02">
-                  <Command.Input
+                  <input
                     autoFocus
                     value={search}
-                    onValueChange={setSearch}
-                    placeholder={`Search ${linkingSheet.contentType.name.toLowerCase()}s...`}
+                    onChange={(e) => { const v = e.target.value; setSearch(v); setLinkFilter(v); setLinkZone('search'); setResultIndex(0) }}
+                    placeholder={`Search ${ct.name.toLowerCase()}s…`}
                     className="flex-1 px-4 py-3 bg-transparent text-base-05 placeholder:text-base-04 focus:outline-none"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') setLinkingSheet(null)
-                    }}
+                    onKeyDown={onSearchKeyDown}
                   />
                   {isDated && (
                     <div className="relative flex items-center gap-1 pr-3">
@@ -578,49 +665,53 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     </div>
                   )}
                 </div>
-                <Command.List
+                <div
                   className="max-h-80 overflow-y-auto p-2"
                   // The calendar is an absolute popover inside the dialog's
                   // overflow-hidden box; reserve height so it isn't clipped when
                   // the results list is short.
                   style={showLinkCal ? { minHeight: '320px' } : undefined}
                 >
-                  {filtered.length === 0 && !search.trim() && (
-                    <Command.Empty className="py-6 text-center text-sm text-base-04">
-                      No {linkingSheet.contentType.name.toLowerCase()}s found{linkDate ? ` on ${linkDate}` : ''}. Type to create new.
-                    </Command.Empty>
+                  {filtered.length === 0 && !linkFilter.trim() && (
+                    <div className="py-6 text-center text-sm text-base-04">
+                      No {ct.name.toLowerCase()}s found{linkDate ? ` on ${linkDate}` : ''}. Type to create new.
+                    </div>
                   )}
                   {filtered.length > 0 && (
-                    <Command.Group heading="Existing" className="mb-2">
-                      {filtered.map((sheet) => (
-                        <Command.Item
+                    <div className="mb-2">
+                      <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">Existing</div>
+                      {filtered.map((sheet, i) => (
+                        <div
                           key={sheet.name}
-                          value={sheet.name}
-                          onSelect={() => insertLink(linkPathOf(sheet))}
-                          className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
+                          onClick={() => insertLink(linkPathOf(sheet))}
+                          className={`flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer ${
+                            linkZone === 'results' && resultIndex === i ? 'bg-base-02' : 'hover:bg-base-02'
+                          }`}
                         >
                           <span>{nameOf(sheet)}</span>
                           {sheet.journalDate && (
                             <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
                           )}
-                        </Command.Item>
+                        </div>
                       ))}
-                    </Command.Group>
+                    </div>
                   )}
                   {showCreate && (
-                    <Command.Group heading="Create new" className="mb-2">
-                      <Command.Item
-                        value={`create-${search}`}
-                        onSelect={() => insertLink(newSheetPath)}
-                        className="flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer data-[selected=true]:bg-base-02"
+                    <div className="mb-2">
+                      <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">Create new</div>
+                      <div
+                        onClick={() => insertLink(newSheetPath)}
+                        className={`flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer ${
+                          linkZone === 'create' ? 'bg-base-02' : 'hover:bg-base-02'
+                        }`}
                       >
                         <span>
-                          {`Create "${search.trim()}" (${linkingSheet.contentType.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
+                          {`Create "${search.trim()}" (${ct.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
                         </span>
-                      </Command.Item>
-                    </Command.Group>
+                      </div>
+                    </div>
                   )}
-                </Command.List>
+                </div>
               </>
             )
           })()
