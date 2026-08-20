@@ -665,39 +665,42 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     </div>
                   )}
                 </div>
+                {/* Results scroll; "Create new" is pinned below so it stays
+                    reachable no matter how long the list is. The calendar is an
+                    absolute popover inside the dialog's overflow-hidden box, so
+                    reserve height on the whole body when it's open. */}
                 <div
-                  className="max-h-80 overflow-y-auto p-2"
-                  // The calendar is an absolute popover inside the dialog's
-                  // overflow-hidden box; reserve height so it isn't clipped when
-                  // the results list is short.
+                  className="flex flex-col max-h-80"
                   style={showLinkCal ? { minHeight: '320px' } : undefined}
                 >
-                  {filtered.length === 0 && !linkFilter.trim() && (
-                    <div className="py-6 text-center text-sm text-base-04">
-                      No {ct.name.toLowerCase()}s found{linkDate ? ` on ${linkDate}` : ''}. Type to create new.
-                    </div>
-                  )}
-                  {filtered.length > 0 && (
-                    <div className="mb-2">
-                      <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">Existing</div>
-                      {filtered.map((sheet, i) => (
-                        <div
-                          key={sheet.name}
-                          onClick={() => insertLink(linkPathOf(sheet))}
-                          className={`flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer ${
-                            linkZone === 'results' && resultIndex === i ? 'bg-base-02' : 'hover:bg-base-02'
-                          }`}
-                        >
-                          <span>{nameOf(sheet)}</span>
-                          {sheet.journalDate && (
-                            <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <div className="flex-1 min-h-0 overflow-y-auto p-2">
+                    {filtered.length === 0 && !linkFilter.trim() && (
+                      <div className="py-6 text-center text-sm text-base-04">
+                        No {ct.name.toLowerCase()}s found{linkDate ? ` on ${linkDate}` : ''}. Type to create new.
+                      </div>
+                    )}
+                    {filtered.length > 0 && (
+                      <div>
+                        <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">Existing</div>
+                        {filtered.map((sheet, i) => (
+                          <div
+                            key={sheet.name}
+                            onClick={() => insertLink(linkPathOf(sheet))}
+                            className={`flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer ${
+                              linkZone === 'results' && resultIndex === i ? 'bg-base-02' : 'hover:bg-base-02'
+                            }`}
+                          >
+                            <span>{nameOf(sheet)}</span>
+                            {sheet.journalDate && (
+                              <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   {showCreate && (
-                    <div className="mb-2">
+                    <div className="shrink-0 border-t border-base-02 p-2">
                       <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">Create new</div>
                       <div
                         onClick={() => insertLink(newSheetPath)}
