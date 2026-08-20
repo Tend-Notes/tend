@@ -17,9 +17,11 @@ use tracing::{info, Level};
 
 mod auth;
 mod config;
+mod csrf;
 mod error;
 mod headers;
 mod indices;
+mod origin;
 mod proxy_guard;
 mod routes;
 mod state;
@@ -178,6 +180,10 @@ async fn main() -> anyhow::Result<()> {
     }
     let proxy_guard_state = proxy_guard::ProxyGuard::new(config.auth.required, trusted_nets);
 
+    // CSRF guard: reject cross-origin state-changing requests. Active only when
+    // auth is required (dev has no proxy cookie to abuse and runs cross-origin).
+    let csrf_state = csrf::CsrfConfig::new(config.auth.required, config.cors.allowed_origins.clone());
+
     let [sec0, sec1, sec2, sec3, sec4, sec5] = headers::security_headers_layer();
     let app = api_router
         .fallback_service(static_service)
@@ -190,6 +196,11 @@ async fn main() -> anyhow::Result<()> {
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
         .with_state(state)
+        // CSRF guard sits just inside the proxy gate.
+        .layer(axum::middleware::from_fn_with_state(
+            csrf_state,
+            csrf::guard,
+        ))
         // Outermost layer: runs before routing/auth, drops untrusted peers first.
         .layer(axum::middleware::from_fn_with_state(
             proxy_guard_state,

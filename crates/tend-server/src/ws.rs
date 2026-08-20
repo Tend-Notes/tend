@@ -222,27 +222,9 @@ async fn verify_auth(
 
 /// Reject cross-origin WebSocket handshakes (WS bypasses CORS, so a malicious
 /// web page could otherwise open `ws://host/ws` on the user's ambient cookies).
-///
-/// A same-origin browser sends `Origin` matching the request host. Non-browser
-/// clients that send no `Origin` are allowed (they carry no ambient cookies to
-/// abuse); a present-but-mismatched `Origin` is refused.
+/// Same-origin only — the shared helper is passed an empty allowlist.
 fn origin_allowed(headers: &HeaderMap) -> bool {
-    let origin = match headers.get("origin").and_then(|v| v.to_str().ok()) {
-        Some(o) => o,
-        None => return true, // no Origin: not a browser cross-site request
-    };
-    // Host the client actually reached (proxy-forwarded first, then Host).
-    let expected_host = headers
-        .get("x-forwarded-host")
-        .or_else(|| headers.get("host"))
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    // Compare only the host[:port] authority, ignoring the scheme.
-    let origin_host = origin
-        .split_once("://")
-        .map(|(_, rest)| rest)
-        .unwrap_or(origin);
-    !expected_host.is_empty() && origin_host == expected_host
+    crate::origin::origin_allowed(headers, &[])
 }
 
 /// WebSocket upgrade handler
