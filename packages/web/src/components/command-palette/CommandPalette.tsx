@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { useShallow } from 'zustand/react/shallow'
 import { Command } from 'cmdk'
-import { useEffect, useState, useCallback, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { LinkPicker } from './LinkPicker'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore, usesDate, type ContentType } from '../../stores/settingsStore'
@@ -86,20 +87,9 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   // date (journalDate) for date-organized content types. '' = no date filter.
   const [linkDate, setLinkDate] = useState('')
   const [showLinkCal, setShowLinkCal] = useState(false)
-  // Selected namespace ("book") for namespaced/Compilation content types.
+  // Selected namespace ("book") for namespaced/Compilation content types. The
+  // keyboard/filter model itself now lives in <LinkPicker>.
   const [linkNamespace, setLinkNamespace] = useState('')
-  // Link panel keyboard model. `search` is the box's live value (and the
-  // Create-new target). `linkFilter` is the last actually-TYPED query and is
-  // what filters the results — so arrowing through results fills the box for
-  // Create without reshuffling the frozen list. `linkZone` tracks which region
-  // (search / results / create) Tab and Enter act on; `resultIndex` is the
-  // highlighted result while in the results zone.
-  const [linkFilter, setLinkFilter] = useState('')
-  const [linkZone, setLinkZone] = useState<'search' | 'results' | 'create'>('search')
-  const [resultIndex, setResultIndex] = useState(0)
-  // The file-title input in the namespaced link panel — focused after a
-  // compilation is chosen so the two levels flow top-to-bottom.
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
   const [stabilizing, setStabilizing] = useState(false)
@@ -119,9 +109,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
       setCommitMessage('')
       setShowCommitInput(false)
       setLinkingSheet(null)
-      setLinkFilter('')
-      setLinkZone('search')
-      setResultIndex(0)
       setLinkDate('')
       setLinkNamespace('')
       setShowLinkCal(false)
@@ -132,9 +119,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
   const handleStartLinkSheet = useCallback(async (ct: ContentType) => {
     setSearch('')
-    setLinkFilter('')
-    setLinkZone('search')
-    setResultIndex(0)
     setLinkDate('')
     setLinkNamespace('')
     setShowLinkCal(false)
@@ -367,11 +351,8 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             const ct = linkingSheet.contentType
             const isDated = usesDate(ct)
             const isNamespaced = ct.organization === 'namespaced'
-            // The regular panel filters on the last TYPED query (linkFilter) so
-            // arrowing through results can fill the box (search) for Create
-            // without reshuffling the list. The namespaced panel has no such
-            // arrow-fill, so it filters on the box directly.
-            const query = (isNamespaced ? search : linkFilter).toLowerCase().trim()
+            // Display name: for namespaced sheets it's the leaf (last path
+            // segment); otherwise the title (or leaf as a fallback).
             const nameOf = (s: PageMeta) =>
               isNamespaced ? (s.name.split('/').pop() || s.title || '') : (s.title || s.name.split('/').pop() || '')
             // A listed sheet's namespace ("book"): the first path segment after the directory.
@@ -380,33 +361,9 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
               return rel.includes('/') ? rel.split('/')[0] : ''
             }
             const namespaces = [...new Set(linkingSheet.sheets.map(nsOf).filter(Boolean))].sort()
-            // Text matches, IGNORING the date/namespace filter — this drives the create gate.
-            const nameMatches = linkingSheet.sheets.filter(
-              s => nameOf(s).toLowerCase().includes(query) || s.name.toLowerCase().includes(query)
-            )
-            // The shown list also applies the date/namespace filter (the second layer).
-            const filtered = nameMatches
-              .filter(s => !linkDate || s.journalDate === linkDate)
-              .filter(s => !isNamespaced || !linkNamespace.trim() || nsOf(s) === linkNamespace.trim())
-              .slice(0, 15)
-            // Create on the picked date if set, else today (date-organized types only).
-            const createDate = isDated ? (linkDate || new Date().toISOString().slice(0, 10)) : undefined
-            const newSheetPath = isNamespaced
-              ? qualifyName(ct, `${linkNamespace.trim()}/${search.trim()}`)
-              : qualifyName(ct, search.trim(), createDate)
-            // Offer "create" whenever the target path is free. Recurring names are
-            // legitimate for by-date and namespaced types (many "Team Meeting", many
-            // "Chapter 1" across dates/books), so an exact name match must NOT hide
-            // create — only a real collision at the exact target path does, and there
-            // you'd link the existing sheet instead. Namespaced types also need a
-            // chosen namespace first.
-            // Create is offered whenever the box holds a name and the exact
-            // target path is free — gated on the box (search), not the frozen
-            // filter, so a name filled in by arrowing still offers Create.
-            const showCreate =
-              search.trim().length > 0 &&
-              (!isNamespaced || linkNamespace.trim().length > 0) &&
-              !linkingSheet.sheets.some(s => s.name === newSheetPath)
+            // Filter predicate for the picker: match the leaf title OR the full name.
+            const matchSheet = (s: PageMeta, q: string) =>
+              nameOf(s).toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
             // Insert a wikilink for the chosen/created target and close the panel.
             const insertLink = (target: string) => {
               const wikiLink = `[[${target}]]`
@@ -424,298 +381,115 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             // already carry the content-type directory prefix).
             const linkPathOf = (s: PageMeta) =>
               s.name.startsWith(ct.directory + '/') ? s.name : `${ct.directory}/${s.name}`
-            // The file input mounts only once a compilation is chosen, so defer focus.
-            const focusFile = () => setTimeout(() => fileInputRef.current?.focus(), 0)
 
-            // Namespaced/Compilation types get a dedicated two-level panel: first
-            // choose or create a compilation (the middle folder), then choose or
-            // create a file within it. The content type was already chosen in the
-            // Ctrl-K menu and is not revisited here.
+            // Namespaced/Compilation types step within ONE picker: choose or
+            // create a compilation (the middle folder), then the same control
+            // swaps to files within it — same keyboard flow at each step.
             if (isNamespaced) {
               const compilation = linkNamespace.trim()
-              const hasCompilation = compilation.length > 0
-              const compilationMatches = namespaces.filter(n =>
-                n.toLowerCase().includes(compilation.toLowerCase())
-              )
-              const compilationExists = namespaces.some(
-                n => n.toLowerCase() === compilation.toLowerCase()
-              )
-              const exactFile = filtered.find(s => nameOf(s).toLowerCase() === query)
+              if (!compilation) {
+                return (
+                  <LinkPicker
+                    key="compilations"
+                    autoFocus
+                    items={namespaces}
+                    getKey={(n) => n}
+                    getLabel={(n) => n}
+                    placeholder={`Choose or create a ${ct.name.toLowerCase()}…`}
+                    canCreate={(box) => box.trim().length > 0 && !namespaces.some(n => n.toLowerCase() === box.trim().toLowerCase())}
+                    createLabel={(box) => `Create ${ct.name.toLowerCase()} "${box.trim()}"`}
+                    onPick={(n) => setLinkNamespace(n)}
+                    onCreate={(box) => setLinkNamespace(box.trim())}
+                    onEscape={() => setLinkingSheet(null)}
+                  />
+                )
+              }
+              const files = linkingSheet.sheets.filter(s => nsOf(s) === compilation)
               return (
                 <>
-                  {/* Level 1 — the compilation */}
-                  <div className="border-b border-base-02 p-2">
-                    <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">
-                      Compilation
-                    </div>
-                    <input
-                      autoFocus
-                      value={linkNamespace}
-                      onChange={(e) => setLinkNamespace(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') setLinkingSheet(null)
-                        else if (e.key === 'Enter' && hasCompilation) {
-                          e.preventDefault()
-                          focusFile()
-                        }
-                      }}
-                      placeholder={`Choose or create a ${ct.name.toLowerCase()}…`}
-                      className="w-full px-3 py-2 bg-base-01 border border-base-02 rounded text-sm text-base-05 placeholder:text-base-04 focus:outline-none focus:border-base-04"
-                    />
-                    <div className="mt-1 max-h-32 overflow-y-auto">
-                      {compilationMatches.map((ns) => (
-                        <div
-                          key={ns}
-                          onClick={() => {
-                            setLinkNamespace(ns)
-                            focusFile()
-                          }}
-                          className={`px-3 py-1.5 text-sm rounded cursor-pointer hover:bg-base-02 ${
-                            ns.toLowerCase() === compilation.toLowerCase() ? 'bg-base-02 text-base-05' : 'text-base-05'
-                          }`}
-                        >
-                          {ns}
-                        </div>
-                      ))}
-                      {hasCompilation && !compilationExists && (
-                        <div
-                          onClick={() => focusFile()}
-                          className="px-3 py-1.5 text-sm rounded cursor-pointer text-base-0D hover:bg-base-02"
-                        >
-                          Create {ct.name.toLowerCase()} "{compilation}"
-                        </div>
-                      )}
-                    </div>
+                  <div className="flex items-center gap-2 border-b border-base-02 px-4 py-2 text-xs text-base-04">
+                    <button onClick={() => setLinkNamespace('')} className="text-base-04 hover:text-base-05" title="Back to compilations">‹ back</button>
+                    <span>{ct.name}</span>
+                    <span>▸</span>
+                    <span className="text-base-05">{compilation}</span>
                   </div>
-                  {/* Level 2 — the file within the compilation */}
-                  <div className="p-2">
-                    <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">
-                      {hasCompilation ? (
-                        <>
-                          File in <span className="normal-case text-base-05">{compilation}</span>
-                        </>
-                      ) : (
-                        'File'
-                      )}
-                    </div>
-                    {!hasCompilation ? (
-                      <div className="px-3 py-4 text-center text-sm text-base-04">
-                        Choose or create a compilation first.
-                      </div>
-                    ) : (
-                      <>
-                        <input
-                          ref={fileInputRef}
-                          value={search}
-                          onChange={(e) => setSearch(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Escape') setLinkingSheet(null)
-                            else if (e.key === 'Enter') {
-                              e.preventDefault()
-                              if (exactFile) insertLink(linkPathOf(exactFile))
-                              else if (showCreate) insertLink(newSheetPath)
-                              else if (filtered[0]) insertLink(linkPathOf(filtered[0]))
-                            }
-                          }}
-                          placeholder="Choose or create a file…"
-                          className="w-full px-3 py-2 bg-base-01 border border-base-02 rounded text-sm text-base-05 placeholder:text-base-04 focus:outline-none focus:border-base-04"
-                        />
-                        <div className="mt-1 max-h-56 overflow-y-auto">
-                          {filtered.map((sheet) => (
-                            <div
-                              key={sheet.name}
-                              onClick={() => insertLink(linkPathOf(sheet))}
-                              className="px-3 py-1.5 text-sm rounded cursor-pointer hover:bg-base-02 text-base-05"
-                            >
-                              {nameOf(sheet)}
-                            </div>
-                          ))}
-                          {showCreate && (
-                            <div
-                              onClick={() => insertLink(newSheetPath)}
-                              className="px-3 py-1.5 text-sm rounded cursor-pointer text-base-0D hover:bg-base-02"
-                            >
-                              Create "{search.trim()}" in {compilation}
-                            </div>
-                          )}
-                          {filtered.length === 0 && !showCreate && (
-                            <div className="px-3 py-3 text-center text-sm text-base-04">
-                              Type a title to create a file.
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>
+                  <LinkPicker
+                    key={`files:${compilation}`}
+                    autoFocus
+                    items={files}
+                    getKey={(s) => s.name}
+                    getLabel={nameOf}
+                    matches={matchSheet}
+                    placeholder="Choose or create a file…"
+                    canCreate={(box) => box.trim().length > 0 && !linkingSheet.sheets.some(s => s.name === qualifyName(ct, `${compilation}/${box.trim()}`))}
+                    createLabel={(box) => `Create "${box.trim()}" in ${compilation}`}
+                    onPick={(s) => insertLink(linkPathOf(s))}
+                    onCreate={(box) => insertLink(qualifyName(ct, `${compilation}/${box.trim()}`))}
+                    onEscape={() => setLinkNamespace('')}
+                    onExitBackward={() => setLinkNamespace('')}
+                  />
                 </>
               )
             }
 
-            // ---- Keyboard model (see the linkFilter/linkZone state comment) ----
-            // Zones cycle search -> results -> create -> search with Tab
-            // (Shift-Tab reverses); Down/Up also step through them. Arrowing a
-            // result fills the box (for Create) without re-filtering the frozen
-            // list. Enter commits the active zone: a result links to it, search
-            // or create makes a new sheet with the box's text (today's date).
-            const enterResults = () => {
-              if (!filtered.length) return
-              setLinkZone('results')
-              setResultIndex(0)
-              setSearch(nameOf(filtered[0]))
-            }
-            const enterLastResult = () => {
-              if (!filtered.length) return
-              const li = filtered.length - 1
-              setLinkZone('results')
-              setResultIndex(li)
-              setSearch(nameOf(filtered[li]))
-            }
-            const toSearch = () => {
-              setLinkZone('search')
-              setSearch(linkFilter)
-            }
-            const moveResult = (delta: number) => {
-              const next = resultIndex + delta
-              if (next < 0) return toSearch()
-              if (next > filtered.length - 1) {
-                if (showCreate) setLinkZone('create')
-                return
-              }
-              setResultIndex(next)
-              setSearch(nameOf(filtered[next]))
-            }
-            const commit = () => {
-              if (linkZone === 'results' && filtered[resultIndex]) insertLink(linkPathOf(filtered[resultIndex]))
-              else if (showCreate) insertLink(newSheetPath)
-            }
-            const onSearchKeyDown = (e: ReactKeyboardEvent) => {
-              if (e.key === 'Escape') return setLinkingSheet(null)
-              if (e.key === 'Enter') { e.preventDefault(); return commit() }
-              if (e.key === 'Tab') {
-                e.preventDefault()
-                if (!e.shiftKey) {
-                  if (linkZone === 'search') { if (filtered.length) enterResults(); else if (showCreate) setLinkZone('create') }
-                  else if (linkZone === 'results') { if (showCreate) setLinkZone('create'); else toSearch() }
-                  else toSearch()
-                } else {
-                  if (linkZone === 'search') { if (showCreate) setLinkZone('create'); else enterLastResult() }
-                  else if (linkZone === 'create') { if (filtered.length) enterLastResult(); else toSearch() }
-                  else toSearch()
-                }
-                return
-              }
-              if (e.key === 'ArrowDown') {
-                e.preventDefault()
-                if (linkZone === 'search') enterResults()
-                else if (linkZone === 'results') moveResult(1)
-                return
-              }
-              if (e.key === 'ArrowUp') {
-                e.preventDefault()
-                if (linkZone === 'results') moveResult(-1)
-                else if (linkZone === 'create') enterLastResult()
-                return
-              }
-            }
-
-            return (
-              <>
-                <div className="flex items-center border-b border-base-02">
-                  <input
-                    autoFocus
-                    value={search}
-                    onChange={(e) => { const v = e.target.value; setSearch(v); setLinkFilter(v); setLinkZone('search'); setResultIndex(0) }}
-                    placeholder={`Search ${ct.name.toLowerCase()}s…`}
-                    className="flex-1 px-4 py-3 bg-transparent text-base-05 placeholder:text-base-04 focus:outline-none"
-                    onKeyDown={onSearchKeyDown}
-                  />
-                  {isDated && (
-                    <div className="relative flex items-center gap-1 pr-3">
-                      {linkDate && (
-                        <span className="text-xs text-base-05">
-                          {linkDate}
-                          <button
-                            onClick={() => setLinkDate('')}
-                            className="ml-1 text-base-04 hover:text-base-05"
-                            title="Clear date filter"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      )}
-                      {/* Same calendar icon + picker as the journal page. */}
-                      <button
-                        onClick={() => setShowLinkCal((v) => !v)}
-                        className={`p-1 transition-colors ${linkDate ? 'text-base-0D' : 'text-base-04 hover:text-base-05'}`}
-                        title="Filter by date"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                        </svg>
-                      </button>
-                      {showLinkCal && (
-                        <HeatmapCalendar
-                          currentDate={linkDate || undefined}
-                          onSelectDate={(d) => setLinkDate(d)}
-                          onClose={() => setShowLinkCal(false)}
-                          heatmap={false}
-                          align="right"
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
-                {/* Results scroll; "Create new" is pinned below so it stays
-                    reachable no matter how long the list is. The calendar is an
-                    absolute popover inside the dialog's overflow-hidden box, so
-                    reserve height on the whole body when it's open. */}
-                <div
-                  className="flex flex-col max-h-80"
-                  style={showLinkCal ? { minHeight: '320px' } : undefined}
+            // Flat or dated: one picker. Dated types get a calendar date-filter
+            // (as the input's headerRight) and create on the picked date, else
+            // today. Flat types (a Page with just a category) get neither.
+            const createDate = isDated ? (linkDate || new Date().toISOString().slice(0, 10)) : undefined
+            const dateFiltered = linkingSheet.sheets.filter(s => !linkDate || s.journalDate === linkDate)
+            const dateFilter = isDated ? (
+              <div className="relative flex items-center gap-1 pr-3">
+                {linkDate && (
+                  <span className="text-xs text-base-05">
+                    {linkDate}
+                    <button
+                      onClick={() => setLinkDate('')}
+                      className="ml-1 text-base-04 hover:text-base-05"
+                      title="Clear date filter"
+                    >
+                      ×
+                    </button>
+                  </span>
+                )}
+                {/* Same calendar icon + picker as the journal page. */}
+                <button
+                  onClick={() => setShowLinkCal((v) => !v)}
+                  className={`p-1 transition-colors ${linkDate ? 'text-base-0D' : 'text-base-04 hover:text-base-05'}`}
+                  title="Filter by date"
                 >
-                  <div className="flex-1 min-h-0 overflow-y-auto p-2">
-                    {filtered.length === 0 && !linkFilter.trim() && (
-                      <div className="py-6 text-center text-sm text-base-04">
-                        No {ct.name.toLowerCase()}s found{linkDate ? ` on ${linkDate}` : ''}. Type to create new.
-                      </div>
-                    )}
-                    {filtered.length > 0 && (
-                      <div>
-                        <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">Existing</div>
-                        {filtered.map((sheet, i) => (
-                          <div
-                            key={sheet.name}
-                            onClick={() => insertLink(linkPathOf(sheet))}
-                            className={`flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer ${
-                              linkZone === 'results' && resultIndex === i ? 'bg-base-02' : 'hover:bg-base-02'
-                            }`}
-                          >
-                            <span>{nameOf(sheet)}</span>
-                            {sheet.journalDate && (
-                              <span className="ml-2 text-xs text-base-04">{sheet.journalDate}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {showCreate && (
-                    <div className="shrink-0 border-t border-base-02 p-2">
-                      <div className="px-2 pb-1 text-xs font-medium uppercase tracking-wide text-base-04">Create new</div>
-                      <div
-                        onClick={() => insertLink(newSheetPath)}
-                        className={`flex items-center justify-between px-3 py-2 text-sm rounded cursor-pointer ${
-                          linkZone === 'create' ? 'bg-base-02' : 'hover:bg-base-02'
-                        }`}
-                      >
-                        <span>
-                          {`Create "${search.trim()}" (${ct.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                </button>
+                {showLinkCal && (
+                  <HeatmapCalendar
+                    currentDate={linkDate || undefined}
+                    onSelectDate={(d) => setLinkDate(d)}
+                    onClose={() => setShowLinkCal(false)}
+                    heatmap={false}
+                    align="right"
+                  />
+                )}
+              </div>
+            ) : undefined
+            return (
+              <LinkPicker
+                key={`sheets:${ct.id}`}
+                autoFocus
+                items={dateFiltered}
+                getKey={(s) => s.name}
+                getLabel={nameOf}
+                getMeta={(s) => s.journalDate || undefined}
+                matches={matchSheet}
+                placeholder={`Search ${ct.name.toLowerCase()}s…`}
+                canCreate={(box) => box.trim().length > 0 && !linkingSheet.sheets.some(s => s.name === qualifyName(ct, box.trim(), createDate))}
+                createLabel={(box) => `Create "${box.trim()}" (${ct.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
+                onPick={(s) => insertLink(linkPathOf(s))}
+                onCreate={(box) => insertLink(qualifyName(ct, box.trim(), createDate))}
+                onEscape={() => setLinkingSheet(null)}
+                headerRight={dateFilter}
+                bodyMinHeight={showLinkCal ? '320px' : undefined}
+              />
             )
           })()
         ) : (
