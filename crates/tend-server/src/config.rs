@@ -73,6 +73,29 @@ pub struct AuthConfig {
     /// Used for WebSocket connections which can't go through reverse proxy auth.
     #[serde(default)]
     pub verify_url: Option<String>,
+
+    /// CIDR ranges (or bare IPs) whose requests are trusted to carry the
+    /// `Remote-User` header set by the reverse proxy. When `required` is true,
+    /// requests whose TCP peer is outside this set are rejected before routing,
+    /// so a client that reaches the backend port directly cannot spoof identity.
+    ///
+    /// Default: loopback only (`127.0.0.1/32`, `::1/128`) — correct for a proxy
+    /// on the same host. For a proxy on another host or container, add its
+    /// address/subnet via `TEND_TRUSTED_PROXIES` (comma-separated).
+    #[serde(default = "default_trusted_proxies")]
+    pub trusted_proxies: Vec<String>,
+}
+
+fn default_trusted_proxies() -> Vec<String> {
+    std::env::var("TEND_TRUSTED_PROXIES")
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_else(|| vec!["127.0.0.1/32".to_string(), "::1/128".to_string()])
 }
 
 fn default_user_header() -> String {
@@ -98,6 +121,7 @@ impl Default for AuthConfig {
             default_user: std::env::var("TEND_AUTH_DEFAULT_USER").ok(),
             dev_user_header: default_dev_user_header(),
             verify_url: std::env::var("TEND_AUTH_VERIFY_URL").ok(),
+            trusted_proxies: default_trusted_proxies(),
         }
     }
 }
@@ -432,6 +456,30 @@ impl Config {
         Ok(())
     }
 
+    /// Parse `auth.trusted_proxies` into CIDR networks. Bare IPs are treated as
+    /// host routes (`/32` for IPv4, `/128` for IPv6). Unparseable entries are
+    /// returned separately so the caller can warn about them.
+    pub fn trusted_proxy_nets(&self) -> (Vec<ipnet::IpNet>, Vec<String>) {
+        use std::str::FromStr;
+        let mut nets = Vec::new();
+        let mut invalid = Vec::new();
+        for entry in &self.auth.trusted_proxies {
+            if let Ok(net) = ipnet::IpNet::from_str(entry) {
+                nets.push(net);
+            } else if let Ok(ip) = IpAddr::from_str(entry) {
+                // Bare IP -> host route.
+                let prefix = if ip.is_ipv4() { 32 } else { 128 };
+                match ipnet::IpNet::new(ip, prefix) {
+                    Ok(net) => nets.push(net),
+                    Err(_) => invalid.push(entry.clone()),
+                }
+            } else {
+                invalid.push(entry.clone());
+            }
+        }
+        (nets, invalid)
+    }
+
     /// Emit a clearly-delimited block of log lines describing the effective
     /// security posture.  Normal/safe values use `tracing::info!`; unusual-but-
     /// allowed values use `tracing::warn!` so operators see them immediately.
@@ -469,6 +517,33 @@ impl Config {
             warn!(
                 "  Auth:        disabled (loopback only) — no authentication enforced"
             );
+        }
+
+        // Trusted proxies (only enforced when auth is required)
+        if self.auth.required {
+            let (nets, invalid) = self.trusted_proxy_nets();
+            if nets.is_empty() {
+                warn!(
+                    "  Trusted proxy: NONE parsed — every request will be rejected; \
+                     set TEND_TRUSTED_PROXIES to your proxy's address/subnet"
+                );
+            } else {
+                let all_loopback = nets.iter().all(|n| n.addr().is_loopback());
+                let rendered: Vec<String> = nets.iter().map(|n| n.to_string()).collect();
+                if all_loopback {
+                    info!("  Trusted proxy: {} (loopback)", rendered.join(", "));
+                } else {
+                    warn!(
+                        "  Trusted proxy: {} — Remote-User trusted from non-loopback peers",
+                        rendered.join(", ")
+                    );
+                }
+            }
+            for bad in invalid {
+                warn!("  Trusted proxy: ignoring unparseable entry {:?}", bad);
+            }
+        } else {
+            info!("  Trusted proxy: n/a (auth disabled — gate inactive)");
         }
 
         // WebSocket verify URL
@@ -571,6 +646,7 @@ mod tests {
                 default_user: None,
                 dev_user_header: "X-Dev-User".to_string(),
                 verify_url: None,
+                trusted_proxies: vec!["127.0.0.1/32".to_string(), "::1/128".to_string()],
             },
             request_body_limit: default_request_body_limit(),
         }

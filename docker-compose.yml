@@ -29,6 +29,17 @@ services:
       # REQUIRED for production: the reverse proxy's forward-auth verify endpoint.
       # Without it the server refuses to start (WebSocket auth would be bypassed).
       # - TEND_AUTH_VERIFY_URL=https://your-auth-proxy/api/verify
+      #
+      # Trusted-proxy allowlist: the server only honors the proxy-set Remote-User
+      # header from these peer IPs/CIDRs, so a client reaching the port directly
+      # cannot spoof a user. Defaults to loopback only.
+      #  - If your reverse proxy runs on the HOST and reaches Tend over the
+      #    published 127.0.0.1 port, the loopback default already works — leave
+      #    this unset.
+      #  - If your proxy is ANOTHER CONTAINER reaching tend over the compose
+      #    network, set this to that network's subnet (find it with
+      #    `docker network inspect <network>`), e.g.:
+      # - TEND_TRUSTED_PROXIES=172.18.0.0/16
       # Git configuration (optional)
       - GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-Tend}
       - GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-tend@localhost}

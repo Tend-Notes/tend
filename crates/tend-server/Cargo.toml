@@ -52,6 +52,10 @@ uuid = { workspace = true }
 # Regex
 regex = { workspace = true }
 
+# CIDR parsing/matching for the trusted-proxy allowlist (already in the tree via
+# hyper/reqwest; pinned here as a direct dep for the proxy_guard middleware)
+ipnet = "2.11"
+
 # URL encoding for Logseq import
 urlencoding = "2.1"
 
