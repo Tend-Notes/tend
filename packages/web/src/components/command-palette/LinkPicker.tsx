@@ -38,6 +38,13 @@ export interface LinkPickerProps<T> {
   onEscape?: () => void
   /** Shift-Tab out of the search zone — lets a parent hand focus to a prior level. */
   onExitBackward?: () => void
+  /**
+   * Fill the box with the highlighted result's name while navigating, so Create
+   * targets that name. This is the DATE feature (arrow to a series, create a new
+   * instance of it today). Leave false for flat/namespaced types, where every
+   * listed name already exists — filling would just make Create flicker away.
+   */
+  fillOnNavigate?: boolean
   /** Content rendered to the right of the input (e.g. a date-filter button). */
   headerRight?: ReactNode
   /** Min-height for the body (reserve room for an absolute popover like a calendar). */
@@ -63,6 +70,7 @@ export function LinkPicker<T>({
   onCreate,
   onEscape,
   onExitBackward,
+  fillOnNavigate = false,
   headerRight,
   bodyMinHeight,
   limit = 50,
@@ -88,11 +96,11 @@ export function LinkPicker<T>({
     const i = Math.min(Math.max(at, 0), results.length - 1)
     setZone('results')
     setIndex(i)
-    setBox(getLabel(results[i]))
+    if (fillOnNavigate) setBox(getLabel(results[i]))
   }
   const toSearch = () => {
     setZone('search')
-    setBox(typed)
+    if (fillOnNavigate) setBox(typed)
   }
   const moveResult = (delta: number) => {
     const next = index + delta
@@ -102,7 +110,7 @@ export function LinkPicker<T>({
       return
     }
     setIndex(next)
-    setBox(getLabel(results[next]))
+    if (fillOnNavigate) setBox(getLabel(results[next]))
   }
   const commit = () => {
     if (zone === 'results' && results[index]) return onPick(results[index])

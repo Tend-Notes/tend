@@ -487,6 +487,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 onPick={(s) => insertLink(linkPathOf(s))}
                 onCreate={(box) => insertLink(qualifyName(ct, box.trim(), createDate))}
                 onEscape={() => setLinkingSheet(null)}
+                fillOnNavigate={isDated}
                 headerRight={dateFilter}
                 bodyMinHeight={showLinkCal ? '320px' : undefined}
               />
