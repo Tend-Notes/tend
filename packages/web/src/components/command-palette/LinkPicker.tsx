@@ -105,8 +105,18 @@ export function LinkPicker<T>({
     setBox(getLabel(results[next]))
   }
   const commit = () => {
-    if (zone === 'results' && results[index]) onPick(results[index])
-    else if (showCreate) onCreate(box)
+    if (zone === 'results' && results[index]) return onPick(results[index])
+    if (zone === 'create') return onCreate(box)
+    // Search zone: a UNIQUE exact match is picked (so typing a full existing
+    // name and pressing Enter selects it — e.g. an existing compilation). A name
+    // that matches several rows (a recurring dated sheet) is NOT auto-picked;
+    // it falls through to Create. Otherwise create the box text, else pick the
+    // first result.
+    const q = box.trim().toLowerCase()
+    const exact = results.filter((it) => getLabel(it).trim().toLowerCase() === q)
+    if (exact.length === 1) return onPick(exact[0])
+    if (showCreate) return onCreate(box)
+    if (results.length) return onPick(results[0])
   }
 
   const onKeyDown = (e: KeyboardEvent) => {
