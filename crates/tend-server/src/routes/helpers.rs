@@ -134,6 +134,44 @@ pub async fn update_all_indices(garden: &GardenState, page: &Page, entity_type: 
     update_all_indices_with_content_type(garden, page, entity_type, &content_type, date).await;
 }
 
+/// The auto-created "About" dust-jacket body for a compilation. Kept here (server
+/// side) so it's the single source of truth for both creation and the
+/// skip-while-default search check. A single line = a single block, which
+/// round-trips cleanly so the equality check below stays stable.
+pub fn default_about_body(compilation: &str) -> String {
+    format!(
+        "This page was created automatically with the \"{compilation}\" compilation. \
+         Use it to keep track of information about the project — a summary, a table of \
+         contents, anything — or just throw it away."
+    )
+}
+
+/// The compilation name for an "About" sheet path (`{dir}/{compilation}/About`).
+fn about_compilation_name(page: &Page) -> Option<String> {
+    let rest = page.name.strip_suffix("/About")?;
+    let comp = rest.rsplit('/').next()?;
+    (!comp.is_empty()).then(|| comp.to_string())
+}
+
+/// True if `page` is an untouched default compilation "About" stub — a
+/// namespaced `{dir}/{compilation}/About` whose single block still holds exactly
+/// the auto-created body. Editing it (any block change) makes this false.
+pub fn is_default_about(page: &Page, content_type: &ContentType) -> bool {
+    if !content_type.is_namespaced() {
+        return false;
+    }
+    let Some(comp) = about_compilation_name(page) else {
+        return false;
+    };
+    if page.root_blocks.len() != 1 {
+        return false;
+    }
+    match page.blocks.get(&page.root_blocks[0]) {
+        Some(block) => block.content.trim() == default_about_body(&comp).trim(),
+        None => false,
+    }
+}
+
 /// Update all indices for a sheet with explicit content type.
 ///
 /// This is used for custom content types (sheets) where we need to specify
@@ -145,15 +183,19 @@ pub async fn update_all_indices_with_content_type(
     content_type: &ContentType,
     date: Option<NaiveDate>,
 ) {
-    // Update search index (if search is enabled)
+    // Update search index (if search is enabled) — but skip an untouched
+    // default "About" dust-jacket stub so its boilerplate never shows up in
+    // search. Once the user edits it, it no longer matches and indexes normally.
     if let Some(search_index) = &garden.search_index {
-        let mut index = search_index.write().await;
-        if let Err(e) = index.index_page(page) {
-            warn!("Failed to update search index for {} {}: {}", entity_type, page.name, e);
-        } else if let Err(e) = index.maybe_commit() {
-            // Deferred: a burst of saves commits once (PERF-03). Search commits
-            // any pending changes before querying, so results stay fresh.
-            warn!("Failed to commit search index for {} {}: {}", entity_type, page.name, e);
+        if !is_default_about(page, content_type) {
+            let mut index = search_index.write().await;
+            if let Err(e) = index.index_page(page) {
+                warn!("Failed to update search index for {} {}: {}", entity_type, page.name, e);
+            } else if let Err(e) = index.maybe_commit() {
+                // Deferred: a burst of saves commits once (PERF-03). Search commits
+                // any pending changes before querying, so results stay fresh.
+                warn!("Failed to commit search index for {} {}: {}", entity_type, page.name, e);
+            }
         }
     }
 
@@ -236,5 +278,62 @@ pub async fn remove_from_all_indices(
         let key = PageKey::new(&content_type.id, page_name, date);
         let mut todo_index = garden.todo_index.write().await;
         todo_index.remove_page(&key);
+    }
+}
+
+#[cfg(test)]
+mod about_tests {
+    use super::*;
+    use tend_core::{Block, Organization, Page};
+
+    fn namespaced_ct() -> ContentType {
+        let mut ct = ContentType::page();
+        ct.organization = Organization::Namespaced;
+        ct.directory = "books".to_string();
+        ct
+    }
+
+    fn about_page(compilation: &str, body: &str) -> Page {
+        let mut page = Page::new_sheet(format!("books/{compilation}/About"), "book", None);
+        page.add_block(Block::new(body.to_string()));
+        page
+    }
+
+    #[test]
+    fn untouched_default_about_is_detected() {
+        let ct = namespaced_ct();
+        let page = about_page("Dune", &default_about_body("Dune"));
+        assert!(is_default_about(&page, &ct));
+    }
+
+    #[test]
+    fn edited_about_is_not_default() {
+        let ct = namespaced_ct();
+        let page = about_page("Dune", "my own notes");
+        assert!(!is_default_about(&page, &ct));
+    }
+
+    #[test]
+    fn about_with_wrong_compilation_body_is_not_default() {
+        // Body interpolates a different name than the path's compilation.
+        let ct = namespaced_ct();
+        let page = about_page("Dune", &default_about_body("Foundation"));
+        assert!(!is_default_about(&page, &ct));
+    }
+
+    #[test]
+    fn non_about_sheet_is_not_default() {
+        let ct = namespaced_ct();
+        let mut page = Page::new_sheet("books/Dune/Chapter 1", "book", None);
+        page.add_block(Block::new(default_about_body("Dune")));
+        assert!(!is_default_about(&page, &ct));
+    }
+
+    #[test]
+    fn non_namespaced_type_is_never_default_about() {
+        let ct = ContentType::page(); // flat
+        let mut page = Page::new_sheet("pages/About", "page", None);
+        page.add_block(Block::new(default_about_body("About")));
+        assert!(!is_default_about(&page, &ct));
     }
 }

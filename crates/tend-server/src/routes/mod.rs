@@ -19,7 +19,7 @@ mod blocks;
 mod git;
 mod graph;
 pub(crate) mod gardens;
-mod helpers;
+pub(crate) mod helpers;
 mod sheets;
 mod tags;
 mod templates;
@@ -94,6 +94,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
         // Sheets (generic content type API)
         .route("/sheets/{content_type}", get(sheets::list_sheets))
         .route("/sheets/{content_type}", post(sheets::create_sheet))
+        .route("/compilations/{content_type}", post(sheets::create_compilation))
         .route("/sheets/{content_type}/{name}", get(sheets::get_sheet))
         .route("/sheets/{content_type}/{name}", put(sheets::update_sheet))
         .route("/sheets/{content_type}/{name}", delete(sheets::delete_sheet))

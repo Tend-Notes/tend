@@ -18,7 +18,7 @@ use crate::routes::pages::BlockData;
 use crate::state::AppState;
 
 use super::gardens::load_user_content_types;
-use super::helpers::{apply_block_updates, apply_property_updates, remove_from_all_indices, update_all_indices_with_content_type};
+use super::helpers::{apply_block_updates, apply_property_updates, default_about_body, remove_from_all_indices, update_all_indices_with_content_type};
 
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
@@ -368,6 +368,81 @@ pub async fn create_sheet(
     Ok(Json(CreateSheetResponse {
         page,
         cursor_position,
+    }))
+}
+
+/// Request to eagerly create a compilation (namespace) for a namespaced type.
+#[derive(Deserialize)]
+pub struct CreateCompilationRequest {
+    pub namespace: String,
+}
+
+/// Result of creating a compilation.
+#[derive(Serialize)]
+pub struct CreateCompilationResponse {
+    pub namespace: String,
+    /// Full page name of the auto-created "About" dust jacket.
+    pub about_path: String,
+    /// True if it already existed (create was a no-op).
+    pub existed: bool,
+}
+
+/// Eagerly create a compilation by writing its "About" dust-jacket stub.
+///
+/// A compilation is otherwise just a path segment with no on-disk presence until
+/// a sheet lands in it; the About stub gives it a real, git-durable home (and, in
+/// an encrypted garden, an encrypted one) so it can be pre-created and shown in
+/// the picker before any entries exist. The stub is kept out of the search index
+/// while unedited (see `is_default_about`).
+pub async fn create_compilation(
+    State(state): State<Arc<AppState>>,
+    user: AuthenticatedUser,
+    Path(content_type_id): Path<String>,
+    Json(req): Json<CreateCompilationRequest>,
+) -> Result<Json<CreateCompilationResponse>, AppError> {
+    let content_type = get_content_type(&content_type_id, &user.username)?;
+    if !content_type.is_namespaced() {
+        return Err(AppError::BadRequest(
+            "Only namespaced content types have compilations".to_string(),
+        ));
+    }
+
+    let namespace = req.namespace.trim().to_string();
+    if namespace.is_empty() || namespace.contains('/') {
+        return Err(AppError::BadRequest(
+            "A compilation name cannot be empty or contain '/'".to_string(),
+        ));
+    }
+    tend_storage::fs::validate_safe_name(&namespace)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+
+    let rel_name = format!("{}/About", namespace);
+    let about_path = build_sheet_page_name(&content_type, &rel_name, None);
+
+    let user_state = state.get_user_state(&user.username).await?;
+    let garden = user_state.garden.read().await;
+
+    // Idempotent: an existing About means the compilation is already there.
+    if garden.file_manager.sheet_exists(&content_type, &rel_name, None).await {
+        return Ok(Json(CreateCompilationResponse {
+            namespace,
+            about_path,
+            existed: true,
+        }));
+    }
+
+    let mut page = Page::new_sheet(&about_path, &content_type_id, None);
+    page.title = rel_name.clone();
+    page.add_block(Block::new(default_about_body(&namespace)));
+
+    garden.file_manager.write_sheet(&content_type, &page, None).await?;
+    // Skips the search index while the stub is unedited (is_default_about).
+    update_all_indices_with_content_type(&garden, &page, "sheet", &content_type, None).await;
+
+    Ok(Json(CreateCompilationResponse {
+        namespace,
+        about_path,
+        existed: false,
     }))
 }
 

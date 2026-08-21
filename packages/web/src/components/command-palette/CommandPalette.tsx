@@ -399,7 +399,16 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     canCreate={(box) => box.trim().length > 0 && !namespaces.some(n => n.toLowerCase() === box.trim().toLowerCase())}
                     createLabel={(box) => `Create ${ct.name.toLowerCase()} "${box.trim()}"`}
                     onPick={(n) => setLinkNamespace(n)}
-                    onCreate={(box) => setLinkNamespace(box.trim())}
+                    onCreate={(box) => {
+                      const ns = box.trim()
+                      // Advance immediately; eagerly create the compilation (its
+                      // About dust jacket) and refresh so it's discoverable.
+                      setLinkNamespace(ns)
+                      api.sheets.createCompilation(ct.id, ns)
+                        .then(() => api.sheets.list(ct.id))
+                        .then((sheets) => setLinkingSheet((prev) => (prev ? { ...prev, sheets } : prev)))
+                        .catch((e) => console.error('Failed to create compilation:', e))
+                    }}
                     onEscape={() => setLinkingSheet(null)}
                   />
                 )

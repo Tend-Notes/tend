@@ -19,6 +19,7 @@ use tracing::{info, warn};
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
 use crate::indices::{TagIndex, TodoIndex};
+use crate::routes::helpers::is_default_about;
 use crate::ws::{BroadcastEvent, EventSender, WsEvent};
 use std::time::Duration;
 use tend_storage::watcher::SimpleFileWatcher;
@@ -577,6 +578,10 @@ impl GardenState {
                 let sheets = self.file_manager.list_sheets(ct).await?;
                 for meta in &sheets {
                     if let Some(page) = self.load_sheet_from_meta(ct, meta).await {
+                        // Skip an untouched compilation "About" stub (dust jacket).
+                        if is_default_about(&page, ct) {
+                            continue;
+                        }
                         if let Err(e) = index.index_page(&page) {
                             tracing::warn!("Failed to index {} in search: {}", page.name, e);
                         }
@@ -629,6 +634,10 @@ impl GardenState {
             let sheets = self.file_manager.list_sheets(ct).await?;
             for meta in &sheets {
                 if let Some(page) = self.load_sheet_from_meta(ct, meta).await {
+                    // Skip an untouched compilation "About" stub (dust jacket).
+                    if is_default_about(&page, ct) {
+                        continue;
+                    }
                     if let Err(e) = index.index_page(&page) {
                         tracing::warn!("Failed to index {} in search: {}", page.name, e);
                     }
@@ -847,7 +856,11 @@ impl GardenState {
             let search_index = Arc::new(RwLock::new(search_index));
             {
                 let mut index = search_index.write().await;
-                for (_, _, page) in &loaded {
+                for (ct, _, page) in &loaded {
+                    // Skip an untouched compilation "About" stub (dust jacket).
+                    if is_default_about(page, ct) {
+                        continue;
+                    }
                     if let Err(e) = index.index_page(page) {
                         tracing::warn!("Failed to index {} in search: {}", page.name, e);
                     }
