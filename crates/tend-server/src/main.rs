@@ -17,9 +17,12 @@ use tracing::{info, Level};
 
 mod auth;
 mod config;
+mod csrf;
 mod error;
 mod headers;
 mod indices;
+mod origin;
+mod proxy_guard;
 mod routes;
 mod state;
 mod ws;
@@ -162,6 +165,25 @@ async fn main() -> anyhow::Result<()> {
         .append_index_html_on_directories(true)
         .fallback(ServeFile::new(&index_path));
 
+    // Trusted-proxy edge gate. When auth is required, reject requests whose TCP
+    // peer is outside the trusted set (default: loopback) before routing, so a
+    // client reaching the backend port directly cannot spoof Remote-User.
+    let (trusted_nets, invalid_trusted) = config.trusted_proxy_nets();
+    for bad in &invalid_trusted {
+        tracing::warn!("Ignoring unparseable TEND_TRUSTED_PROXIES entry: {:?}", bad);
+    }
+    if config.auth.required && trusted_nets.is_empty() {
+        tracing::warn!(
+            "auth.required is set but no trusted proxies parsed — all requests will be \
+             rejected (health excepted). Set TEND_TRUSTED_PROXIES to your proxy's address."
+        );
+    }
+    let proxy_guard_state = proxy_guard::ProxyGuard::new(config.auth.required, trusted_nets);
+
+    // CSRF guard: reject cross-origin state-changing requests. Active only when
+    // auth is required (dev has no proxy cookie to abuse and runs cross-origin).
+    let csrf_state = csrf::CsrfConfig::new(config.auth.required, config.cors.allowed_origins.clone());
+
     let [sec0, sec1, sec2, sec3, sec4, sec5] = headers::security_headers_layer();
     let app = api_router
         .fallback_service(static_service)
@@ -173,7 +195,17 @@ async fn main() -> anyhow::Result<()> {
         .layer(sec0)
         .layer(TraceLayer::new_for_http())
         .layer(cors_layer)
-        .with_state(state);
+        .with_state(state)
+        // CSRF guard sits just inside the proxy gate.
+        .layer(axum::middleware::from_fn_with_state(
+            csrf_state,
+            csrf::guard,
+        ))
+        // Outermost layer: runs before routing/auth, drops untrusted peers first.
+        .layer(axum::middleware::from_fn_with_state(
+            proxy_guard_state,
+            proxy_guard::guard,
+        ));
 
     // Start server
     let addr = SocketAddr::new(config.host, config.port);

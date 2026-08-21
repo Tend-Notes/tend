@@ -12,22 +12,30 @@ import { clearAllDrafts } from './draftStore'
 const CONTENT_CACHE_NAMES = ['api-pages', 'api-journals']
 
 /**
- * Delete the API content caches and clear all unsaved drafts. Best-effort: a
- * failure to clear one store must not block the switch, so errors are logged
- * and swallowed.
+ * Delete the service-worker runtime caches that hold note content, so a reload
+ * on a shared machine cannot serve them. Does NOT touch unsaved drafts, which
+ * the session-expiry flow keeps for recovery after re-login. Best-effort.
  */
-export async function clearUserScopedContent(): Promise<void> {
-  const tasks: Promise<unknown>[] = []
+export async function clearContentCaches(): Promise<void> {
+  if (typeof caches === 'undefined') return
 
-  if (typeof caches !== 'undefined') {
-    for (const name of CONTENT_CACHE_NAMES) {
-      tasks.push(caches.delete(name))
+  const results = await Promise.allSettled(
+    CONTENT_CACHE_NAMES.map((name) => caches.delete(name)),
+  )
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('Failed to clear content cache:', result.reason)
     }
   }
+}
 
-  tasks.push(clearAllDrafts())
-
-  const results = await Promise.allSettled(tasks)
+/**
+ * Delete the API content caches AND clear all unsaved drafts. Use when the
+ * identity actually changes (whoami mismatch, garden switch/lock) so no prior
+ * user's content — cached or draft — survives. Best-effort.
+ */
+export async function clearUserScopedContent(): Promise<void> {
+  const results = await Promise.allSettled([clearContentCaches(), clearAllDrafts()])
   for (const result of results) {
     if (result.status === 'rejected') {
       console.error('Failed to clear cached content on identity change:', result.reason)

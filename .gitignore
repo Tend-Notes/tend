@@ -23,9 +23,12 @@ Thumbs.db
 result
 .direnv/
 
-# Environment
-.env
-.env.local
+# Environment — ignore all .env files so a future .env.production can't be
+# committed by accident. .env.development is already tracked (CORS-only); keep an
+# explicit example checked in if one is ever added.
+.env*
+!.env.development
+!.env.example
 
 # Local notes
 ANONYMIZE-*.md

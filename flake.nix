@@ -268,6 +268,25 @@
                 '';
                 example = "http://localhost:9091/api/verify";
               };
+
+              trustedProxies = mkOption {
+                type = types.listOf types.str;
+                default = [ "127.0.0.1/32" "::1/128" ];
+                description = ''
+                  CIDR ranges (or bare IPs) whose requests are trusted to carry the
+                  `Remote-User` header set by the reverse proxy. When authentication is
+                  required, a request whose TCP peer is outside this set is rejected
+                  before routing, so a client reaching the backend port directly cannot
+                  spoof another user's identity.
+
+                  The default (loopback only) is correct when the reverse proxy runs on
+                  the same host and connects over 127.0.0.1 — the common NixOS setup.
+                  Add the proxy's address or subnet only if it connects from elsewhere
+                  (a different host, or a container network). There is no secret to
+                  manage; trust derives from the network position of the peer.
+                '';
+                example = [ "127.0.0.1/32" "10.88.0.0/16" ];
+              };
             };
 
             extraEnvironment = mkOption {
@@ -312,6 +331,8 @@
                 GIT_SSH_COMMAND = "${pkgs.openssh}/bin/ssh";
               } // optionalAttrs (cfg.auth.verifyUrl != null) {
                 TEND_AUTH_VERIFY_URL = cfg.auth.verifyUrl;
+              } // optionalAttrs (cfg.auth.trustedProxies != []) {
+                TEND_TRUSTED_PROXIES = concatStringsSep "," cfg.auth.trustedProxies;
               } // cfg.extraEnvironment;
 
               serviceConfig = {

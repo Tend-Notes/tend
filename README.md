@@ -17,23 +17,37 @@ A self-hosted digital garden for your thoughts. Tend is a browser-based outliner
 
 ### Docker
 
-The easiest way to run Tend:
+> **Read this first.** Tend has no built-in login. For any real deployment it
+> must sit behind a reverse proxy that authenticates users and sets a
+> `Remote-User` header — see [Authentication](#authentication) below. The command
+> here is a **local, unauthenticated trial** bound to `127.0.0.1` only. Do not
+> publish this port to a network without a proxy in front.
+
+To try Tend on your own machine:
 
 ```bash
 # Create a directory for your garden
 mkdir -p ~/tend-data
 
-# Run with Docker
+# Local trial only: no authentication, bound to localhost.
 docker run -d \
   --name tend \
-  -p 3000:3000 \
+  -p 127.0.0.1:3000:3000 \
+  -e TEND_AUTH_REQUIRED=false \
+  -e TEND_DEV_ALLOW_INSECURE=true \
+  -e TEND_AUTH_DEFAULT_USER=me \
   -v ~/tend-data:/data \
   ghcr.io/tend-notes/tend:latest
 
 # Open http://localhost:3000
 ```
 
-Or use Docker Compose:
+`TEND_DEV_ALLOW_INSECURE=true` is required only because the container binds
+`0.0.0.0` internally; the `127.0.0.1:` in the port mapping keeps it off the
+network. For production, drop these three env vars and follow
+[Authentication](#authentication).
+
+Or use Docker Compose (also binds to loopback by default):
 
 ```bash
 # Clone the repository
@@ -54,6 +68,11 @@ Environment variables:
 |----------|---------|-------------|
 | `TEND_PORT` | `3000` | Port to listen on |
 | `TEND_GARDEN_PATH` | `/data` | Path to garden directory |
+| `TEND_AUTH_REQUIRED` | `true` | Require the proxy-set auth header. Set `false` only for local/dev use. |
+| `TEND_AUTH_HEADER` | `Remote-User` | Header the proxy sets with the authenticated username. |
+| `TEND_AUTH_VERIFY_URL` | (none) | Forward-auth verify endpoint for WebSocket auth. **Required** when `TEND_AUTH_REQUIRED=true`. |
+| `TEND_TRUSTED_PROXIES` | `127.0.0.1/32,::1/128` | Peer IPs/CIDRs trusted to set `Remote-User` (see [Authentication](#authentication)). |
+| `TEND_DEV_ALLOW_INSECURE` | `false` | Override the safety checks that refuse to start when auth is disabled on a non-loopback bind. Dev only. |
 | `TEND_CORS_ORIGINS` | (none) | CORS allowed origins (see below) |
 | `RUST_LOG` | `info` | Log level (`debug`, `info`, `warn`, `error`) |
 | `GIT_AUTHOR_NAME` | `Tend` | Git commit author name |
@@ -120,6 +139,8 @@ Add Tend to your NixOS configuration:
 | `services.tend.user` | `"tend"` | User to run as |
 | `services.tend.group` | `"tend"` | Group to run as |
 | `services.tend.openFirewall` | `false` | Open firewall for the port |
+| `services.tend.auth.verifyUrl` | `null` | Forward-auth verify endpoint for WebSocket auth (see [Authentication](#authentication)) |
+| `services.tend.auth.trustedProxies` | `[ "127.0.0.1/32" "::1/128" ]` | Peer IPs/CIDRs trusted to set `Remote-User` |
 | `services.tend.gitBackup.enable` | `false` | Enable automatic Git backup |
 | `services.tend.gitBackup.intervalMinutes` | `30` | Backup interval |
 | `services.tend.gitBackup.autoPush` | `false` | Push after each backup |
@@ -137,19 +158,67 @@ nix build github:tend-notes/tend
 ./result/bin/tend
 ```
 
-### Reverse Proxy
+## Authentication
 
-For production, run Tend behind a reverse proxy like Caddy or nginx.
+Tend has **no built-in login**. It delegates authentication to a reverse proxy
+that sits in front of it (for example Caddy or nginx with [Authelia](https://www.authelia.com/)).
+Understanding this model matters — misconfiguring it is the difference between a
+private garden and an open one.
 
-#### Caddy
+**How it works:**
+
+1. The reverse proxy terminates TLS and authenticates the user (login page, MFA,
+   whatever you configure).
+2. On each authenticated request the proxy sets a header — `Remote-User` by
+   default — containing the username, and forwards the request to Tend.
+3. Tend trusts that header to decide whose garden to serve. There is no session,
+   cookie, or password inside Tend itself.
+
+Two things keep this from being spoofable, and **you are responsible for both**:
+
+- **The proxy must set `Remote-User` itself from the verified session, and must
+  not pass through a client-supplied copy.** The forward-auth configs below do
+  this: the value comes from the auth server's response, which overwrites
+  anything the client sent.
+- **Tend must be reachable only through the proxy.** Tend enforces this itself:
+  it only honors `Remote-User` from a trusted peer IP. By default that is
+  **loopback only** (`127.0.0.1`, `::1`), which is correct when the proxy runs on
+  the same host. A request arriving from anywhere else is rejected with `403`
+  before it reaches your data — so even if the port is exposed, a direct client
+  cannot impersonate a user. If your proxy connects from another host or a
+  container network, list its address in `TEND_TRUSTED_PROXIES` (see below).
+
+  There is no shared secret to manage or leak — the trust is the peer's network
+  position. The server logs its effective trusted set at startup.
+
+**Required settings for production:**
+
+| Setting | Value |
+|---------|-------|
+| `TEND_AUTH_REQUIRED` | `true` (default) |
+| `TEND_AUTH_VERIFY_URL` | your proxy's forward-auth verify endpoint — required so WebSocket connections (which can't go through the proxy's auth the same way) are verified. The server refuses to start without it when auth is required. |
+| `TEND_TRUSTED_PROXIES` | leave default (loopback) if the proxy is on the same host; otherwise the proxy's IP/subnet |
+
+### Caddy + Authelia
 
 ```caddy
 notes.example.com {
-    reverse_proxy localhost:3000
+    # Authenticate every request against Authelia. The Remote-User header is
+    # taken from Authelia's response (the verified session), overwriting any
+    # value the client may have sent.
+    forward_auth authelia:9091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+    }
+
+    reverse_proxy 127.0.0.1:3000
 }
 ```
 
-#### nginx
+Set `TEND_AUTH_VERIFY_URL=http://authelia:9091/api/verify` (or your Authelia
+`/api/authz/forward-auth` endpoint) so WebSocket connections are verified too.
+
+### nginx + Authelia
 
 ```nginx
 server {
@@ -157,6 +226,14 @@ server {
     server_name notes.example.com;
 
     location / {
+        # Authenticate against Authelia first.
+        auth_request /authelia;
+        # Pull the username from Authelia's response...
+        auth_request_set $user $upstream_http_remote_user;
+        # ...and set it explicitly. proxy_set_header replaces the header, so a
+        # client-supplied Remote-User never reaches Tend.
+        proxy_set_header Remote-User $user;
+
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -164,8 +241,18 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
+
+    location = /authelia {
+        internal;
+        proxy_pass http://authelia:9091/api/verify;
+        proxy_set_header X-Original-URL $scheme://$http_host$request_uri;
+    }
 }
 ```
+
+If your proxy runs on a **different host or container** than Tend, add its
+address to the trusted set, e.g. `TEND_TRUSTED_PROXIES=10.88.0.0/16`. Otherwise
+Tend rejects it as an untrusted peer.
 
 ## Data Storage
 
