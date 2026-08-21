@@ -718,6 +718,15 @@ export const sheets = {
     return pages.create(name, options?.content)
   },
 
+  // Demo has no server-side compilation registry; report it as created so the
+  // picker can advance to the file step.
+  createCompilation: async (
+    _contentTypeId: string,
+    namespace: string
+  ): Promise<{ namespace: string; about_path: string; existed: boolean }> => {
+    return { namespace, about_path: `${namespace}/About`, existed: false }
+  },
+
   update: async (
     contentTypeId: string,
     name: string,

@@ -563,6 +563,15 @@ const _sheets = {
       body: JSON.stringify({ name, date: options?.date, content: options?.content }),
     }),
 
+  // Eagerly create a compilation (namespace) for a namespaced type by writing
+  // its "About" dust-jacket stub, so it exists and is pickable before it has
+  // any entries.
+  createCompilation: (contentTypeId: string, namespace: string) =>
+    fetchJson<{ namespace: string; about_path: string; existed: boolean }>(
+      `${API_BASE}/compilations/${encodeURIComponent(contentTypeId)}`,
+      { method: 'POST', body: JSON.stringify({ namespace }) }
+    ),
+
   update: (
     contentTypeId: string,
     name: string,
