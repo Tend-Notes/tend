@@ -19,10 +19,10 @@ import { NodeViewConstructor } from 'prosemirror-view'
 import { keymap } from 'prosemirror-keymap'
 import { history, undo, redo } from 'prosemirror-history'
 import { baseKeymap, chainCommands, deleteSelection, joinBackward } from 'prosemirror-commands'
-import { splitListItem, sinkListItem, liftListItem } from 'prosemirror-schema-list'
+import { sinkListItem, liftListItem } from 'prosemirror-schema-list'
 import { listItemType } from './schema'
 import { uuidPlugin } from './uuidPlugin'
-import { moveListItem, toggleCollapse } from './commands'
+import { moveListItem, toggleCollapse, splitListItemCleanTask } from './commands'
 import { ListItemView } from './nodeview'
 import { formattingPlugin, type NavHandlers } from './decorations'
 import { slashMenuPlugin } from './slashMenuPlugin'
@@ -55,11 +55,12 @@ export function outlinerLayer(): EditorLayer {
     plugins: [
       uuidPlugin(),
       keymap({
-        // Pass explicit empty attrs: with no attrs, splitListItem copies the split
-        // node's attrs onto the new bullet — including `properties`, so a new TODO
-        // would inherit the previous one's priority/dates. The uuid plugin then
-        // mints a fresh uuid for the '' default.
-        Enter: splitListItem(listItemType, { uuid: '', collapsed: false, properties: {} }),
+        // A new bullet from Enter must never inherit the split block's task
+        // metadata (dates, priority, work_log — all stored in `properties`).
+        // splitListItem's own empty-attrs override only applies to end-of-line
+        // splits; splitListItemCleanTask clears the new bullet for every caret
+        // position. The uuid plugin then mints a fresh uuid for the '' default.
+        Enter: splitListItemCleanTask(),
         // Chain a no-op returning true so structural keys never fall through to
         // the browser (focus escape).
         Tab: chainCommands(sinkListItem(listItemType), () => true),
