@@ -139,8 +139,16 @@ export function checkAuthResponse(res: Response): void {
 
 // Helper for JSON requests
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+  // redirect: 'manual' so an expired session is *detectable*. Without it, the
+  // proxy's cross-origin 302 to the login portal is followed, blocked by CORS,
+  // and fetch rejects with a bare "Failed to fetch" - which never reaches the
+  // auth-expiry check below and leaves the app unable to route to login (no
+  // reload button in the installed iOS app). With it, the bounce comes back as
+  // an opaqueredirect response, which isAuthExpiredResponse already recognizes.
+  // The tend API itself never issues redirects, so nothing legitimate breaks.
   const res = await fetch(url, {
     ...options,
+    redirect: 'manual',
     headers: {
       'Content-Type': 'application/json',
       ...options?.headers,
