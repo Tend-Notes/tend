@@ -221,7 +221,8 @@ async fn verify_auth(
 }
 
 /// Reject cross-origin WebSocket handshakes (WS bypasses CORS, so a malicious
-/// web page could otherwise open `ws://host/ws` on the user's ambient cookies).
+/// web page could otherwise open a socket to the `/ws` endpoint on the user's
+/// ambient cookies).
 /// Same-origin only — the shared helper is passed an empty allowlist.
 fn origin_allowed(headers: &HeaderMap) -> bool {
     crate::origin::origin_allowed(headers, &[])
