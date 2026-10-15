@@ -29,12 +29,16 @@ pub struct Garden {
     #[serde(default)]
     pub encrypted: bool,
     /// Whether full-text search is enabled.
-    /// For encrypted gardens, enabling search creates a plaintext index in .tend/
+    /// For encrypted gardens the index is built in memory on unlock and never
+    /// written to disk, but it is a plaintext copy of every note for as long as
+    /// it is resident — see `index_ttl_hours`.
     /// Defaults to true for unencrypted gardens, false for encrypted.
     #[serde(default = "default_search_enabled")]
     pub search_enabled: bool,
-    /// Hours after last use before the search index is auto-deleted (encrypted gardens only).
-    /// Set to 0 to disable auto-deletion. Default is 6 hours.
+    /// Hours after last use before the in-memory search index is dropped
+    /// (encrypted gardens only), ending the window in which the garden's
+    /// content is readable in the clear. The next search rebuilds it.
+    /// Set to 0 to keep it for as long as the garden stays unlocked.
     #[serde(default = "default_index_ttl_hours")]
     pub index_ttl_hours: u32,
     /// Content types configured for this garden
@@ -51,7 +55,7 @@ fn default_search_enabled() -> bool {
 }
 
 fn default_index_ttl_hours() -> u32 {
-    6
+    12
 }
 
 /// Archived garden (kept for 15 days before permanent removal)
@@ -80,12 +84,13 @@ pub struct CreateGardenRequest {
     pub passphrase: Option<String>,
     /// Whether to enable search for encrypted gardens.
     /// Ignored for unencrypted gardens (always enabled).
-    /// When enabled, a plaintext search index is stored in .tend/
+    /// When enabled, a plaintext index is held in memory while the garden is
+    /// unlocked (never written to disk).
     #[serde(default)]
     pub search_enabled: Option<bool>,
-    /// Hours after last use before the search index is auto-deleted.
+    /// Hours after last use before the in-memory search index is dropped.
     /// Only applies to encrypted gardens with search enabled.
-    /// Set to 0 to disable auto-deletion. Default is 6 hours.
+    /// Set to 0 to disable. Default is 12 hours.
     #[serde(default)]
     pub index_ttl_hours: Option<u32>,
 }
@@ -450,7 +455,7 @@ pub async fn create_garden(
     let (search_enabled, index_ttl_hours) = if encrypted {
         (
             req.search_enabled.unwrap_or(false), // Default OFF for encrypted
-            req.index_ttl_hours.unwrap_or(6),    // Default 6 hours TTL
+            req.index_ttl_hours.unwrap_or(12),   // Default 12 hours TTL
         )
     } else {
         (true, 0) // Always on, no TTL for unencrypted

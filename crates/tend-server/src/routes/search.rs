@@ -215,7 +215,41 @@ pub async fn search(
                 )),
             }));
         }
-        IndexStatus::NotBuilt | IndexStatus::Expired => {
+        IndexStatus::Expired => {
+            // The index was dropped after its idle TTL (see
+            // GardenState::expire_index_if_idle), but the garden is still
+            // unlocked — so rebuild it in the background rather than leaving
+            // search dead until the user switches gardens and unlocks again.
+            // The claim flips Expired -> Building, so concurrent searches
+            // queue behind one rebuild instead of each starting their own.
+            let rebuilding = garden.claim_expired_index_rebuild().await;
+            if rebuilding {
+                let user_state = Arc::clone(&user_state);
+                let content_types =
+                    load_user_content_types(&user.username).unwrap_or_default();
+                tokio::spawn(async move {
+                    // Waits for this handler to release its read lock.
+                    let mut garden = user_state.garden.write().await;
+                    if let Err(e) = garden.build_index(&content_types).await {
+                        tracing::warn!("Failed to rebuild expired search index: {}", e);
+                    }
+                });
+            }
+            return Ok(Json(SearchResponse {
+                results: Vec::new(),
+                status: Some(SearchStatusResponse::from_garden(
+                    &garden,
+                    if rebuilding {
+                        IndexStatus::Building
+                    } else {
+                        index_status
+                    },
+                    None,
+                    Some("Search index is being rebuilt..."),
+                )),
+            }));
+        }
+        IndexStatus::NotBuilt => {
             return Ok(Json(SearchResponse {
                 results: Vec::new(),
                 status: Some(SearchStatusResponse::from_garden(

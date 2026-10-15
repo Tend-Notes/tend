@@ -75,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     info!("Per-user file watchers enabled (started on garden load)");
 
     // Start search index GC task (cleans up expired indices for encrypted gardens)
-    let _gc_handle = state::start_search_index_gc_task(config.data_dir.clone());
+    let _gc_handle = state::start_search_index_gc_task(config.data_dir.clone(), state.clone());
 
     // Build CORS layer based on configuration
     let cors_layer = if config.cors.allowed_origins.is_empty() {
