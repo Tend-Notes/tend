@@ -1,5 +1,9 @@
 # Review Remediation Guide — 2026-10-15
 
+> **DO NOT COMMIT THIS FILE YET.** It documents unfixed vulnerabilities and is
+> excluded from the repository until the security fixes (Phases 0–3) are merged
+> and deployments updated. Keep it local-only when committing other work.
+
 Source: full security + code-quality review of all Rust crates and the web
 client (2026-10-15). Work the phases in order; items within a phase are
 independent unless noted. Each item has **Problem / Fix / Verify**. Branch per
