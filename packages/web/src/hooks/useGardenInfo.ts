@@ -1,50 +1,62 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-// Hook to get current garden information
+// Encryption and search-index state for the active garden.
 
 import { useState, useEffect, useCallback } from 'react'
-import { gardens, type Garden } from '../lib/api'
+import { search, type SearchStatus, type IndexStatus } from '../lib/api'
+import { useSettingsStore } from '../stores/settingsStore'
 
 interface GardenInfo {
-  garden: Garden | null
+  /** Whether the active garden is encrypted */
   isEncrypted: boolean
+  /** Lifecycle of the full-text index, or null before the first fetch lands */
+  indexStatus: IndexStatus | null
+  /** A plaintext index directory is sitting on disk (see SearchStatus) */
+  indexOnDisk: boolean
+  numDocs: number | null
   loading: boolean
   error: string | null
   refresh: () => void
 }
 
 /**
- * Hook to get information about the current active garden.
- * Useful for checking encryption status to disable certain features.
+ * State of the active garden's encryption and full-text index.
+ *
+ * Reads `GET /search/status`, which carries the garden's `encrypted` flag
+ * alongside the index lifecycle, so one request answers both "is this garden
+ * encrypted" and "does a plaintext index of it exist right now".
  */
 export function useGardenInfo(): GardenInfo {
-  const [garden, setGarden] = useState<Garden | null>(null)
+  const [status, setStatus] = useState<SearchStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Garden switches and unlocks both land here (the garden_switched WebSocket
+  // handler sets it), so this doubles as the refetch trigger.
+  const currentGraphId = useSettingsStore((s) => s.currentGraphId)
 
-  const fetchGarden = useCallback(async () => {
+  const fetchStatus = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
-      const response = await gardens.list()
-      const active = response.gardens.find((g) => g.id === response.active)
-      setGarden(active || null)
+      setStatus(await search.status())
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch garden info')
-      setGarden(null)
+      setError(err instanceof Error ? err.message : 'Failed to fetch search status')
+      setStatus(null)
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    fetchGarden()
-  }, [fetchGarden])
+    fetchStatus()
+  }, [fetchStatus, currentGraphId])
 
   return {
-    garden,
-    isEncrypted: garden?.encrypted ?? false,
+    isEncrypted: status?.encrypted ?? false,
+    indexStatus: status?.indexStatus ?? null,
+    indexOnDisk: status?.indexOnDisk ?? false,
+    numDocs: status?.numDocs ?? null,
     loading,
     error,
-    refresh: fetchGarden,
+    refresh: fetchStatus,
   }
 }

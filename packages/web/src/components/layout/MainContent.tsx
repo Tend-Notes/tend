@@ -15,6 +15,7 @@ const ImportErrorEditor = lazy(() =>
 )
 import { BacklinksPanel } from '../panels/BacklinksPanel'
 import { SaveStatus } from '../ui/SaveStatus'
+import { GardenLockStatus } from '../ui/GardenLockStatus'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
 import { TaskManagerPage } from '../tasks/TaskManagerPage'
 
@@ -189,6 +190,7 @@ export function MainContent() {
               )}
             </div>
             <SaveStatus />
+            <GardenLockStatus />
           </div>
 
           {/* Editor: Longform Mode (flat wall-of-text) when the page is flagged,
