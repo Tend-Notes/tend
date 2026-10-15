@@ -252,10 +252,21 @@ export const journals = isDemoMode ? demoApi.journals : _journals
 // Search API
 // ============================================================================
 
-/** Search status for encrypted gardens */
+/** Lifecycle of the full-text index, mirroring the server's `IndexStatus`. */
+export type IndexStatus = 'disabled' | 'ready' | 'building' | 'not_built' | 'expired'
+
+/** Full-text index status — `GET /search/status`, also embedded in a query response. */
 export interface SearchStatus {
-  disabled: boolean
-  rebuilding: boolean
+  indexStatus: IndexStatus
+  numDocs?: number
+  /** Whether the active garden is encrypted */
+  encrypted: boolean
+  /**
+   * A plaintext index directory exists on disk at `.tend/search_index`. Always
+   * false for an encrypted garden unless the removal done on unlock failed, in
+   * which case note content is readable at rest.
+   */
+  indexOnDisk: boolean
   message?: string
 }
 
@@ -268,6 +279,7 @@ export interface SearchResponse {
 const _search = {
   query: (q: string, limit = 20) =>
     fetchJson<SearchResponse>(`${API_BASE}/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  status: () => fetchJson<SearchStatus>(`${API_BASE}/search/status`),
 }
 
 export const search = isDemoMode ? demoApi.search : _search

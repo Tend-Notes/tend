@@ -1460,7 +1460,7 @@ function GardensSection() {
   const [newGardenPassphrase, setNewGardenPassphrase] = useState('')
   const [newGardenPassphraseConfirm, setNewGardenPassphraseConfirm] = useState('')
   const [newGardenSearchEnabled, setNewGardenSearchEnabled] = useState(false)
-  const [newGardenIndexTtl, setNewGardenIndexTtl] = useState(6)
+  const [newGardenIndexTtl, setNewGardenIndexTtl] = useState(12)
   const [creating, setCreating] = useState(false)
   const [confirmArchive, setConfirmArchive] = useState<string | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
@@ -1552,7 +1552,7 @@ function GardensSection() {
       setNewGardenPassphrase('')
       setNewGardenPassphraseConfirm('')
       setNewGardenSearchEnabled(false)
-      setNewGardenIndexTtl(6)
+      setNewGardenIndexTtl(12)
       setShowNewForm(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create garden')

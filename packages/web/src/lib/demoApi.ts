@@ -287,9 +287,13 @@ function formatJournalTitle(date: string): string {
 // Search API (disabled in demo mode)
 // ============================================================================
 
+export type IndexStatus = 'disabled' | 'ready' | 'building' | 'not_built' | 'expired'
+
 export interface SearchStatus {
-  disabled: boolean
-  rebuilding: boolean
+  indexStatus: IndexStatus
+  numDocs?: number
+  encrypted: boolean
+  indexOnDisk: boolean
   message?: string
 }
 
@@ -298,17 +302,22 @@ export interface SearchResponse {
   status: SearchStatus
 }
 
+const DEMO_SEARCH_STATUS: SearchStatus = {
+  indexStatus: 'disabled',
+  encrypted: false,
+  indexOnDisk: false,
+  message: 'Search is disabled in demo mode',
+}
+
 export const search = {
   query: async (_q: string, _limit = 20): Promise<SearchResponse> => {
     return {
       results: [],
-      status: {
-        disabled: true,
-        rebuilding: false,
-        message: 'Search is disabled in demo mode',
-      },
+      status: DEMO_SEARCH_STATUS,
     }
   },
+
+  status: async (): Promise<SearchStatus> => DEMO_SEARCH_STATUS,
 }
 
 // ============================================================================

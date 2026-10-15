@@ -471,20 +471,9 @@ impl GardenState {
         Ok(state)
     }
 
-    /// Check if the search index has expired based on TTL
-    pub async fn is_index_expired(&self) -> bool {
-        if self.search_config.ttl_hours == 0 {
-            return false; // No TTL, never expires
-        }
-
-        let last_use = self.last_search_use.read().await;
-        match *last_use {
-            Some(instant) => {
-                let elapsed = instant.elapsed();
-                elapsed.as_secs() > (self.search_config.ttl_hours as u64 * 3600)
-            }
-            None => false, // Never used, don't expire immediately
-        }
+    /// How long since the search index was last used (built or searched).
+    async fn idle_for(&self) -> Option<Duration> {
+        self.last_search_use.read().await.map(|t| t.elapsed())
     }
 
     /// Mark the search index as used (resets TTL timer)
@@ -532,6 +521,50 @@ impl GardenState {
         let mut status = self.index_status.write().await;
         *status = IndexStatus::Expired;
         Ok(())
+    }
+
+    /// Drop the in-memory search index if its TTL has elapsed.
+    ///
+    /// Encrypted gardens hold the index in RAM (never on disk), so this is the
+    /// only thing that ends the window in which the garden's content is
+    /// readable in the clear. The garden itself stays unlocked; the next search
+    /// rebuilds the index (see routes::search::search).
+    ///
+    /// Returns true if an index was dropped.
+    pub async fn expire_index_if_idle(&mut self) -> bool {
+        let idle_for = self.idle_for().await;
+        self.expire_index_if_idle_for(idle_for).await
+    }
+
+    /// `expire_index_if_idle` with the idle duration supplied, so the drop can
+    /// be exercised without waiting out a real TTL.
+    async fn expire_index_if_idle_for(&mut self, idle_for: Option<Duration>) -> bool {
+        if self.search_index.is_none() || !index_expired(self.search_config.ttl_hours, idle_for) {
+            return false;
+        }
+
+        self.search_index = None;
+        *self.last_search_use.write().await = None;
+        *self.index_status.write().await = IndexStatus::Expired;
+        info!(
+            "Dropped idle in-memory search index after {}h of non-use: {}",
+            self.search_config.ttl_hours,
+            self.data_dir.display()
+        );
+        true
+    }
+
+    /// Claim the right to rebuild an expired index: flips `Expired` to
+    /// `Building` and returns true, or returns false if the status has moved on
+    /// (another request already started a rebuild). Lets the search path kick
+    /// off exactly one rebuild without holding a write lock on the garden.
+    pub async fn claim_expired_index_rebuild(&self) -> bool {
+        let mut status = self.index_status.write().await;
+        if *status != IndexStatus::Expired {
+            return false;
+        }
+        *status = IndexStatus::Building;
+        true
     }
 
     /// Get current index status
@@ -593,8 +626,10 @@ impl GardenState {
             info!("Search index built with {} documents", index.num_docs());
         }
 
-        // Update state
+        // Update state. Start the TTL clock at build time: an index that is
+        // never searched still holds the garden's content in the clear.
         self.search_index = Some(search_index);
+        *self.last_search_use.write().await = Some(Instant::now());
         {
             let mut status = self.index_status.write().await;
             *status = IndexStatus::Ready;
@@ -868,6 +903,7 @@ impl GardenState {
                 index.commit()?;
             }
             self.search_index = Some(search_index);
+            *self.last_search_use.write().await = Some(Instant::now());
             {
                 let mut status = self.index_status.write().await;
                 *status = IndexStatus::Ready;
@@ -922,6 +958,22 @@ fn release_ws_slot(map: &mut std::collections::HashMap<String, usize>, user: &st
         if *count == 0 {
             map.remove(user);
         }
+    }
+}
+
+/// Whether an index whose last use was `last_use` has outlived `ttl_hours`.
+///
+/// `last_use` is seeded when the index is built (not only when it is searched),
+/// so `None` means "no index" rather than "built but never searched" — the
+/// latter used to be treated as never-expiring, which made an index nobody
+/// searched the longest-lived plaintext copy of an encrypted garden.
+fn index_expired(ttl_hours: u32, idle_for: Option<Duration>) -> bool {
+    if ttl_hours == 0 {
+        return false; // No TTL, never expires
+    }
+    match idle_for {
+        Some(idle) => idle.as_secs() > (ttl_hours as u64 * 3600),
+        None => false, // No index resident, nothing to expire
     }
 }
 
@@ -1100,7 +1152,7 @@ impl UserState {
             .get("index_ttl_hours")
             .and_then(|v| v.as_u64())
             .map(|v| v as u32)
-            .unwrap_or(if encrypted { 6 } else { 0 });
+            .unwrap_or(if encrypted { 12 } else { 0 });
 
         Ok((
             PathBuf::from(path),
@@ -1190,7 +1242,7 @@ impl UserState {
             .get("index_ttl_hours")
             .and_then(|v| v.as_u64())
             .map(|v| v as u32)
-            .unwrap_or(if encrypted { 6 } else { 0 });
+            .unwrap_or(if encrypted { 12 } else { 0 });
 
         Ok(GardenInfo {
             path,
@@ -1520,6 +1572,14 @@ impl AppState {
         Ok(user_state)
     }
 
+    /// Snapshot of the currently loaded per-user states.
+    ///
+    /// Clones the Arcs under a read lock and releases it, so callers (the index
+    /// GC task) can take per-garden write locks without holding the map.
+    pub async fn loaded_user_states(&self) -> Vec<Arc<UserState>> {
+        self.user_states.read().await.values().cloned().collect()
+    }
+
     /// Broadcast an event to all connected WebSocket clients
     pub fn broadcast(&self, event: WsEvent) {
         // Ignore errors (no subscribers is fine)
@@ -1550,9 +1610,17 @@ impl AppState {
 
 // ========== Search Index Garbage Collection ==========
 
-/// Start a background task that periodically cleans up expired search indices
-/// for encrypted gardens. Runs every hour.
-pub fn start_search_index_gc_task(base_dir: PathBuf) -> tokio::task::JoinHandle<()> {
+/// Start a background task that periodically expires search indices for
+/// encrypted gardens. Runs every hour.
+///
+/// Two sweeps per pass, because an index can be in two places:
+///  - in RAM, for every loaded encrypted garden (the normal case since the
+///    RAM-only change) — `expire_idle_memory_indices`
+///  - on disk, only as a legacy leftover — `run_search_index_gc`
+pub fn start_search_index_gc_task(
+    base_dir: PathBuf,
+    state: Arc<AppState>,
+) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let gc_interval = Duration::from_secs(3600); // Check every hour
         info!("Search index GC task started (interval: 1 hour)");
@@ -1560,11 +1628,23 @@ pub fn start_search_index_gc_task(base_dir: PathBuf) -> tokio::task::JoinHandle<
         loop {
             tokio::time::sleep(gc_interval).await;
 
+            expire_idle_memory_indices(&state).await;
+
             if let Err(e) = run_search_index_gc(&base_dir).await {
                 tracing::warn!("Search index GC error: {}", e);
             }
         }
     })
+}
+
+/// Drop the in-memory search index of every loaded garden whose TTL has
+/// elapsed. Nothing else does this, so without it an encrypted garden's
+/// plaintext index lives for as long as the process does.
+pub async fn expire_idle_memory_indices(state: &AppState) {
+    for user_state in state.loaded_user_states().await {
+        // expire_index_if_idle logs the garden it dropped.
+        let _ = user_state.garden.write().await.expire_index_if_idle().await;
+    }
 }
 
 /// Run one GC pass: scan all users, find expired search indices, delete them
@@ -1774,5 +1854,103 @@ mod gc_tests {
             !index_path.exists(),
             "expired search index should have been deleted"
         );
+    }
+}
+
+#[cfg(test)]
+mod index_expiry_tests {
+    use super::{
+        index_expired, GardenState, IndexStatus, SearchConfig, UnifiedFileManager,
+    };
+    use crate::config::GitConfig;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tempfile::TempDir;
+    use tend_search::SearchIndex;
+    use tend_storage::FileManager;
+    use tokio::sync::RwLock;
+
+    const H: u64 = 3600;
+
+    #[test]
+    fn ttl_zero_never_expires() {
+        assert!(!index_expired(0, Some(Duration::from_secs(10_000 * H))));
+    }
+
+    #[test]
+    fn expires_only_past_the_ttl() {
+        assert!(!index_expired(12, Some(Duration::from_secs(11 * H))));
+        assert!(!index_expired(12, Some(Duration::from_secs(12 * H))));
+        assert!(index_expired(12, Some(Duration::from_secs(13 * H))));
+    }
+
+    #[test]
+    fn no_resident_index_is_not_expired() {
+        // `last_search_use` is seeded when the index is built, so None means
+        // there is no index to drop — not "built but never searched", which
+        // used to be treated as never-expiring.
+        assert!(!index_expired(12, None));
+    }
+
+    async fn garden_with_resident_index(ttl_hours: u32) -> (TempDir, GardenState) {
+        let temp = TempDir::new().unwrap();
+        let dir = temp.path().to_path_buf();
+        let file_manager = FileManager::new(&dir).unwrap();
+        let mut garden = GardenState::new_with_file_manager(
+            dir,
+            UnifiedFileManager::Plain(file_manager),
+            &GitConfig::default(),
+            false,
+            SearchConfig { enabled: true, ttl_hours },
+        )
+        .await
+        .unwrap();
+
+        // Stand in for the RAM index an encrypted garden builds on unlock.
+        garden.search_index = Some(Arc::new(RwLock::new(SearchIndex::in_memory().unwrap())));
+        *garden.index_status.write().await = IndexStatus::Ready;
+        *garden.last_search_use.write().await = Some(std::time::Instant::now());
+        (temp, garden)
+    }
+
+    #[tokio::test]
+    async fn idle_index_is_dropped_and_marked_expired() {
+        let (_temp, mut garden) = garden_with_resident_index(12).await;
+
+        assert!(garden.expire_index_if_idle_for(Some(Duration::from_secs(13 * H))).await);
+        assert!(garden.search_index.is_none(), "index should have been dropped");
+        assert_eq!(garden.get_index_status().await, IndexStatus::Expired);
+        assert!(garden.last_search_use.read().await.is_none());
+
+        // Nothing left to drop on a second pass.
+        assert!(!garden.expire_index_if_idle_for(Some(Duration::from_secs(99 * H))).await);
+    }
+
+    #[tokio::test]
+    async fn index_in_use_is_kept() {
+        let (_temp, mut garden) = garden_with_resident_index(12).await;
+
+        assert!(!garden.expire_index_if_idle_for(Some(Duration::from_secs(2 * H))).await);
+        assert!(garden.search_index.is_some());
+        assert_eq!(garden.get_index_status().await, IndexStatus::Ready);
+    }
+
+    #[tokio::test]
+    async fn ttl_zero_keeps_the_index_for_the_session() {
+        let (_temp, mut garden) = garden_with_resident_index(0).await;
+
+        assert!(!garden.expire_index_if_idle_for(Some(Duration::from_secs(10_000 * H))).await);
+        assert!(garden.search_index.is_some());
+    }
+
+    #[tokio::test]
+    async fn expired_rebuild_is_claimed_once() {
+        let (_temp, mut garden) = garden_with_resident_index(12).await;
+        garden.expire_index_if_idle_for(Some(Duration::from_secs(13 * H))).await;
+
+        // First search after expiry owns the rebuild; concurrent ones don't.
+        assert!(garden.claim_expired_index_rebuild().await);
+        assert_eq!(garden.get_index_status().await, IndexStatus::Building);
+        assert!(!garden.claim_expired_index_rebuild().await);
     }
 }

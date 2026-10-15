@@ -15,6 +15,9 @@ function SearchPanel() {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
   const [searchStatus, setSearchStatus] = useState<SearchStatus | null>(null)
+  // The server reports a lifecycle (`indexStatus`), not a boolean; 'disabled'
+  // is the one state where searching can never work.
+  const searchDisabled = searchStatus?.indexStatus === 'disabled'
 
   // Search when query changes (debounced)
   useEffect(() => {
@@ -102,23 +105,35 @@ function SearchPanel() {
 
         <div className="max-h-96 overflow-y-auto">
           {/* Search disabled warning for encrypted gardens */}
-          {searchStatus?.disabled && (
+          {searchDisabled && (
             <div className="py-6 px-4 text-center">
-              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-base-0A/10 text-base-0A border border-base-0A/20">
+              <div
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-base-0A border"
+                style={{
+                  backgroundColor: 'color-mix(in srgb, var(--base0A) 15%, transparent)',
+                  borderColor: 'color-mix(in srgb, var(--base0A) 30%, transparent)',
+                }}
+              >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m0 0v2m0-2h2m-2 0H10m9.364-7.536a9 9 0 11-12.728 0M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
                 <span className="text-sm">
-                  {searchStatus.message || 'Search is disabled for this encrypted garden'}
+                  {searchStatus?.message || 'Search is disabled for this encrypted garden'}
                 </span>
               </div>
             </div>
           )}
 
           {/* Index needs rebuilding */}
-          {searchStatus && !searchStatus.disabled && searchStatus.message && (
+          {searchStatus && !searchDisabled && searchStatus.message && (
             <div className="py-4 px-4 text-center">
-              <div className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-base-0D/10 text-base-0D border border-base-0D/20">
+              <div
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-base-0D border"
+                style={{
+                  backgroundColor: 'color-mix(in srgb, var(--base0D) 15%, transparent)',
+                  borderColor: 'color-mix(in srgb, var(--base0D) 30%, transparent)',
+                }}
+              >
                 <svg className="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
@@ -133,7 +148,7 @@ function SearchPanel() {
             </div>
           )}
 
-          {!isLoading && !searchStatus?.disabled && query && results.length === 0 && !searchStatus?.message && (
+          {!isLoading && !searchDisabled && query && results.length === 0 && !searchStatus?.message && (
             <div className="py-6 text-center text-sm text-base-04">
               No results found
             </div>

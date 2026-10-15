@@ -301,7 +301,7 @@ When creating an encrypted garden, you can choose to:
 
 1. **Disable search entirely** (default) - No index is built. Searching an encrypted garden will show a message explaining this.
 
-2. **Enable in-memory search** - The index is built in RAM on unlock and dropped on lock. You can optionally have it dropped after a period of non-use (default: 6 hours) and rebuilt on the next search, which may cause brief delays for large gardens.
+2. **Enable in-memory search** - The index is built in RAM on unlock and dropped on lock. You can optionally have it dropped after a period of non-use (default: 12 hours) and rebuilt on the next search, which may cause brief delays for large gardens.
 
 The link/tag (backlink) index is handled the same way: for encrypted gardens it is kept in memory only and rebuilt from your notes on unlock, so page and link names are never stored in plaintext.
 

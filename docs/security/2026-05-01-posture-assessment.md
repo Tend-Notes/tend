@@ -123,6 +123,8 @@ Each finding is cited with `file:line`. Severity is assigned in §6.
 
 **Search index for encrypted gardens** is plaintext on disk with a TTL (default 6 hours of inactivity, `state.rs:378-419`). For the duration of the TTL window, an encrypted garden's content is recoverable without the passphrase.
 
+> **Fixed 2026-07-11** (`3be36dd`, `8b555fe`): the index is no longer written to disk for encrypted gardens — it is built in RAM on unlock and any legacy on-disk index is removed when the garden is opened. The plaintext copy now lives only in process memory, and the TTL (default 12 hours of non-use) genuinely drops it as of this change; before that the TTL was configured but never enforced, so the index survived for the life of the process.
+
 **Imports.** Zip imports (`routes/import.rs`) use `file.enclosed_name()` against zip-slip and `validate_safe_name` on extracted writes. Cap is 500MB (`import.rs:31`).
 
 **Symlinks.** No `canonicalize`/symlink handling in user-content reads. Within a single user's own garden this is fine (they own their files). Cross-garden escape would require the user to author a symlink in their own garden pointing outside, which they could do today by other means — but worth a note for multi-user shared filesystems.
@@ -196,7 +198,7 @@ The user-stated invariant: *unauthenticated user sees demo, has zero capability 
 ### 3.2 Privacy considerations
 
 - **Logs.** `tracing` is configured; spot-check confirms it logs HTTP method, path, status. **Need to verify**: do logs contain usernames, page names, search queries? If yes, log retention becomes a privacy axis.
-- **Search indexes for encrypted gardens are plaintext on disk** for the TTL window (default 6h). A backup or filesystem snapshot during that window leaks content.
+- **Search indexes for encrypted gardens are plaintext on disk** for the TTL window (default 6h). A backup or filesystem snapshot during that window leaks content. *(Fixed 2026-07-11 — RAM-only since `3be36dd`; see §2.3. The in-memory copy remains until the 12h TTL drops it.)*
 - **Filenames in encrypted gardens are plaintext.** Listing the directory leaks page titles even if content is sealed.
 - **IndexedDB drafts** persist locally. Browser-protected, but a shared browser profile leaks recent edits.
 
