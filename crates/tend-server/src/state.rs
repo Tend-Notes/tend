@@ -547,7 +547,7 @@ impl GardenState {
         *self.last_search_use.write().await = None;
         *self.index_status.write().await = IndexStatus::Expired;
         info!(
-            "Dropped idle in-memory search index after {}h: {}",
+            "Dropped idle in-memory search index after {}h of non-use: {}",
             self.search_config.ttl_hours,
             self.data_dir.display()
         );
@@ -1642,13 +1642,8 @@ pub fn start_search_index_gc_task(
 /// plaintext index lives for as long as the process does.
 pub async fn expire_idle_memory_indices(state: &AppState) {
     for user_state in state.loaded_user_states().await {
-        let mut garden = user_state.garden.write().await;
-        if garden.expire_index_if_idle().await {
-            info!(
-                "Expired idle in-memory search index for user {}",
-                user_state.username
-            );
-        }
+        // expire_index_if_idle logs the garden it dropped.
+        let _ = user_state.garden.write().await.expire_index_if_idle().await;
     }
 }
 
