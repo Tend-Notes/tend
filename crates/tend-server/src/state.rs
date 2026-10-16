@@ -71,9 +71,9 @@ struct GardenInfo {
 /// there is no per-user state to serve requests from.
 ///
 /// A distinct type (rather than a sentinel message) so the HTTP layer can map
-/// it to 423 Locked and tell the client *which* garden to ask a passphrase for
-/// - see `From<anyhow::Error> for AppError`. The `Display` text is unchanged
-/// from when this was a bare `anyhow!` string, so logs still read the same.
+/// it to 423 Locked and tell the client *which* garden to ask a passphrase for;
+/// see `From<anyhow::Error> for AppError`. The `Display` text is unchanged from
+/// when this was a bare `anyhow!` string, so logs still read the same.
 #[derive(Debug)]
 pub struct GardenLocked {
     pub garden_id: String,
