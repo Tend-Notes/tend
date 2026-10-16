@@ -18,7 +18,9 @@ const WARNING_ORANGE = '#e07b1f'
 function LockIcon() {
   return (
     <svg
-      className="w-2.5 h-2.5"
+      // Bigger box than SaveStatus' glyphs (w-2.5): an outlined padlock reads
+      // smaller than their single bold strokes at the same size.
+      className="w-3 h-3"
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
