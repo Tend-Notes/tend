@@ -29,6 +29,7 @@ import { useTheme } from './hooks/useTheme'
 import { contentTypes as contentTypesApi, identity, isDemoMode, AuthExpiredError } from './lib/api'
 import { useAuthStore } from './stores/authStore'
 import { SessionExpiredOverlay } from './components/ui/SessionExpiredOverlay'
+import { GardenLockedOverlay } from './components/ui/GardenLockedOverlay'
 import { initUserSync } from './lib/userSync'
 import { clearUserScopedContent } from './lib/cacheReset'
 
@@ -365,6 +366,10 @@ function App() {
 
       {/* Session expired - blocks the UI and offers a trip to the login page */}
       <SessionExpiredOverlay />
+
+      {/* Active garden encrypted and locked (the state after a server restart)
+          - blocks the UI and asks for the passphrase */}
+      <GardenLockedOverlay />
 
       {/* Draft recovery dialog */}
       <DraftRecoveryDialog />

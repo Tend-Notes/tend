@@ -60,10 +60,32 @@ impl Default for SearchConfig {
 
 /// Garden info returned from config lookup
 struct GardenInfo {
+    /// The garden's id in the user's gardens.json
+    id: String,
     path: String,
     encrypted: bool,
     search_config: SearchConfig,
 }
+
+/// The active garden is encrypted and has not been unlocked this session, so
+/// there is no per-user state to serve requests from.
+///
+/// A distinct type (rather than a sentinel message) so the HTTP layer can map
+/// it to 423 Locked and tell the client *which* garden to ask a passphrase for
+/// - see `From<anyhow::Error> for AppError`. The `Display` text is unchanged
+/// from when this was a bare `anyhow!` string, so logs still read the same.
+#[derive(Debug)]
+pub struct GardenLocked {
+    pub garden_id: String,
+}
+
+impl std::fmt::Display for GardenLocked {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "UNLOCK_REQUIRED:{}", self.garden_id)
+    }
+}
+
+impl std::error::Error for GardenLocked {}
 
 /// Unified file manager that handles both encrypted and unencrypted gardens
 pub enum UnifiedFileManager {
@@ -1026,25 +1048,91 @@ impl UserState {
             Self::create_default_garden(&username)?
         };
 
-        // Initialize garden state
-        let garden = if garden_info.encrypted {
-            // Encrypted garden requires unlock - return error
-            return Err(anyhow::anyhow!("UNLOCK_REQUIRED:default"));
-        } else {
-            GardenState::new(garden_path.clone(), &config.git).await?
-        };
+        // An encrypted garden can't be opened without the passphrase, so there
+        // is nothing to build here. The caller gets a locked error, which the
+        // HTTP layer turns into 423 so the client can ask for the passphrase;
+        // `AppState::unlock_user_garden` then builds the state via
+        // `new_unlocked`. Do NOT make this a hard failure: it is reached on
+        // every request after a server restart with an encrypted garden active.
+        if garden_info.encrypted {
+            return Err(anyhow::Error::new(GardenLocked {
+                garden_id: garden_info.id,
+            }));
+        }
+
+        let garden = GardenState::new(garden_path.clone(), &config.git).await?;
 
         info!("Initialized state for user: {}", username);
 
-        // Start file watcher for the garden
+        Ok(Self::from_garden(
+            username,
+            &garden_path,
+            garden,
+            config,
+            event_sender,
+        ))
+    }
+
+    /// Open an encrypted garden with its passphrase and build the user's state
+    /// around it.
+    ///
+    /// The unlock path for a user who has no state yet - after a server restart
+    /// `UserState::new` can't build one (see above), and every route that could
+    /// would fail with the same locked error. The passphrase is verified by
+    /// `GardenState::new_encrypted`, which unwraps the garden identity with it.
+    pub async fn new_unlocked(
+        username: String,
+        config: &Config,
+        event_sender: EventSender,
+        garden_id: &str,
+        passphrase: String,
+    ) -> anyhow::Result<Self> {
+        ensure_user_dir(&username)?;
+
+        let info = Self::garden_info_for(&username, garden_id)?;
+        if !info.encrypted {
+            return Err(anyhow::anyhow!("Garden '{}' is not encrypted", garden_id));
+        }
+        let garden_path = PathBuf::from(&info.path);
+
+        let garden = GardenState::new_encrypted(
+            garden_path.clone(),
+            passphrase,
+            &config.git,
+            info.search_config,
+        )
+        .await?;
+
+        info!(
+            "Initialized state for user {} with unlocked garden: {}",
+            username, garden_id
+        );
+
+        let state = Self::from_garden(username, &garden_path, garden, config, event_sender);
+
+        // Same post-unlock index build as a switch into an unlocked garden.
+        state.rebuild_after_unlock().await;
+
+        Ok(state)
+    }
+
+    /// Assemble a `UserState` around an already-opened garden, starting its
+    /// file watcher. Shared by `new` and `new_unlocked`.
+    fn from_garden(
+        username: String,
+        garden_path: &Path,
+        garden: GardenState,
+        config: &Config,
+        event_sender: EventSender,
+    ) -> Self {
         let watcher_handle = Self::start_file_watcher(
             &username,
-            &garden_path,
+            garden_path,
             &garden.file_manager,
             event_sender.clone(),
         );
 
-        Ok(Self {
+        Self {
             username,
             garden: RwLock::new(garden),
             config: config.clone(),
@@ -1052,7 +1140,7 @@ impl UserState {
             watcher_handle: RwLock::new(watcher_handle),
             // Backup task requires Arc<Self>, started by start_backup_task() after Arc wrapping
             backup_task_handle: RwLock::new(None),
-        })
+        }
     }
 
     /// Start a file watcher for the given garden path
@@ -1157,6 +1245,7 @@ impl UserState {
         Ok((
             PathBuf::from(path),
             GardenInfo {
+                id: active_id.to_string(),
                 path: path.to_string(),
                 encrypted,
                 search_config: SearchConfig {
@@ -1197,6 +1286,7 @@ impl UserState {
         Ok((
             default_garden_path,
             GardenInfo {
+                id: "default".to_string(),
                 path: path_string,
                 encrypted: false,
                 search_config: SearchConfig::default(),
@@ -1206,7 +1296,15 @@ impl UserState {
 
     /// Get garden info from user's config
     fn get_garden_info(&self, garden_id: &str) -> anyhow::Result<GardenInfo> {
-        let gardens_path = user_gardens_json_path(&self.username);
+        Self::garden_info_for(&self.username, garden_id)
+    }
+
+    /// Read one garden's entry from a user's gardens.json.
+    ///
+    /// Takes a username rather than `&self` because the unlock path has to read
+    /// this *before* any `UserState` exists.
+    fn garden_info_for(username: &str, garden_id: &str) -> anyhow::Result<GardenInfo> {
+        let gardens_path = user_gardens_json_path(username);
         let content = std::fs::read_to_string(&gardens_path)
             .map_err(|e| anyhow::anyhow!("Failed to read gardens config: {}", e))?;
         let config: serde_json::Value = serde_json::from_str(&content)
@@ -1245,6 +1343,7 @@ impl UserState {
             .unwrap_or(if encrypted { 12 } else { 0 });
 
         Ok(GardenInfo {
+            id: garden_id.to_string(),
             path,
             encrypted,
             search_config: SearchConfig {
@@ -1260,7 +1359,9 @@ impl UserState {
         let new_data_dir = PathBuf::from(&info.path);
 
         if info.encrypted {
-            return Err(anyhow::anyhow!("UNLOCK_REQUIRED:{}", garden_id));
+            return Err(anyhow::Error::new(GardenLocked {
+                garden_id: garden_id.to_string(),
+            }));
         }
 
         info!(
@@ -1348,24 +1449,28 @@ impl UserState {
             *handle = new_watcher;
         }
 
-        // The encrypted garden's search and link indices are RAM-only and start
-        // empty, so build them from the now-decrypted pages on unlock; otherwise
-        // search would sit at "needs to be built" and backlinks would be blank.
-        // SEC-25 Part A: decrypt each page once and feed every index from that
-        // single pass (link/tag/todo/search), instead of one decrypt pass per
-        // index — each decrypt runs the scrypt KDF, so this cuts unlock cost ~4x.
-        {
-            let content_types =
-                crate::routes::gardens::load_user_content_types(&self.username).unwrap_or_default();
-            let mut garden = self.garden.write().await;
-            if let Err(e) = garden.rebuild_indices_single_pass(&content_types).await {
-                tracing::warn!("Failed to build indices on unlock: {}", e);
-            }
-        }
+        self.rebuild_after_unlock().await;
 
         info!("User {} encrypted garden switch complete: {}", self.username, garden_id);
 
         Ok(new_data_dir)
+    }
+
+    /// Build the RAM-only indices of a just-unlocked encrypted garden.
+    ///
+    /// Its search and link indices are RAM-only and start empty, so they are
+    /// built from the now-decrypted pages on unlock; otherwise search would sit
+    /// at "needs to be built" and backlinks would be blank. SEC-25 Part A:
+    /// decrypt each page once and feed every index from that single pass
+    /// (link/tag/todo/search), instead of one decrypt pass per index — each
+    /// decrypt runs the scrypt KDF, so this cuts unlock cost ~4x.
+    async fn rebuild_after_unlock(&self) {
+        let content_types =
+            crate::routes::gardens::load_user_content_types(&self.username).unwrap_or_default();
+        let mut garden = self.garden.write().await;
+        if let Err(e) = garden.rebuild_indices_single_pass(&content_types).await {
+            tracing::warn!("Failed to build indices on unlock: {}", e);
+        }
     }
 
     /// Stop the current file watcher
@@ -1539,6 +1644,78 @@ impl AppState {
             return Ok(Arc::clone(state));
         }
 
+        // Create new user state while holding write lock
+        let user_state = UserState::new(
+            username.to_string(),
+            &self.config,
+            self.event_sender.clone(),
+        ).await?;
+
+        Ok(self.cache_user_state(&mut states, username, user_state).await)
+    }
+
+    /// Unlock an encrypted garden for `username` and make it their active state.
+    ///
+    /// Two cases, because the user may or may not already have state loaded:
+    ///  - state loaded (they were in another garden) — hand it to the existing
+    ///    `switch_garden_encrypted`
+    ///  - no state (the usual one after a server restart with an encrypted
+    ///    garden active, where `UserState::new` can only report "locked") —
+    ///    build the state directly around the unlocked garden
+    ///
+    /// Without the second case the app is wedged: every route, including the
+    /// unlock route itself, fails with the same locked error.
+    pub async fn unlock_user_garden(
+        &self,
+        username: &str,
+        garden_id: &str,
+        passphrase: String,
+    ) -> anyhow::Result<()> {
+        {
+            let states = self.user_states.read().await;
+            if let Some(state) = states.get(username) {
+                let state = Arc::clone(state);
+                drop(states);
+                self.touch_user_access(username);
+                state.switch_garden_encrypted(garden_id, passphrase).await?;
+                return Ok(());
+            }
+        }
+
+        // Hold the write lock across construction, as get_user_state does, so
+        // two unlock attempts can't build two states for the same user.
+        let mut states = self.user_states.write().await;
+        if let Some(state) = states.get(username) {
+            let state = Arc::clone(state);
+            drop(states);
+            self.touch_user_access(username);
+            state.switch_garden_encrypted(garden_id, passphrase).await?;
+            return Ok(());
+        }
+
+        let user_state = UserState::new_unlocked(
+            username.to_string(),
+            &self.config,
+            self.event_sender.clone(),
+            garden_id,
+            passphrase,
+        )
+        .await?;
+
+        self.cache_user_state(&mut states, username, user_state).await;
+        Ok(())
+    }
+
+    /// Start the backup task for a freshly built state and put it in the cache,
+    /// evicting the least-recently-used entry first if the map is at its cap.
+    ///
+    /// Caller holds the write lock on `user_states` and passes it in.
+    async fn cache_user_state(
+        &self,
+        states: &mut std::collections::HashMap<String, Arc<UserState>>,
+        username: &str,
+        user_state: UserState,
+    ) -> Arc<UserState> {
         // Bound the map: evict the least-recently-used user before inserting a
         // new one so a flood of distinct usernames can't grow it unbounded.
         if states.len() >= MAX_USER_STATES {
@@ -1554,22 +1731,15 @@ impl AppState {
             }
         }
 
-        // Create new user state while holding write lock
-        let user_state = UserState::new(
-            username.to_string(),
-            &self.config,
-            self.event_sender.clone(),
-        ).await?;
         let user_state = Arc::new(user_state);
 
         // Start backup scheduler (requires Arc for Weak reference)
         user_state.start_backup_task().await;
 
-        // Cache it
         states.insert(username.to_string(), Arc::clone(&user_state));
         self.touch_user_access(username);
 
-        Ok(user_state)
+        user_state
     }
 
     /// Snapshot of the currently loaded per-user states.

@@ -60,6 +60,45 @@ export class AuthExpiredError extends Error {
   }
 }
 
+/**
+ * Error thrown when the active garden is encrypted and still locked (423).
+ *
+ * Normal after a server restart: the server can't open an encrypted garden
+ * without the passphrase, so every request reports this until one is supplied
+ * to `POST /gardens/unlock`.
+ */
+export class GardenLockedError extends Error {
+  readonly gardenId: string
+
+  constructor(gardenId: string, message = 'Garden locked') {
+    super(message)
+    this.name = 'GardenLockedError'
+    this.gardenId = gardenId
+  }
+}
+
+// Listeners notified when the server says the active garden is locked. Same
+// shape as the auth-expiry listeners below, and here for the same reason: this
+// module stays free of any dependency on the store layer, so the garden-lock
+// store registers itself instead.
+type GardenLockedListener = (gardenId: string) => void
+const gardenLockedListeners = new Set<GardenLockedListener>()
+
+export function onGardenLocked(listener: GardenLockedListener): () => void {
+  gardenLockedListeners.add(listener)
+  return () => gardenLockedListeners.delete(listener)
+}
+
+function notifyGardenLocked(gardenId: string): void {
+  for (const listener of gardenLockedListeners) {
+    try {
+      listener(gardenId)
+    } catch {
+      // A listener must never break the request path
+    }
+  }
+}
+
 // Listeners notified when a response *looks* like an expired session. This is
 // a suspicion to be checked, not a conclusion - the auth store confirms it
 // against /whoami before telling the user anything.
@@ -163,6 +202,14 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     // Handle 409 Conflict specially
     if (res.status === 409 && error.code === 'VERSION_CONFLICT') {
       throw new VersionConflictError(error.error, error.currentVersion)
+    }
+
+    // 423 Locked: the garden is encrypted and needs a passphrase. Unlike an
+    // expired session there is nothing to double-check - the server is telling
+    // us exactly what is wrong - so act on it directly.
+    if (res.status === 423 && error.code === 'UNLOCK_REQUIRED') {
+      notifyGardenLocked(error.gardenId)
+      throw new GardenLockedError(error.gardenId, error.error)
     }
 
     throw new Error(`${res.status}: ${error.error || 'Request failed'}`)
