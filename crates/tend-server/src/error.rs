@@ -34,6 +34,12 @@ pub enum AppError {
         current_version: u64,
         message: String,
     },
+    /// The active garden is encrypted and locked - the client must send the
+    /// passphrase to `POST /gardens/unlock` before anything else will work.
+    Locked {
+        garden_id: String,
+        message: String,
+    },
 }
 
 impl IntoResponse for AppError {
@@ -86,6 +92,14 @@ impl IntoResponse for AppError {
                 }));
                 (StatusCode::CONFLICT, body).into_response()
             }
+            AppError::Locked { garden_id, message } => {
+                let body = Json(json!({
+                    "error": sanitize_error(&message),
+                    "code": "UNLOCK_REQUIRED",
+                    "gardenId": garden_id,
+                }));
+                (StatusCode::LOCKED, body).into_response()
+            }
         }
     }
 }
@@ -113,6 +127,17 @@ impl From<tend_git::GitError> for AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(e: anyhow::Error) -> Self {
+        // A locked garden is a normal state, not a server fault: it is what
+        // every request reports after a restart with an encrypted garden
+        // active. Answer 423 so the client knows to ask for the passphrase
+        // instead of showing a 500.
+        if let Some(locked) = e.downcast_ref::<crate::state::GardenLocked>() {
+            return AppError::Locked {
+                garden_id: locked.garden_id.clone(),
+                message: "This garden is encrypted. Please provide passphrase to unlock."
+                    .to_string(),
+            };
+        }
         AppError::Internal(e.to_string())
     }
 }

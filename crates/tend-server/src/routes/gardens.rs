@@ -828,10 +828,12 @@ pub async fn unlock_garden(
         )));
     }
 
-    // Try to unlock with the provided passphrase
-    let user_state = state.get_user_state(&user.username).await?;
-    match user_state
-        .switch_garden_encrypted(&req.id, req.passphrase)
+    // Try to unlock with the provided passphrase. This must NOT go through
+    // get_user_state: with an encrypted garden active there is no state to get
+    // (it can't be built without the passphrase), so asking for it first made
+    // unlocking impossible after a server restart.
+    match state
+        .unlock_user_garden(&user.username, &req.id, req.passphrase)
         .await
     {
         Ok(_) => {
