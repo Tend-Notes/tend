@@ -669,6 +669,23 @@ async fn collect_markdown_files(
     Ok(())
 }
 
+/// Strip a trailing `.md` and drop every character that is not alphanumeric,
+/// dash, underscore or space. Shared by the three import paths that had the
+/// same `chars().filter(...)` written out.
+fn sanitize_import_name(raw: &str) -> String {
+    raw.trim_end_matches(".md")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
+        .collect()
+}
+
+/// `sanitize_import_name` plus spaces folded to dashes, for names that become
+/// filenames. (The user-supplied custom name deliberately keeps its spaces -
+/// that difference predates this helper.)
+fn sanitize_import_file_name(raw: &str) -> String {
+    sanitize_import_name(raw).replace(' ', "-")
+}
+
 /// Save a failed import to the errors directory
 async fn save_import_error(
     errors_dir: &Path,
@@ -677,12 +694,7 @@ async fn save_import_error(
     content: &str,
 ) -> anyhow::Result<()> {
     // Generate a safe filename from the original name
-    let safe_name = original_name
-        .trim_end_matches(".md")
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
-        .collect::<String>()
-        .replace(' ', "-");
+    let safe_name = sanitize_import_file_name(original_name);
     let safe_name = if safe_name.is_empty() {
         format!("unnamed-{}", chrono::Utc::now().timestamp_millis())
     } else {
@@ -912,20 +924,11 @@ pub async fn accept_import_error(
     // Use custom name if provided, otherwise sanitize the original name
     let file_name = if let Some(custom_name) = req.name {
         // Sanitize the custom name
-        let sanitized = custom_name
-            .trim_end_matches(".md")
-            .chars()
-            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
-            .collect::<String>();
+        let sanitized = sanitize_import_name(&custom_name);
         if sanitized.is_empty() { name.clone() } else { sanitized }
     } else {
         // Use a sanitized version of the original name
-        let sanitized = meta.original_name
-            .trim_end_matches(".md")
-            .chars()
-            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
-            .collect::<String>()
-            .replace(' ', "-");
+        let sanitized = sanitize_import_file_name(&meta.original_name);
         if sanitized.is_empty() { name.clone() } else { sanitized }
     };
 
@@ -981,37 +984,21 @@ pub async fn accept_import_error(
             .map_err(|e| AppError::Internal(format!("Failed to write file: {}", e)))?;
     }
 
-    // Update link index, search index, and block index using the Page
-    // with stable UUIDs that match what write_sheet stored on disk
+    // Update every index from the Page with stable UUIDs that write_sheet
+    // just stored. This goes through the shared helper, so an accepted import
+    // reaches the tag and todo indices like any other save - the hand-rolled
+    // copy here skipped both, and indexed under the bare file name rather than
+    // the page's qualified name.
     {
         let garden = user_state.garden.read().await;
-
-        // Update link index
-        {
-            let mut link_index = garden.link_index.write().await;
-            if let Err(e) = link_index.index_page(&file_name, page.blocks.values()).await {
-                tracing::warn!("Failed to update link index for accepted import {}: {}", file_name, e);
-            } else if let Err(e) = link_index.flush().await {
-                tracing::warn!("Failed to persist link index for accepted import {}: {}", file_name, e);
-            }
-        }
-
-        // Update search index (if search is enabled)
-        if let Some(search_index) = &garden.search_index {
-            let mut index = search_index.write().await;
-            if let Err(e) = index.index_page(&page) {
-                tracing::warn!("Failed to update search index for accepted import {}: {}", file_name, e);
-            }
-            let _ = index.maybe_commit();
-        }
-
-        // Update block index (if available - not for encrypted gardens)
-        if let Some(block_index) = &garden.block_index {
-            let mut index = block_index.lock().await;
-            if let Err(e) = index.update_page(&page) {
-                tracing::warn!("Failed to update block index for accepted import {}: {}", file_name, e);
-            }
-        }
+        crate::routes::helpers::update_all_indices_with_content_type(
+            &garden,
+            &page,
+            "sheet",
+            &content_type,
+            sheet_date,
+        )
+        .await;
     }
 
     // Delete the error files
