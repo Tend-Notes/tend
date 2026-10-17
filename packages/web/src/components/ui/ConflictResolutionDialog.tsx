@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { usePageStore } from '../../stores/pageStore'
+import { ModalShell } from './ModalShell'
 
 export function ConflictResolutionDialog() {
   const pendingConflict = usePageStore((state) => state.pendingConflict)
@@ -13,9 +14,7 @@ export function ConflictResolutionDialog() {
   const pageName = currentPage.isJournal ? currentPage.journalDate : currentPage.name
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="overlay-backdrop fixed inset-0 bg-black/50 animate-fade-in" onClick={dismissConflict} />
-      <div className="overlay-content relative bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-md w-full mx-4">
+    <ModalShell onBackdropClick={dismissConflict} panelClassName="p-6 mx-4">
         <h2 className="text-lg font-medium text-base-08 mb-2">
           Version Conflict
         </h2>
@@ -52,7 +51,6 @@ export function ConflictResolutionDialog() {
             Dismiss (keep editing, retry save later)
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }

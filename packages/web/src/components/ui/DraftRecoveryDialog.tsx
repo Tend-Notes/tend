@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 import { usePageStore } from '../../stores/pageStore'
+import { ModalShell } from './ModalShell'
 
 export function DraftRecoveryDialog() {
   const pendingDraftRecovery = usePageStore((state) => state.pendingDraftRecovery)
@@ -12,9 +13,7 @@ export function DraftRecoveryDialog() {
   const timeAgo = formatTimeAgo(savedAt)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="overlay-backdrop fixed inset-0 bg-black/50 animate-fade-in" />
-      <div className="overlay-content relative bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-md w-full mx-4">
+    <ModalShell panelClassName="p-6 mx-4">
         <h2 className="text-lg font-medium text-base-06 mb-2">
           Recover unsaved changes?
         </h2>
@@ -38,8 +37,7 @@ export function DraftRecoveryDialog() {
             Restore
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 

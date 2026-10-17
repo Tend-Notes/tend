@@ -2,6 +2,7 @@
 // Dialog for importing a Logseq graph from a zip file
 
 import { useState, useCallback, useRef } from 'react'
+import { ModalShell } from './ModalShell'
 import { motion, AnimatePresence } from 'framer-motion'
 import { importApi, type ImportProgress } from '../../lib/api'
 
@@ -168,15 +169,12 @@ export function LogseqImportDialog({ open, onOpenChange }: LogseqImportDialogPro
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/50"
-        onClick={handleClose}
-      />
-
-      {/* Dialog */}
-      <div className="relative z-10 w-full max-w-lg mx-4 bg-base-01 rounded-lg shadow-2xl border border-base-02 overflow-hidden">
+    <ModalShell
+      onBackdropClick={handleClose}
+      maxWidth="max-w-lg"
+      panelClassName="z-10 mx-4 overflow-hidden"
+      backdropClassName="fixed inset-0 bg-black/50"
+    >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-base-02">
           <h2 className="text-sm font-medium text-base-06">Import from Logseq</h2>
@@ -454,8 +452,7 @@ export function LogseqImportDialog({ open, onOpenChange }: LogseqImportDialogPro
             )}
           </AnimatePresence>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 
