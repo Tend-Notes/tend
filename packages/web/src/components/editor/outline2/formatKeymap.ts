@@ -9,6 +9,7 @@
 // reason the Ctrl/Cmd+K palette works.
 
 import { Command, TextSelection } from 'prosemirror-state'
+import { withFreshSelection } from './freshSelection'
 
 // Wrap the selection in `delim` on both sides. With no selection, insert an
 // empty pair and drop the caret between them. Exported so the touch FormatBar
@@ -39,10 +40,14 @@ export function wrap(delim: string): Command {
 }
 
 // Delimiters match contentRenderer.ts's parser exactly.
+//
+// withFreshSelection: a selection made with the mouse reaches ProseMirror only
+// on the browser's async selectionchange, so a Ctrl+B pressed straight after
+// double-clicking a word used to wrap nothing - leaving "****word".
 export const formatKeymap: Record<string, Command> = {
-  'Mod-b': wrap('**'),
-  'Mod-i': wrap('*'),
-  'Mod-e': wrap('`'),
-  'Mod-Shift-x': wrap('~~'),
-  'Mod-Shift-h': wrap('=='),
+  'Mod-b': withFreshSelection(wrap('**')),
+  'Mod-i': withFreshSelection(wrap('*')),
+  'Mod-e': withFreshSelection(wrap('`')),
+  'Mod-Shift-x': withFreshSelection(wrap('~~')),
+  'Mod-Shift-h': withFreshSelection(wrap('==')),
 }
