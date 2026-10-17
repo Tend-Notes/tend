@@ -7,8 +7,7 @@ import { useSettingsStore } from '../../stores/settingsStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { useTagStore } from '../../stores/tagStore'
 import { isDemoMode } from '../../lib/api'
-import { formatDateYMD } from '../../lib/dateUtils'
-import { useTaskStore, selectBadgeCount } from '../../stores/taskStore'
+import { useTaskStore, selectBadgeCount, selectOverdue, selectToday } from '../../stores/taskStore'
 // Lazy: the options panel (and its framer-motion dependency) is only shown when
 // the user opens settings, so keep it out of the initial chunk.
 const SidebarOptions = lazy(() =>
@@ -75,22 +74,15 @@ export function Sidebar({ mode, onModeChange }: SidebarProps) {
   // Task counts for navigation panel — use shared taskStore to avoid duplicate fetch
   const taskItems = useTaskStore((s) => s.tasks)
 
-  const taskCounts = useMemo(() => {
-    const todayStr = formatDateYMD(new Date())
-    let todayCount = 0
-    let overdueCount = 0
-    for (const task of taskItems) {
-      const isCompleted = task.status === 'DONE' || task.status === 'NEVER'
-      if (isCompleted) continue
-      if (task.dueDate === todayStr || task.startDate === todayStr) {
-        todayCount++
-      }
-      if (task.dueDate && task.dueDate < todayStr) {
-        overdueCount++
-      }
-    }
-    return { todayCount, overdueCount }
-  }, [taskItems])
+  // Counts come from the same selectors the lists use, so a badge can never
+  // disagree with the list it opens.
+  const taskCounts = useMemo(
+    () => ({
+      todayCount: selectToday(taskItems).length,
+      overdueCount: selectOverdue(taskItems).length,
+    }),
+    [taskItems]
+  )
 
   const handleTaskCountClick = (filter: 'today' | 'overdue') => {
     setTodoFilter(filter)

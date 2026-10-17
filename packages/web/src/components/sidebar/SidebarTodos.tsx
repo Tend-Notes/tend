@@ -4,11 +4,18 @@
 import { useShallow } from 'zustand/react/shallow'
 import { useState, useEffect, useMemo } from 'react'
 import { type TaskItem } from '../../lib/api'
-import { useTaskStore } from '../../stores/taskStore'
+import {
+  useTaskStore,
+  isCompleted,
+  selectAllActive,
+  selectCompleted,
+  selectOverdue,
+  selectToday,
+} from '../../stores/taskStore'
 import { usePageStore } from '../../stores/pageStore'
 import { useSettingsStore, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { useUIStore, type TodoFilterMode } from '../../stores/uiStore'
-import { formatShortDate, formatDateYMD, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils'
+import { formatShortDate, getUrgencyStyle, getDaysFromDue } from '../../lib/dateUtils'
 import { getPriorityDisplay } from '../ui/PriorityPickerPopover'
 import { renderContentWithWikilinks } from '../../lib/renderTaskContent'
 
@@ -30,11 +37,6 @@ function getStatusColor(status: string): string {
     }
   }
   return 'base05'
-}
-
-// Is this a "completed" status?
-function isCompletedStatus(status: string): boolean {
-  return status === 'DONE' || status === 'NEVER'
 }
 
 
@@ -65,26 +67,21 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
   const { navigateToPage, navigateToJournal, setPendingScrollTarget } = usePageStore(useShallow((s) => ({ navigateToPage: s.navigateToPage, navigateToJournal: s.navigateToJournal, setPendingScrollTarget: s.setPendingScrollTarget })))
   const taskStatuses = useSettingsStore((state) => state.getTaskStatuses())
 
-  // Filter tasks
+  // Filter tasks — the store owns every predicate, so these lists and the
+  // sidebar's counts can't drift apart.
   const filteredTasks = useMemo(() => {
-    const todayStr = formatDateYMD(new Date())
-    return tasks.filter((task) => {
-      if (filter === 'all') return true
-      if (filter === 'active') return !isCompletedStatus(task.status)
-      if (filter === 'completed') return isCompletedStatus(task.status)
-      if (filter === 'today') {
-        // Tasks with due_date = today OR start_date = today (active only)
-        if (isCompletedStatus(task.status)) return false
-        return task.dueDate === todayStr || task.startDate === todayStr
-      }
-      if (filter === 'overdue') {
-        // Tasks with due_date < today that are not completed
-        if (isCompletedStatus(task.status)) return false
-        if (!task.dueDate) return false
-        return task.dueDate < todayStr
-      }
-      return true
-    })
+    switch (filter) {
+      case 'active':
+        return selectAllActive(tasks)
+      case 'completed':
+        return selectCompleted(tasks)
+      case 'today':
+        return selectToday(tasks)
+      case 'overdue':
+        return selectOverdue(tasks)
+      default:
+        return tasks
+    }
   }, [tasks, filter])
 
   // Sort tasks
@@ -337,12 +334,12 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
           <ul className="space-y-2">
             {sortedTasks.map((task) => {
               const color = getStatusColor(task.status)
-              const isCompleted = isCompletedStatus(task.status)
+              const completed = isCompleted(task)
               const priorityInfo = task.priority ? getPriorityDisplay(task.priority) : null
               // Urgency based on start date if set, otherwise due date
               // Completed tasks don't show urgency styling
               const urgencyDate = task.startDate || task.dueDate
-              const urgencyStyle = urgencyDate && !isCompleted ? getUrgencyStyle(urgencyDate) : null
+              const urgencyStyle = urgencyDate && !completed ? getUrgencyStyle(urgencyDate) : null
               const daysFromDue = task.dueDate ? getDaysFromDue(task.dueDate) : null
 
               return (
@@ -363,7 +360,7 @@ export function SidebarTodos({ onBack }: SidebarTodosProps) {
                       </span>
                       <span
                         className={`text-sm flex-1 ${
-                          isCompleted ? 'text-base-04 line-through' : 'text-base-05'
+                          completed ? 'text-base-04 line-through' : 'text-base-05'
                         }`}
                       >
                         {task.content

@@ -30,11 +30,17 @@ function getTodayPlusDays(days: number): string {
   return formatDateYMD(d)
 }
 
-function isCompleted(task: Task): boolean {
+/**
+ * A task nobody has to act on any more. Exported because the sidebar, the
+ * sidebar's counts and the task manager each used to re-type this comparison,
+ * so adding a status meant remembering all four places.
+ */
+export function isCompleted(task: Pick<Task, 'status'>): boolean {
   return task.status === 'DONE' || task.status === 'NEVER'
 }
 
-function isActive(task: Task): boolean {
+/** A task still in play. */
+export function isActive(task: Pick<Task, 'status'>): boolean {
   return !isCompleted(task)
 }
 
