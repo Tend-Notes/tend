@@ -30,7 +30,7 @@ import { contentTypes as contentTypesApi, identity, isDemoMode, AuthExpiredError
 import { useAuthStore } from './stores/authStore'
 import { SessionExpiredOverlay } from './components/ui/SessionExpiredOverlay'
 import { GardenLockedOverlay } from './components/ui/GardenLockedOverlay'
-import { initUserSync } from './lib/userSync'
+import { initUserSync, withoutSync } from './lib/userSync'
 import { clearUserScopedContent } from './lib/cacheReset'
 
 // Demo mode imports (only loaded in demo mode)
@@ -166,10 +166,13 @@ function App() {
           initializeFromUrl()
         })
 
-      // Load content types from API (needed for content type routing)
+      // Load content types from API (needed for content type routing).
+      // This is server data, not a user edit: set it behind the sync guard so
+      // the settings subscription doesn't answer it with a prefs POST that
+      // carries no content types anyway.
       contentTypesApi.list()
         .then((types) => {
-          setContentTypes(types)
+          withoutSync(() => setContentTypes(types))
         })
         .catch((err) => console.error('Failed to load content types:', err))
     }
