@@ -73,12 +73,6 @@ impl Block {
             || content.starts_with("WAITING ")
     }
 
-    /// Check if this block is marked as done
-    pub fn is_done(&self) -> bool {
-        let content = self.content.trim_start();
-        content.starts_with("DONE ") || content.starts_with("CANCELLED ")
-    }
-
     /// Get the task status if this is a task block
     pub fn task_status(&self) -> Option<TaskStatus> {
         let content = self.content.trim_start();
