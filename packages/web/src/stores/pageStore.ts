@@ -9,6 +9,7 @@ import * as api from '../lib/api'
 import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 import { useActivityLogStore } from './activityLogStore'
+import { computeRootBlocks } from './rootBlocks'
 import { useSyncStatusStore } from './syncStatusStore'
 import { useSettingsStore, type ContentType } from './settingsStore'
 import { parseName, splitName } from '../lib/name'
@@ -655,49 +656,12 @@ export const usePageStore = create<PageState>()(
       if (!currentPage) return
 
       // Compute new root blocks
-      const blockMap: Record<string, Block> = {}
-      const newRootUuids = new Set<string>()
-
-      for (const block of blocks) {
-        blockMap[block.uuid] = block
-        if (!block.parentUuid) {
-          newRootUuids.add(block.uuid)
-        }
-      }
-
-      let finalRoots: string[]
-
-      if (rootBlocksHint) {
-        // Use the hint, but filter to only include valid root UUIDs
-        finalRoots = rootBlocksHint.filter(uuid => newRootUuids.has(uuid))
-        // Add any roots not in the hint at the end
-        for (const uuid of newRootUuids) {
-          if (!finalRoots.includes(uuid)) {
-            finalRoots.push(uuid)
-          }
-        }
-      } else {
-        // Build new rootBlocks list preserving order and inserting new roots smartly
-        const existingRoots = currentPage.rootBlocks.filter(uuid => newRootUuids.has(uuid))
-        const addedRoots = [...newRootUuids].filter(uuid => !currentPage.rootBlocks.includes(uuid))
-
-        // For each new root, try to insert it after its former parent (if parent is a root)
-        finalRoots = [...existingRoots]
-        for (const newRootUuid of addedRoots) {
-          // Check the old state to find the former parent
-          const oldBlock = currentPage.blocks[newRootUuid]
-          const formerParentUuid = oldBlock?.parentUuid
-
-          if (formerParentUuid && finalRoots.includes(formerParentUuid)) {
-            // Insert after the former parent
-            const parentIndex = finalRoots.indexOf(formerParentUuid)
-            finalRoots.splice(parentIndex + 1, 0, newRootUuid)
-          } else {
-            // Append at the end
-            finalRoots.push(newRootUuid)
-          }
-        }
-      }
+      const { blockMap, finalRoots } = computeRootBlocks(
+        blocks,
+        rootBlocksHint,
+        currentPage.rootBlocks,
+        { previousBlocks: currentPage.blocks }
+      )
 
       // Optimistic update (instant, no debounce)
       set((state) => {
@@ -1070,33 +1034,7 @@ export const usePageStore = create<PageState>()(
       if (!editingTemplate) return
 
       // Compute new root blocks
-      const blockMap: Record<string, Block> = {}
-      const newRootUuids = new Set<string>()
-
-      for (const block of blocks) {
-        blockMap[block.uuid] = block
-        if (!block.parentUuid) {
-          newRootUuids.add(block.uuid)
-        }
-      }
-
-      let finalRoots: string[]
-
-      if (rootBlocksHint) {
-        // Use the hint, but filter to only include valid root UUIDs
-        finalRoots = rootBlocksHint.filter(uuid => newRootUuids.has(uuid))
-        // Add any roots not in the hint at the end
-        for (const uuid of newRootUuids) {
-          if (!finalRoots.includes(uuid)) {
-            finalRoots.push(uuid)
-          }
-        }
-      } else {
-        // Build new rootBlocks list preserving order and inserting new roots smartly
-        const existingRoots = editingTemplate.page.rootBlocks.filter(uuid => newRootUuids.has(uuid))
-        const addedRoots = [...newRootUuids].filter(uuid => !editingTemplate.page.rootBlocks.includes(uuid))
-        finalRoots = [...existingRoots, ...addedRoots]
-      }
+      const { blockMap, finalRoots } = computeRootBlocks(blocks, rootBlocksHint, editingTemplate.page.rootBlocks)
 
       // Update template state
       set((state) => {
@@ -1259,33 +1197,7 @@ export const usePageStore = create<PageState>()(
       if (!editingImportError) return
 
       // Compute new root blocks
-      const blockMap: Record<string, Block> = {}
-      const newRootUuids = new Set<string>()
-
-      for (const block of blocks) {
-        blockMap[block.uuid] = block
-        if (!block.parentUuid) {
-          newRootUuids.add(block.uuid)
-        }
-      }
-
-      let finalRoots: string[]
-
-      if (rootBlocksHint) {
-        // Use the hint, but filter to only include valid root UUIDs
-        finalRoots = rootBlocksHint.filter(uuid => newRootUuids.has(uuid))
-        // Add any roots not in the hint at the end
-        for (const uuid of newRootUuids) {
-          if (!finalRoots.includes(uuid)) {
-            finalRoots.push(uuid)
-          }
-        }
-      } else {
-        // Build new rootBlocks list preserving order and inserting new roots smartly
-        const existingRoots = editingImportError.page.rootBlocks.filter(uuid => newRootUuids.has(uuid))
-        const addedRoots = [...newRootUuids].filter(uuid => !editingImportError.page.rootBlocks.includes(uuid))
-        finalRoots = [...existingRoots, ...addedRoots]
-      }
+      const { blockMap, finalRoots } = computeRootBlocks(blocks, rootBlocksHint, editingImportError.page.rootBlocks)
 
       // Update import error state
       set((state) => {
