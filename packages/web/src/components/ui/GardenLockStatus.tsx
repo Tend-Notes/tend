@@ -6,7 +6,9 @@
 //            index of every note exists (in memory while unlocked, or left
 //            behind on disk, which is worse and gets its own legend).
 // Pale disc via color-mix, since Tailwind /opacity doesn't work on our
-// var-hex colors (same as SaveStatus).
+// var-hex colors (same as SaveStatus) — at the same 30% as SaveStatus, so the
+// badge reads the same size as its neighbour. At 20% the orange disc dissolved
+// into a light theme's background and the whole badge looked smaller.
 
 import { useGardenInfo } from '../../hooks/useGardenInfo'
 
@@ -43,17 +45,17 @@ export function GardenLockStatus() {
   const indexResident = indexStatus === 'ready' || indexStatus === 'building'
 
   let color = 'var(--base04)'
-  let mix = '30%'
+  // Same tint as SaveStatus for every state: the disc is what gives the badge
+  // its size, and a fainter one reads as a smaller badge.
+  const mix = '30%'
   let label = 'Encrypted garden — notes are encrypted at rest and no search index exists'
 
   if (indexOnDisk) {
     color = WARNING_ORANGE
-    mix = '20%'
     label =
       'Encrypted garden — an unencrypted search index has been left on disk, so your notes are readable at rest. This should not happen; check the server log.'
   } else if (indexResident) {
     color = WARNING_ORANGE
-    mix = '20%'
     label =
       'Encrypted garden, not fully secured — full-text search keeps an unencrypted index of your notes in memory while the garden is unlocked'
   }
