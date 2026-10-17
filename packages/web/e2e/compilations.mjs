@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 //
-// Compilations: a "namespaced" content type. Ctrl-K "Link or create" gains a Book
-// field; entering a book + title inserts a [[books/Book/Title]] wiki-link, and
-// navigating to it creates the entry under the namespace subfolder.
+// Compilations: a "namespaced" content type. Ctrl-K "Link or create" asks for the
+// book first and then the file inside it; choosing both inserts a
+// [[books/Book/Title]] wiki-link, and navigating to it creates the entry under
+// the namespace subfolder.
+//
+// The picker is a drill-down (one level at a time, with a back breadcrumb) since
+// the reusable LinkPicker landed; it used to stack both levels on one screen.
 
 import { launch, seedJournal, check, done, APP, API } from './lib.mjs'
 
@@ -46,17 +50,23 @@ try {
   await page.getByText('Link or create Book', { exact: false }).first().click()
   await page.waitForTimeout(400)
 
-  // The namespaced flow shows two levels: a Compilation field on top, then a File
-  // field below it. The File level is inert until a compilation is chosen.
+  // The namespaced flow asks for the compilation first; the file level replaces
+  // it once one is chosen, with a breadcrumb back to the list.
   check('Compilation field present', (await page.getByPlaceholder('Choose or create a book…').count()) === 1)
-  check(
-    'file level prompts for a compilation first',
-    (await page.getByText('Choose or create a compilation first', { exact: false }).count()) === 1,
-  )
   check('file field hidden before a compilation is chosen', (await page.getByPlaceholder('Choose or create a file…').count()) === 0)
   await page.getByPlaceholder('Choose or create a book…').fill('MyNovel')
   await page.waitForTimeout(200)
-  check('file field appears once a compilation is chosen', (await page.getByPlaceholder('Choose or create a file…').count()) === 1)
+  check(
+    'a new compilation is offered for creation',
+    (await page.getByText('Create book "MyNovel"', { exact: false }).count()) === 1,
+  )
+  await page.getByText('Create book "MyNovel"', { exact: false }).click()
+  await page.waitForTimeout(400)
+  check('choosing a compilation opens the file level', (await page.getByPlaceholder('Choose or create a file…').count()) === 1)
+  check(
+    'the file level names the chosen compilation',
+    (await page.getByText('MyNovel', { exact: true }).count()) >= 1,
+  )
   await page.getByPlaceholder('Choose or create a file…').fill('Chapter One')
   await page.waitForTimeout(300)
   await page.getByText('Create "Chapter One" in MyNovel', { exact: false }).click()
@@ -88,6 +98,9 @@ try {
   await page.waitForTimeout(400)
   await page.getByPlaceholder('Choose or create a book…').fill('MyNovel')
   await page.waitForTimeout(200)
+  // MyNovel exists now, so it is picked from the list instead of created.
+  await page.getByText('MyNovel', { exact: true }).first().click()
+  await page.waitForTimeout(400)
   await page.getByPlaceholder('Choose or create a file…').fill('One')
   await page.waitForTimeout(300)
   check(

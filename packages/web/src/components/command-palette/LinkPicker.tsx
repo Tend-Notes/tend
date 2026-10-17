@@ -3,8 +3,9 @@
 // One keyboard-driven "filter a list -> pick one OR create new" control. A Page
 // is the base case; a custom content type is a Page with an optional namespace
 // and/or date attached, so this same control backs all of them — the dated
-// panel passes a date filter as `headerRight`, and the namespaced panel stacks
-// two of these (a compilation level, then a file level).
+// panel passes a date filter as `headerRight`, and the namespaced panel drills
+// down through two of these in turn (the compilation level, then the file level
+// inside it).
 //
 // Keyboard model (see the palette feature): type to filter; Tab cycles
 // search -> results -> create (Shift-Tab reverses); Up/Down also step through
