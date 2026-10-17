@@ -22,6 +22,23 @@ const DEBOUNCE_MS = 1000
 let isLoadingFromServer = false
 
 /**
+ * Run a store update that came from the server, not from the user.
+ *
+ * The subscriptions treat every store change as something to save back;
+ * applying server data under this guard keeps that from bouncing straight
+ * back as a POST.
+ */
+export function withoutSync(apply: () => void): void {
+  const previous = isLoadingFromServer
+  isLoadingFromServer = true
+  try {
+    apply()
+  } finally {
+    isLoadingFromServer = previous
+  }
+}
+
+/**
  * Load user preferences from server and apply to stores.
  * Called on app init after authenticating.
  */
@@ -51,6 +68,9 @@ export async function loadUserPrefs(): Promise<void> {
     // Preferences may not exist yet for new users
   } finally {
     isLoadingFromServer = false
+    // Seed the snapshot: whatever is in the stores now IS what the server has,
+    // so an unrelated subscription firing on a cold load sends nothing.
+    lastSentPrefs = JSON.stringify(buildPrefs())
   }
 }
 
@@ -109,6 +129,8 @@ export async function loadUserState(): Promise<void> {
     // State may not exist yet for new users
   } finally {
     isLoadingFromServer = false
+    // Same seeding as prefs: the stores now mirror the server.
+    lastSentState = JSON.stringify(buildState())
   }
 }
 
@@ -166,6 +188,14 @@ function buildState(): Record<string, unknown> {
 let prefsDirty = false
 let stateDirty = false
 
+// Last payload actually sent, serialized. The subscriptions fire on any change
+// to their stores, including fields these payloads don't carry — uiStore's
+// lastFocusedBlockUuid is written every time the caret crosses a block
+// boundary, so plain typing used to POST the identical UI-state JSON once per
+// editing pause. Comparing against what was last sent drops those.
+let lastSentPrefs: string | null = null
+let lastSentState: string | null = null
+
 /**
  * Save current preferences to server (debounced).
  */
@@ -175,8 +205,15 @@ function savePrefsToServer(): void {
   prefsDirty = true
   if (prefsSaveTimeout) clearTimeout(prefsSaveTimeout)
   prefsSaveTimeout = setTimeout(async () => {
+    const prefs = buildPrefs()
+    const serialized = JSON.stringify(prefs)
+    if (serialized === lastSentPrefs) {
+      prefsDirty = false
+      return
+    }
     try {
-      await user.savePrefs(buildPrefs())
+      await user.savePrefs(prefs)
+      lastSentPrefs = serialized
       prefsDirty = false
     } catch {
       // Silently fail - user prefs are not critical
@@ -193,8 +230,15 @@ function saveStateToServer(): void {
   stateDirty = true
   if (stateSaveTimeout) clearTimeout(stateSaveTimeout)
   stateSaveTimeout = setTimeout(async () => {
+    const state = buildState()
+    const serialized = JSON.stringify(state)
+    if (serialized === lastSentState) {
+      stateDirty = false
+      return
+    }
     try {
-      await user.saveState(buildState())
+      await user.saveState(state)
+      lastSentState = serialized
       stateDirty = false
     } catch {
       // Silently fail - UI state is not critical
@@ -209,12 +253,18 @@ function saveStateToServer(): void {
 function flushPendingSaves(): void {
   if (prefsDirty) {
     const prefs = JSON.stringify(buildPrefs())
-    navigator.sendBeacon('/api/v1/user/prefs', new Blob([prefs], { type: 'application/json' }))
+    if (prefs !== lastSentPrefs) {
+      navigator.sendBeacon('/api/v1/user/prefs', new Blob([prefs], { type: 'application/json' }))
+      lastSentPrefs = prefs
+    }
     prefsDirty = false
   }
   if (stateDirty) {
     const state = JSON.stringify(buildState())
-    navigator.sendBeacon('/api/v1/user/state', new Blob([state], { type: 'application/json' }))
+    if (state !== lastSentState) {
+      navigator.sendBeacon('/api/v1/user/state', new Blob([state], { type: 'application/json' }))
+      lastSentState = state
+    }
     stateDirty = false
   }
 }
