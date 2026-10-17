@@ -600,6 +600,56 @@ impl EncryptedFileManager {
         Ok(pages)
     }
 
+    /// The file a sheet actually lives in: the encoded path when it exists,
+    /// else the legacy un-encoded one, else `None`.
+    fn existing_sheet_file(
+        &self,
+        content_type: &ContentType,
+        name: &str,
+        resolved_date: Option<NaiveDate>,
+    ) -> Option<PathBuf> {
+        let path = self.sheet_path(content_type, name, resolved_date);
+        if path.exists() {
+            return Some(path);
+        }
+        let raw_path = self.raw_sheet_path(content_type, name, resolved_date);
+        if raw_path.exists() {
+            return Some(raw_path);
+        }
+        None
+    }
+
+    /// A sheet's file content as text, without parsing it into a `Page`.
+    ///
+    /// Same name/date/path resolution as [`Self::read_sheet`] — including
+    /// filename encoding and decryption — so callers that only need the bytes (checking for a
+    /// stability footer, say) never hand-build a path.
+    pub async fn read_sheet_raw(
+        &self,
+        content_type: &ContentType,
+        name: &str,
+        date: Option<NaiveDate>,
+    ) -> Result<String, StorageError> {
+        validate_safe_name(name)?;
+        validate_safe_name(&content_type.directory)?;
+
+        let resolved_date = if content_type.is_date_named() {
+            Some(
+                NaiveDate::parse_from_str(name, "%Y-%m-%d")
+                    .map_err(|_| StorageError::NotFound(format!("Invalid date: {}", name)))?,
+            )
+        } else {
+            date
+        };
+
+        let path = self
+            .existing_sheet_file(content_type, name, resolved_date)
+            .ok_or_else(|| StorageError::NotFound(format!("{}/{}", content_type.id, name)))?;
+        ensure_within_root(&self.root, &path)?;
+        let encrypted = tokio::fs::read(&path).await?;
+        self.decrypt_file(&encrypted)
+    }
+
     /// Read and decrypt a sheet (one code path, driven by `organization`).
     pub async fn read_sheet(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<Page, StorageError> {
         validate_safe_name(name)?;
@@ -618,23 +668,15 @@ impl EncryptedFileManager {
             date
         };
 
-        let path = self.sheet_path(content_type, name, resolved_date);
-
-        // Backwards compat: try encoded path first, fall back to raw path.
-        let path = if path.exists() {
-            path
-        } else {
-            let raw_path = self.raw_sheet_path(content_type, name, resolved_date);
-            if raw_path.exists() {
-                raw_path
-            } else if content_type.id == "journal" {
+        let path = match self.existing_sheet_file(content_type, name, resolved_date) {
+            Some(p) => p,
+            None if content_type.id == "journal" => {
                 // Journal-only: a missing date is an empty journal, not an error.
                 return Ok(Page::new_journal(
                     resolved_date.expect("date-named type resolves a date"),
                 ));
-            } else {
-                return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
             }
+            None => return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name))),
         };
 
         ensure_within_root(&self.root, &path)?;

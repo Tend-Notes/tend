@@ -598,6 +598,55 @@ impl FileManager {
         Ok(sheets)
     }
 
+    /// The file a sheet actually lives in: the encoded path when it exists,
+    /// else the legacy un-encoded one, else `None`.
+    fn existing_sheet_file(
+        &self,
+        content_type: &ContentType,
+        name: &str,
+        resolved_date: Option<NaiveDate>,
+    ) -> Option<PathBuf> {
+        let path = self.sheet_path(content_type, name, resolved_date);
+        if path.exists() {
+            return Some(path);
+        }
+        let raw_path = self.raw_sheet_path(content_type, name, resolved_date);
+        if raw_path.exists() {
+            return Some(raw_path);
+        }
+        None
+    }
+
+    /// A sheet's file content as text, without parsing it into a `Page`.
+    ///
+    /// Same name/date/path resolution as [`Self::read_sheet`] — including
+    /// filename encoding — so callers that only need the bytes (checking for a
+    /// stability footer, say) never hand-build a path.
+    pub async fn read_sheet_raw(
+        &self,
+        content_type: &ContentType,
+        name: &str,
+        date: Option<NaiveDate>,
+    ) -> Result<String, StorageError> {
+        validate_safe_name(name)?;
+        validate_safe_name(&content_type.directory)?;
+
+        let resolved_date = if content_type.is_date_named() {
+            Some(
+                NaiveDate::parse_from_str(name, "%Y-%m-%d")
+                    .map_err(|_| StorageError::NotFound(format!("Invalid date: {}", name)))?,
+            )
+        } else {
+            date
+        };
+
+        let path = self
+            .existing_sheet_file(content_type, name, resolved_date)
+            .ok_or_else(|| StorageError::NotFound(format!("{}/{}", content_type.id, name)))?;
+        ensure_within_root(&self.root, &path)?;
+        Ok(tokio::fs::read_to_string(&path).await?)
+    }
+
     /// Read a sheet by content type, name, and optional date.
     ///
     /// `Page::name` is set bare for page/journal (`name_includes_directory() ==
@@ -621,23 +670,15 @@ impl FileManager {
             date
         };
 
-        let path = self.sheet_path(content_type, name, resolved_date);
-
-        // Backwards compat: try encoded path first, fall back to raw path.
-        let path = if path.exists() {
-            path
-        } else {
-            let raw_path = self.raw_sheet_path(content_type, name, resolved_date);
-            if raw_path.exists() {
-                raw_path
-            } else if content_type.id == "journal" {
+        let path = match self.existing_sheet_file(content_type, name, resolved_date) {
+            Some(p) => p,
+            None if content_type.id == "journal" => {
                 // Journal-only: a missing date is an empty journal, not an error.
                 return Ok(Page::new_journal(
                     resolved_date.expect("date-named type resolves a date"),
                 ));
-            } else {
-                return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name)));
             }
+            None => return Err(StorageError::NotFound(format!("{}/{}", content_type.id, name))),
         };
 
         ensure_within_root(&self.root, &path)?;
@@ -908,6 +949,41 @@ mod tests {
         assert!(fm.sheet_exists(&ct, "John", None).await);
         fm.delete_sheet(&ct, "John", None).await.unwrap();
         assert!(!fm.sheet_exists(&ct, "John", None).await);
+    }
+
+    #[tokio::test]
+    async fn read_sheet_raw_finds_an_encoded_filename() {
+        // The stabilize path reads files raw to look for a footer. It used to
+        // build the path by hand and never applied encode_filename, so a sheet
+        // whose name carries an unsafe character was simply unreadable.
+        let (temp_dir, fm) = setup().await;
+        let ct = flat_type();
+
+        let mut page = Page::new_sheet("person/Weird: Name?", "person", None);
+        page.add_block(tend_core::Block::new("Bio"));
+        fm.write_sheet(&ct, &page, None).await.unwrap();
+
+        // On disk the unsafe characters are percent-encoded.
+        assert!(temp_dir
+            .path()
+            .join("person")
+            .join("Weird%3A Name%3F.md")
+            .exists());
+
+        let raw = fm.read_sheet_raw(&ct, "Weird: Name?", None).await.unwrap();
+        assert!(raw.contains("Bio"));
+
+        // And it agrees with what the parsing read returns.
+        let parsed = fm.read_sheet(&ct, "Weird: Name?", None).await.unwrap();
+        assert_eq!(parsed.name, "person/Weird: Name?");
+    }
+
+    #[tokio::test]
+    async fn read_sheet_raw_reports_a_missing_sheet() {
+        let (_temp_dir, fm) = setup().await;
+        let ct = flat_type();
+        let err = fm.read_sheet_raw(&ct, "Nope", None).await.unwrap_err();
+        assert!(matches!(err, StorageError::NotFound(_)));
     }
 
     #[tokio::test]
