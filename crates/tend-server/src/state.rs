@@ -1150,10 +1150,7 @@ impl UserState {
         file_manager: &UnifiedFileManager,
         event_sender: EventSender,
     ) -> Option<tokio::task::JoinHandle<()>> {
-        let pending_writes = match file_manager {
-            UnifiedFileManager::Plain(fm) => fm.pending_writes(),
-            UnifiedFileManager::Encrypted(efm) => efm.pending_writes(),
-        };
+        let pending_writes = file_manager.pending_writes();
 
         match SimpleFileWatcher::new(garden_path, pending_writes) {
             Ok(watcher) => {
@@ -1371,15 +1368,26 @@ impl UserState {
             new_data_dir.display()
         );
 
-        // Stop old file watcher
+        let new_garden = GardenState::new(new_data_dir.clone(), &self.config.git).await?;
+        self.install_garden(&new_data_dir, new_garden).await;
+
+        info!("User {} garden switch complete: {}", self.username, garden_id);
+
+        Ok(new_data_dir)
+    }
+
+    /// Swap in an already-built garden: stop the old file watcher, start one
+    /// for the new garden, then replace both under their locks.
+    ///
+    /// Shared by the plain and encrypted switches, which differ only in how
+    /// the `GardenState` was constructed (and the encrypted one's index
+    /// rebuild afterwards).
+    async fn install_garden(&self, data_dir: &Path, new_garden: GardenState) {
         self.stop_file_watcher().await;
 
-        let new_garden = GardenState::new(new_data_dir.clone(), &self.config.git).await?;
-
-        // Start new file watcher
         let new_watcher = Self::start_file_watcher(
             &self.username,
-            &new_data_dir,
+            data_dir,
             &new_garden.file_manager,
             self.event_sender.clone(),
         );
@@ -1393,10 +1401,6 @@ impl UserState {
             let mut handle = self.watcher_handle.write().await;
             *handle = new_watcher;
         }
-
-        info!("User {} garden switch complete: {}", self.username, garden_id);
-
-        Ok(new_data_dir)
     }
 
     /// Switch to an encrypted garden with passphrase
@@ -1420,9 +1424,6 @@ impl UserState {
             new_data_dir.display()
         );
 
-        // Stop old file watcher
-        self.stop_file_watcher().await;
-
         let new_garden = GardenState::new_encrypted(
             new_data_dir.clone(),
             passphrase,
@@ -1430,24 +1431,7 @@ impl UserState {
             info.search_config,
         )
         .await?;
-
-        // Start new file watcher
-        let new_watcher = Self::start_file_watcher(
-            &self.username,
-            &new_data_dir,
-            &new_garden.file_manager,
-            self.event_sender.clone(),
-        );
-
-        {
-            let mut garden = self.garden.write().await;
-            *garden = new_garden;
-        }
-
-        {
-            let mut handle = self.watcher_handle.write().await;
-            *handle = new_watcher;
-        }
+        self.install_garden(&new_data_dir, new_garden).await;
 
         self.rebuild_after_unlock().await;
 
