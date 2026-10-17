@@ -55,12 +55,6 @@ export interface ContentType {
   template: string // markdown template for new sheets
 }
 
-// True for types whose sheets live in date subfolders ({dir}/YYYY-MM-DD/name).
-// This is the path-layout check that the old `saveByDate` boolean stood in for.
-export function usesDateFolder(ct: ContentType): boolean {
-  return ct.organization === 'dateFoldered'
-}
-
 // True for any type that associates a date with each sheet (journals are
 // date-named; custom by-date types are date-foldered). Use for "needs a date
 // picker" UI decisions.

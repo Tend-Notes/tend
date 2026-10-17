@@ -73,32 +73,6 @@ export function formatDateYMD(date: Date): string {
 }
 
 /**
- * Check if a due date is overdue (past today).
- */
-export function isOverdue(dateStr: string): boolean {
-  const date = parseDate(dateStr)
-  if (!date) return false
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  return date.getTime() < today.getTime()
-}
-
-/**
- * Check if a due date is today.
- */
-export function isDueToday(dateStr: string): boolean {
-  const date = parseDate(dateStr)
-  if (!date) return false
-
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  return date.getTime() === today.getTime()
-}
-
-/**
  * Get days from today to the due date.
  * Negative = past due, 0 = today, positive = future.
  */
