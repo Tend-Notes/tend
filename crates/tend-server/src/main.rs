@@ -74,8 +74,11 @@ async fn main() -> anyhow::Result<()> {
     // File watcher is now per-user: started when user's garden is loaded in UserState::new()
     info!("Per-user file watchers enabled (started on garden load)");
 
-    // Start search index GC task (cleans up expired indices for encrypted gardens)
-    let _gc_handle = state::start_search_index_gc_task(config.data_dir.clone(), state.clone());
+    // Start search index GC task (cleans up expired indices for encrypted
+    // gardens). It sweeps `<dir>/users`, so it must get the base directory —
+    // `config.data_dir` defaults to the *active garden*, where no `users`
+    // directory exists, so the disk sweep never found anything to clean.
+    let _gc_handle = state::start_search_index_gc_task(config::base_dir(), state.clone());
 
     // Build CORS layer based on configuration
     let cors_layer = if config.cors.allowed_origins.is_empty() {

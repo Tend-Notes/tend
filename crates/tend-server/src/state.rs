@@ -1958,6 +1958,46 @@ mod gc_tests {
     use tempfile::TempDir;
 
     #[tokio::test]
+    async fn gc_sweeps_the_users_directory_under_the_base_dir() {
+        // Regression: the task was handed config.data_dir (the *active garden*),
+        // so `<dir>/users` never existed and the whole disk sweep was dead.
+        // This pins the shape the sweep expects: base_dir/users/<name>.
+        let temp = TempDir::new().unwrap();
+        let base_dir = temp.path().to_path_buf();
+        let user_dir = base_dir.join("users").join("testuser");
+        let garden_dir = user_dir.join("Gardens").join("Sealed");
+        let index_path: PathBuf = garden_dir.join(".tend").join("search_index");
+        tokio::fs::create_dir_all(&index_path).await.unwrap();
+        tokio::fs::write(index_path.join("meta.json"), "{}").await.unwrap();
+
+        let old = chrono::Utc::now().timestamp() - 100 * 3600;
+        tokio::fs::write(garden_dir.join(".tend").join("search_last_use"), old.to_string())
+            .await
+            .unwrap();
+
+        let gardens_json = serde_json::json!({
+            "gardens": [{
+                "id": "sealed",
+                "path": garden_dir.to_string_lossy(),
+                "encrypted": true,
+                "search_enabled": true,
+                "index_ttl_hours": 1
+            }],
+            "active": "sealed"
+        });
+        tokio::fs::write(user_dir.join("gardens.json"), gardens_json.to_string())
+            .await
+            .unwrap();
+
+        super::run_search_index_gc(&base_dir).await.unwrap();
+
+        assert!(
+            !index_path.exists(),
+            "an expired on-disk index under base_dir/users must be removed"
+        );
+    }
+
+    #[tokio::test]
     async fn gc_uses_stored_garden_path_and_array_format() {
         let temp = TempDir::new().unwrap();
         let user_dir = temp.path().join("users").join("testuser");
