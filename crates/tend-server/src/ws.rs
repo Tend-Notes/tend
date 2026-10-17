@@ -74,31 +74,11 @@ pub fn create_event_channel() -> (EventSender, broadcast::Receiver<BroadcastEven
     broadcast::channel(100)
 }
 
-/// Extract username from headers (matches auth.rs logic)
+/// Extract username from headers, or `None` when the request carries no
+/// usable identity. Thin wrapper over the auth-layer authority so HTTP and
+/// WebSocket agree on trimming and validation.
 fn extract_username(headers: &HeaderMap, config: &crate::config::Config) -> Option<String> {
-    // Try the configured user header (e.g., Remote-User from Authelia)
-    if let Some(value) = headers.get(&config.auth.user_header) {
-        if let Ok(username) = value.to_str() {
-            if !username.is_empty() {
-                return Some(username.to_string());
-            }
-        }
-    }
-
-    // In dev mode, try the dev header
-    if !config.auth.required {
-        if let Some(value) = headers.get(&config.auth.dev_user_header) {
-            if let Ok(username) = value.to_str() {
-                if !username.is_empty() {
-                    return Some(username.to_string());
-                }
-            }
-        }
-        // Fall back to default user
-        return config.auth.default_user.clone();
-    }
-
-    None
+    crate::auth::extract_username_from_headers(headers, config).ok()
 }
 
 /// Outcome of verifying a WebSocket handshake against the auth service.
