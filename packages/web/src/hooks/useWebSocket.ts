@@ -148,11 +148,13 @@ export function useWebSocket() {
                   break
                 }
 
-                // Re-fetch the current page (silent - don't show errors for background reloads)
+                // Re-fetch the current page in the background: no errors, no
+                // loading blank-out, and no view change - a task edited from
+                // the task manager used to bounce the user onto its page.
                 if (isJournal) {
-                  navigateToJournal(pageName, false).catch(() => {})
+                  navigateToJournal(pageName, false, { background: true }).catch(() => {})
                 } else {
-                  navigateToPage(pageName, false).catch(() => {})
+                  navigateToPage(pageName, false, { background: true }).catch(() => {})
                 }
               }
               break
@@ -166,11 +168,11 @@ export function useWebSocket() {
                   break
                 }
 
-                // Silent reload - don't show errors for background reloads
+                // Silent background reload (see file_changed above).
                 if (currentPage?.isJournal) {
-                  navigateToJournal(data.name, false).catch(() => {})
+                  navigateToJournal(data.name, false, { background: true }).catch(() => {})
                 } else {
-                  navigateToPage(data.name, false).catch(() => {})
+                  navigateToPage(data.name, false, { background: true }).catch(() => {})
                 }
               }
               break
