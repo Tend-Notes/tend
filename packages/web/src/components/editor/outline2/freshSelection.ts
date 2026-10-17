@@ -45,7 +45,9 @@ function selectionFromDom(view: EditorView): { anchor: number; head: number } | 
  */
 export function withFreshSelection(cmd: Command): Command {
   return (state, dispatch, view) => {
-    if (!view) return cmd(state, dispatch, view)
+    // Never touch the selection mid-composition: an IME's own caret handling
+    // must win, and the DOM there is transient.
+    if (!view || view.composing) return cmd(state, dispatch, view)
 
     const dom = selectionFromDom(view)
     if (
