@@ -76,6 +76,11 @@ try {
   console.log('editor text:', JSON.stringify(blockText))
   check('inserted [[books/MyNovel/Chapter One]] wiki-link', blockText.includes('[[books/MyNovel/Chapter One]]'))
 
+  // The entry is created with the link, not on first visit.
+  const eager = (await (await fetch(`${API}/sheets/book`)).json()).map((s) => s.name)
+  console.log('book sheets before visiting:', JSON.stringify(eager))
+  check('entry exists before anyone visits the link', eager.includes('books/MyNovel/Chapter One'))
+
   // Navigate to it (create-on-404) and confirm the entry exists under the namespace.
   await page.goto(`${APP}/books/MyNovel/Chapter%20One`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(800)
