@@ -183,6 +183,9 @@ export function LinkPicker<T>({
                 <div
                   key={getKey(it)}
                   onClick={() => onPick(it)}
+                  // Stable hooks for the e2e checks: these rows are plain divs,
+                  // not cmdk items, so there is nothing else to select them by.
+                  data-picker-row=""
                   className={`${ROW} ${zone === 'results' && index === i ? 'bg-base-02' : 'hover:bg-base-02'}`}
                 >
                   <span>{getLabel(it)}</span>
@@ -200,6 +203,7 @@ export function LinkPicker<T>({
             <div className={HEADING}>Create new</div>
             <div
               onClick={() => onCreate(box)}
+              data-picker-create=""
               className={`${ROW} ${zone === 'create' ? 'bg-base-02' : 'hover:bg-base-02'}`}
             >
               <span>{createLabel(box)}</span>

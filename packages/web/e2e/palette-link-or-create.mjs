@@ -4,9 +4,10 @@
 //  - "New ___" command is gone; one entry links existing AND creates.
 //  - date-organized types get the journal-page calendar icon + picker as a
 //    second-layer filter (narrows Existing by sheet date).
-//  - "Create" shows only when the name search matches nothing OR every match is a
-//    prefix of the search (search + extra chars); a non-prefix substring match
-//    hides it. Independent of the date filter.
+//  - "Create" shows whenever the target path is free. Recurring names are
+//    legitimate for by-date types (many "standup" across dates), so a name that
+//    merely matches an existing one does NOT hide it — only a true same-path
+//    collision does, and there you link the existing sheet instead.
 
 import { launch, seedJournal, check, done, APP, API } from './lib.mjs'
 
@@ -22,8 +23,11 @@ for (const [name, date] of [['standup', '2026-01-01'], ['standup', '2026-01-02']
 const DATE = '2099-12-22'
 await seedJournal(DATE, [{ content: 'hi' }])
 
-const itemTexts = (page) => page.evaluate(() => Array.from(document.querySelectorAll('[cmdk-item]')).map((e) => e.textContent.trim()))
-const hasCreate = async (page) => (await itemTexts(page)).some((t) => /^Create "/.test(t))
+// The command list is cmdk; the link/create panel below it is a LinkPicker,
+// whose rows are plain divs tagged data-picker-row / data-picker-create.
+const commandTexts = (page) => page.evaluate(() => Array.from(document.querySelectorAll('[cmdk-item]')).map((e) => e.textContent.trim()))
+const pickerTexts = (page) => page.evaluate(() => Array.from(document.querySelectorAll('[data-picker-row]')).map((e) => e.textContent.trim()))
+const hasCreate = async (page) => (await page.locator('[data-picker-create]').count()) > 0
 
 const browser = await launch()
 try {
@@ -36,7 +40,7 @@ try {
   await page.waitForSelector('[cmdk-item]', { timeout: 5000 })
   await page.keyboard.type('Meeting')
   await page.waitForTimeout(300)
-  const cmds = await itemTexts(page)
+  const cmds = await commandTexts(page)
   check('has "Link or create Meeting..."', cmds.some((t) => /Link or create Meeting/.test(t)))
   check('no "New Meeting" command', !cmds.some((t) => /^New Meeting/.test(t)))
 
@@ -46,13 +50,13 @@ try {
 
   const search = page.getByPlaceholder(/Search meetings/i)
 
-  // Create gate.
-  await search.fill('standup')
+  // Create gate: free target path -> create offered, whatever the name matches.
+  await search.fill('standup') // exists, but only on other dates
   await page.waitForTimeout(200)
-  check('create shown for exact/prefix match (standup)', await hasCreate(page))
+  check('create shown for a name that exists on another date (standup)', await hasCreate(page))
   await search.fill('and') // substring of "standup" but not a prefix
   await page.waitForTimeout(200)
-  check('create hidden for non-prefix substring match (and)', !(await hasCreate(page)))
+  check('create shown for a non-prefix substring match (and)', await hasCreate(page))
   await search.fill('zzz') // no matches
   await page.waitForTimeout(200)
   check('create shown when nothing matches (zzz)', await hasCreate(page))
@@ -69,8 +73,14 @@ try {
   await page.getByRole('button', { name: '1', exact: true }).click()
   await page.waitForTimeout(300)
   check('date filter set to 2026-01-01', await page.locator('[title="Clear date filter"]').count() === 1)
-  const dated = await itemTexts(page)
+  const dated = await pickerTexts(page)
   check('existing narrows to 2026-01-01', dated.some((t) => t.includes('2026-01-01')) && !dated.some((t) => t.includes('2026-01-02')))
+
+  // With the date picked, "standup" now resolves to an existing path — the one
+  // case where create is suppressed.
+  await search.fill('standup')
+  await page.waitForTimeout(250)
+  check('create hidden on a same-path collision (standup on 2026-01-01)', !(await hasCreate(page)))
 } finally {
   await browser.close()
 }
