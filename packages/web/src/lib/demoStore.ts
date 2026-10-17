@@ -257,17 +257,6 @@ export async function clearAll(): Promise<void> {
   // Keep prefs and state - user settings should persist across sessions
 }
 
-/**
- * Full reset including preferences
- */
-export async function fullReset(): Promise<void> {
-  await clearStore(STORES.PAGES)
-  await clearStore(STORES.JOURNALS)
-  await clearStore(STORES.META)
-  await clearStore(STORES.PREFS)
-  await clearStore(STORES.STATE)
-}
-
 // ============================================================================
 // Preferences API
 // ============================================================================

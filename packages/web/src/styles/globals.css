@@ -85,11 +85,7 @@ body {
 
 /* Suppress focus outline on editor containers - focus is managed internally */
 .outliner-editor:focus-visible,
-.outliner-editor:focus,
-.seed-dormant:focus-visible,
-.seed-dormant:focus,
-[data-seed-editor]:focus-visible,
-[data-seed-editor]:focus {
+.outliner-editor:focus {
   outline: none;
 }
 
@@ -343,19 +339,11 @@ code {
   padding: 0 2px;
 }
 
-/* Block reference styles - basic (legacy) */
-.block-ref {
-  color: var(--color-link);
-  background-color: var(--color-bg-secondary);
-  padding: 0 4px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-
-.block-ref:hover {
-  background-color: var(--color-bg-selection);
-}
-
+/* Kept deliberately: the .block-reference* family below is emitted only by
+ * renderContentReact, which has no callers today but is the consolidation
+ * target for the three-renderer cleanup (REVIEW-REMEDIATION-20261015). Delete
+ * this family with that decision, not before — see CLEANUP-PUNCHLIST-20261017
+ * CLN-03.4. */
 /* Block reference styles - inline widget
  * Design: Chain link icon replaces bullet, content has subtle background.
  * Renders like a normal block but with visual distinction.
@@ -902,24 +890,6 @@ code {
     border-color var(--duration-normal) var(--ease-out),
     max-height var(--duration-slow) var(--ease-out),
     opacity var(--duration-normal) var(--ease-out);
-}
-
-/* Dormant seed - static HTML rendering that matches CodeMirror layout */
-.seed-dormant {
-  /* Match .cm-content styles */
-  font-family: inherit;
-  font-size: inherit;
-  line-height: inherit;
-  padding: 0;
-  /* Match .cm-line padding */
-  white-space: pre-wrap;
-  word-break: break-word;
-  /* Minimum height matches block-content */
-  min-height: 1.5em;
-  /* Cursor indicates clickable to edit */
-  cursor: text;
-  /* Prevent layout shift when transitioning to/from CodeMirror */
-  overflow-wrap: break-word;
 }
 
 /* Editor placeholder */

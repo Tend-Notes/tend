@@ -263,11 +263,6 @@ export async function loadThemesFromTintedTheming(): Promise<void> {
   }
 }
 
-// Get all available themes (built-in + fetched)
-export function getAllThemes(): Base16Theme[] {
-  return themeCache.themes
-}
-
 // Get all dark themes
 export function getDarkThemes(): Base16Theme[] {
   return themeCache.themes.filter((t) => t.variant === 'dark')
@@ -286,11 +281,6 @@ export function findTheme(name: string): Base16Theme | undefined {
 // Check if themes are still loading
 export function isLoadingThemes(): boolean {
   return themeCache.isLoading
-}
-
-// Get theme loading error
-export function getThemeError(): string | null {
-  return themeCache.error
 }
 
 // Parse a Base16 YAML string into a theme object
