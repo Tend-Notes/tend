@@ -376,9 +376,13 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             // log. The link goes in whether or not the create succeeds, so a
             // failure just leaves the old lazy-create-on-visit behaviour.
             const createAndInsertLink = (bareName: string, target: string, date?: string) => {
+              // Start the request BEFORE insertLink: that closes the dialog and
+              // unmounts this tree, and a create fired after it was seen to go
+              // missing intermittently. The link still goes in immediately -
+              // the create is not awaited - so the editor stays snappy.
+              const created = api.sheets.create(ct.id, bareName, date ? { date } : undefined)
               insertLink(target)
-              void api.sheets
-                .create(ct.id, bareName, date ? { date } : undefined)
+              void created
                 .then(() => invalidateSheetList())
                 .catch((e) => console.error('Failed to create sheet from the palette:', e))
             }

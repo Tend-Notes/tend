@@ -76,8 +76,14 @@ try {
   console.log('editor text:', JSON.stringify(blockText))
   check('inserted [[books/MyNovel/Chapter One]] wiki-link', blockText.includes('[[books/MyNovel/Chapter One]]'))
 
-  // The entry is created with the link, not on first visit.
-  const eager = (await (await fetch(`${API}/sheets/book`)).json()).map((s) => s.name)
+  // The entry is created with the link, not on first visit. The create runs in
+  // the background behind the link insert, so poll for it.
+  let eager = []
+  for (let i = 0; i < 40; i++) {
+    eager = (await (await fetch(`${API}/sheets/book`)).json()).map((s) => s.name)
+    if (eager.includes('books/MyNovel/Chapter One')) break
+    await new Promise((r) => setTimeout(r, 200))
+  }
   console.log('book sheets before visiting:', JSON.stringify(eager))
   check('entry exists before anyone visits the link', eager.includes('books/MyNovel/Chapter One'))
 
