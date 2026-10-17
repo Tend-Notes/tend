@@ -219,7 +219,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 // Block data format for API requests
-interface BlockData {
+export interface BlockData {
   uuid: string
   content: string
   parent_uuid: string | null
