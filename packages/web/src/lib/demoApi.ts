@@ -21,37 +21,19 @@ import { v4 as uuidv4 } from 'uuid'
 // Re-export types that don't change
 export { VersionConflictError } from './api'
 // Reuse the canonical task types from api.ts (single source of truth).
-import type { TaskItem, TaskList } from './api'
-
-// ============================================================================
-// Block data format for API requests (matches api.ts)
-// ============================================================================
-
-interface BlockData {
-  uuid: string
-  content: string
-  parent_uuid: string | null
-  children: string[]
-  collapsed: boolean
-  properties: Record<string, string>
-}
-
-// Convert frontend Block to API format
-export function blockToApiFormat(block: Block): BlockData {
-  return {
-    uuid: block.uuid,
-    content: block.content,
-    parent_uuid: block.parentUuid,
-    children: block.children,
-    collapsed: block.collapsed,
-    properties: block.properties,
-  }
-}
-
-// Convert Page blocks to API format
-export function pageBlocksToApiFormat(page: Page): BlockData[] {
-  return Object.values(page.blocks).map(blockToApiFormat)
-}
+import type {
+  BlockData,
+  ContentType,
+  Garden,
+  GardensResponse,
+  SearchResponse,
+  SearchStatus,
+  TagInfo,
+  TaskItem,
+  TaskList,
+  WhoamiResponse,
+  WikilinkTargetsResponse,
+} from './api'
 
 // Convert BlockData array back to Page.blocks format
 function blocksDataToPageBlocks(blocksData: BlockData[]): Record<string, Block> {
@@ -287,21 +269,6 @@ function formatJournalTitle(date: string): string {
 // Search API (disabled in demo mode)
 // ============================================================================
 
-export type IndexStatus = 'disabled' | 'ready' | 'building' | 'not_built' | 'expired'
-
-export interface SearchStatus {
-  indexStatus: IndexStatus
-  numDocs?: number
-  encrypted: boolean
-  indexOnDisk: boolean
-  message?: string
-}
-
-export interface SearchResponse {
-  results: never[]
-  status: SearchStatus
-}
-
 const DEMO_SEARCH_STATUS: SearchStatus = {
   indexStatus: 'disabled',
   encrypted: false,
@@ -323,10 +290,6 @@ export const search = {
 // ============================================================================
 // Links API
 // ============================================================================
-
-export interface WikilinkTargetsResponse {
-  targets: string[]
-}
 
 export const links = {
   getWikilinkTargets: async (): Promise<WikilinkTargetsResponse> => {
@@ -414,11 +377,6 @@ export const graph = {
 // ============================================================================
 // Tags API
 // ============================================================================
-
-export interface TagInfo {
-  name: string
-  count: number
-}
 
 export const tags = {
   list: async (): Promise<TagInfo[]> => {
@@ -571,21 +529,6 @@ export const git = {
 // Gardens API (single fixed garden in demo mode)
 // ============================================================================
 
-export interface Garden {
-  id: string
-  name: string
-  path: string
-  encrypted?: boolean
-  searchEnabled?: boolean
-  indexTtlHours?: number
-}
-
-export interface GardensResponse {
-  gardens: Garden[]
-  active: string
-  archived?: never[]
-}
-
 const DEMO_GARDEN: Garden = {
   id: 'demo',
   name: 'Demo Garden',
@@ -675,14 +618,6 @@ export const templates = {
 // Content Types API
 // ============================================================================
 
-export interface ContentType {
-  id: string
-  name: string
-  directory: string
-  organization: 'flat' | 'dateNamed' | 'dateFoldered' | 'namespaced'
-  template: string
-}
-
 const DEFAULT_CONTENT_TYPES: ContentType[] = [
   { id: 'page', name: 'Pages', directory: 'pages', organization: 'flat', template: '' },
   { id: 'journal', name: 'Journals', directory: 'journals', organization: 'dateNamed', template: '' },
@@ -768,10 +703,6 @@ export const sheets = {
 // Identity API
 // ============================================================================
 
-export interface WhoamiResponse {
-  username: string
-}
-
 export const identity = {
   whoami: async (): Promise<WhoamiResponse> => ({
     username: 'demo',
@@ -845,10 +776,6 @@ export const blocks = {
 // ============================================================================
 
 export const importApi = {
-  logseq: async () => {
-    throw new Error('Import is not available in demo mode')
-  },
-
   uploadLogseqZip: async () => {
     throw new Error('Import is not available in demo mode')
   },
