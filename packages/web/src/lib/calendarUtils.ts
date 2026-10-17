@@ -52,3 +52,12 @@ export function parseCalendarDate(dateStr: string): { year: number; month: numbe
   const [year, month, day] = dateStr.split('-').map(Number)
   return { year, month: month - 1, day }
 }
+
+/**
+ * Today's date split into the parts the calendar grids compare against.
+ * Both pickers derived this the same way.
+ */
+export function todayParts(): { year: number; month: number; day: number } {
+  const now = new Date()
+  return { year: now.getFullYear(), month: now.getMonth(), day: now.getDate() }
+}

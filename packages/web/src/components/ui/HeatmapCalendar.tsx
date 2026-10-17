@@ -3,14 +3,8 @@
 
 import { useMemo, useState, useRef, useEffect } from 'react'
 import { journals as journalsApi } from '../../lib/api'
-import {
-  getDaysInMonth,
-  getFirstDayOfMonth,
-  formatCalendarDate,
-  parseCalendarDate,
-  MONTH_NAMES,
-  DAY_NAMES,
-} from '../../lib/calendarUtils'
+import { parseCalendarDate, todayParts } from '../../lib/calendarUtils'
+import { MonthGrid } from './MonthGrid'
 import { usePageStore } from '../../stores/pageStore'
 import type { PageMeta } from '../../types'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -44,14 +38,9 @@ export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = 
   const popoverRef = useRef<HTMLDivElement>(null)
 
   // Parse current date or use today
-  const today = useMemo(() => {
-    const now = new Date()
-    return { year: now.getFullYear(), month: now.getMonth(), day: now.getDate() }
-  }, [])
+  const today = useMemo(() => todayParts(), [])
 
   const initialDate = currentDate ? parseCalendarDate(currentDate) : today
-  const [viewYear, setViewYear] = useState(initialDate.year)
-  const [viewMonth, setViewMonth] = useState(initialDate.month)
 
   // Fetch journals on mount (only needed for the heatmap shading).
   useEffect(() => {
@@ -86,48 +75,11 @@ export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = 
     return map
   }, [journals])
 
-  // Navigate months
-  const goToPrevMonth = () => {
-    if (viewMonth === 0) {
-      setViewMonth(11)
-      setViewYear(viewYear - 1)
-    } else {
-      setViewMonth(viewMonth - 1)
-    }
-  }
-
-  const goToNextMonth = () => {
-    if (viewMonth === 11) {
-      setViewMonth(0)
-      setViewYear(viewYear + 1)
-    } else {
-      setViewMonth(viewMonth + 1)
-    }
-  }
-
-  const goToToday = () => {
-    setViewYear(today.year)
-    setViewMonth(today.month)
-  }
-
   // Handle day click — select as a date if a handler was given, else navigate.
   const handleDayClick = (dateStr: string) => {
     if (onSelectDate) onSelectDate(dateStr)
     else navigateToJournal(dateStr)
     onClose()
-  }
-
-  // Build calendar grid
-  const daysInMonth = getDaysInMonth(viewYear, viewMonth)
-  const firstDay = getFirstDayOfMonth(viewYear, viewMonth)
-
-  // Create array of day cells (including empty ones for alignment)
-  const dayCells: (number | null)[] = []
-  for (let i = 0; i < firstDay; i++) {
-    dayCells.push(null)
-  }
-  for (let day = 1; day <= daysInMonth; day++) {
-    dayCells.push(day)
   }
 
   // Intensity colors using base16 theme
@@ -147,88 +99,43 @@ export function HeatmapCalendar({ onClose, currentDate, onSelectDate, heatmap = 
       className="absolute z-50 bg-base-00 border border-base-02 rounded-lg shadow-lg p-3 w-[280px]"
       style={{ top: '100%', [align]: 0, marginTop: '4px' }}
     >
-      {/* Header with month navigation */}
-      <div className="flex items-center justify-between mb-3">
-        <button
-          onClick={goToPrevMonth}
-          className="p-1 text-base-04 hover:text-base-05 transition-colors"
-          title="Previous month"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-        </button>
+      <MonthGrid
+        initialMonth={initialDate}
+        gridOverride={
+          isLoading ? (
+            <div className="h-[180px] flex items-center justify-center text-base-04 text-sm">
+              Loading...
+            </div>
+          ) : undefined
+        }
+        renderDay={({ day, dateStr, isToday }) => {
+          const blockCount = journalMap.get(dateStr) || 0
+          const intensity = getIntensityLevel(blockCount)
+          const hasContent = blockCount > 0
+          const isSelected = currentDate === dateStr
 
-        <button
-          onClick={goToToday}
-          className="text-sm font-medium text-base-05 hover:text-base-06 transition-colors"
-          title="Go to today"
-        >
-          {MONTH_NAMES[viewMonth]} {viewYear}
-        </button>
-
-        <button
-          onClick={goToNextMonth}
-          className="p-1 text-base-04 hover:text-base-05 transition-colors"
-          title="Next month"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-        </button>
-      </div>
-
-      {/* Day names header */}
-      <div className="grid grid-cols-7 gap-1 mb-1">
-        {DAY_NAMES.map((day) => (
-          <div key={day} className="text-center text-xs text-base-04 font-medium py-1">
-            {day}
-          </div>
-        ))}
-      </div>
-
-      {/* Calendar grid */}
-      {isLoading ? (
-        <div className="h-[180px] flex items-center justify-center text-base-04 text-sm">
-          Loading...
-        </div>
-      ) : (
-        <div className="grid grid-cols-7 gap-1">
-          {dayCells.map((day, index) => {
-            if (day === null) {
-              return <div key={`empty-${index}`} className="w-8 h-8" />
-            }
-
-            const dateStr = formatCalendarDate(viewYear, viewMonth, day)
-            const blockCount = journalMap.get(dateStr) || 0
-            const intensity = getIntensityLevel(blockCount)
-            const hasContent = blockCount > 0
-            const isToday = viewYear === today.year && viewMonth === today.month && day === today.day
-            const isSelected = currentDate === dateStr
-
-            return (
-              <button
-                key={day}
-                onClick={() => handleDayClick(dateStr)}
-                className={`
+          return (
+            <button
+              key={day}
+              onClick={() => handleDayClick(dateStr)}
+              className={`
                   w-8 h-8 rounded text-xs font-medium transition-all
                   ${isToday ? 'ring-1 ring-base-0D ring-offset-1 ring-offset-base-00' : ''}
                   ${isSelected ? 'ring-2 ring-base-0E' : ''}
                   ${heatmap && hasContent ? 'hover:ring-1 hover:ring-base-04' : 'hover:bg-base-01'}
                 `}
-                style={heatmap ? {
-                  backgroundColor: intensityColors[intensity],
-                  opacity: hasContent ? intensityOpacity[intensity] : 1,
-                  color: hasContent && intensity >= 2 ? 'var(--base00)' : 'var(--base05)',
-                } : { color: 'var(--base05)' }}
-                title={heatmap ? (hasContent ? `${blockCount} block${blockCount === 1 ? '' : 's'}` : 'No journal entry') : dateStr}
-              >
-                {day}
-              </button>
-            )
-          })}
-        </div>
-      )}
+              style={heatmap ? {
+                backgroundColor: intensityColors[intensity],
+                opacity: hasContent ? intensityOpacity[intensity] : 1,
+                color: hasContent && intensity >= 2 ? 'var(--base00)' : 'var(--base05)',
+              } : { color: 'var(--base05)' }}
+              title={heatmap ? (hasContent ? `${blockCount} block${blockCount === 1 ? '' : 's'}` : 'No journal entry') : dateStr}
+            >
+              {day}
+            </button>
+          )
+        }}
+      />
 
       {/* Legend (heatmap only) */}
       {heatmap && (
