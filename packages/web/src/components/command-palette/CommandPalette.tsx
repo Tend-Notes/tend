@@ -365,6 +365,24 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
             // Filter predicate for the picker: match the leaf title OR the full name.
             const matchSheet = (s: PageMeta, q: string) =>
               nameOf(s).toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
+            // Create the sheet the palette just named, then insert its link.
+            //
+            // A link typed by hand stays unresolved until visited - that is what
+            // the missing-link styling and the wikilink autocomplete are for -
+            // but naming a sheet in this dialog is an explicit "make this", so
+            // it should exist immediately (the compilation level already works
+            // this way). Deliberately does NOT record a recent-sheet access:
+            // creating is not visiting, and the sidebar's recents are a visit
+            // log. The link goes in whether or not the create succeeds, so a
+            // failure just leaves the old lazy-create-on-visit behaviour.
+            const createAndInsertLink = (bareName: string, target: string, date?: string) => {
+              insertLink(target)
+              void api.sheets
+                .create(ct.id, bareName, date ? { date } : undefined)
+                .then(() => invalidateSheetList())
+                .catch((e) => console.error('Failed to create sheet from the palette:', e))
+            }
+
             // Insert a wikilink for the chosen/created target and close the panel.
             const insertLink = (target: string) => {
               const wikiLink = `[[${target}]]`
@@ -434,7 +452,10 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                     canCreate={(box) => box.trim().length > 0 && !linkingSheet.sheets.some(s => s.name === qualifyName(ct, `${compilation}/${box.trim()}`))}
                     createLabel={(box) => `Create "${box.trim()}" in ${compilation}`}
                     onPick={(s) => insertLink(linkPathOf(s))}
-                    onCreate={(box) => insertLink(qualifyName(ct, `${compilation}/${box.trim()}`))}
+                    onCreate={(box) => {
+                      const bare = `${compilation}/${box.trim()}`
+                      createAndInsertLink(bare, qualifyName(ct, bare))
+                    }}
                     onEscape={() => setLinkNamespace('')}
                     onExitBackward={() => setLinkNamespace('')}
                   />
@@ -495,7 +516,10 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                 canCreate={(box) => box.trim().length > 0 && !linkingSheet.sheets.some(s => s.name === qualifyName(ct, box.trim(), createDate))}
                 createLabel={(box) => `Create "${box.trim()}" (${ct.name})${isDated && linkDate ? ` on ${linkDate}` : ''}`}
                 onPick={(s) => insertLink(linkPathOf(s))}
-                onCreate={(box) => insertLink(qualifyName(ct, box.trim(), createDate))}
+                onCreate={(box) => {
+                  const bare = box.trim()
+                  createAndInsertLink(bare, qualifyName(ct, bare, createDate), createDate)
+                }}
                 onEscape={() => setLinkingSheet(null)}
                 fillOnNavigate={isDated}
                 headerRight={dateFilter}

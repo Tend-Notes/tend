@@ -36,16 +36,16 @@ but persist an encrypted snapshot on lock/shutdown. No per-query crypto and no
 custom `Directory` — it buys a fast unlock and restart survival, but does
 nothing about the in-memory exposure.
 
-## 2. Touch the sheet when the command palette creates a link to it
+## 2. Touch the sheet when the command palette creates a link to it — DONE
 
-`CommandPalette.tsx`'s `insertLink` only inserts `[[target]]` text, so a sheet
-created through the palette's "New / Link or create {Content Type}…" flow does
-not exist until someone visits the link. (The compilation branch in the same
-file already does the eager thing — it calls `api.sheets.createCompilation`.)
+Implemented 2026-10-17: both `onCreate` call sites in `CommandPalette.tsx` now
+create the sheet (via `createAndInsertLink`) as the link is inserted, matching
+what the compilation level already did. Creating deliberately does not record a
+recent-sheet access — the sidebar's recents are a visit log — and the link is
+inserted whether or not the create succeeds, so a failure falls back to the old
+create-on-visit behaviour. Covered by `e2e/palette-eager-create.mjs` and an
+added check in `e2e/compilations.mjs`.
 
-Create the sheet as well at the two `onCreate` call sites, so the page exists
-the moment the link is inserted.
-
-Deliberately **not** for `[[links]]` typed by hand in the editor: those should
-stay unresolved until visited, which is what the missing-link styling
+Still deliberately **not** done for `[[links]]` typed by hand in the editor:
+those stay unresolved until visited, which is what the missing-link styling
 (`--color-link-missing`) and the wikilink autocomplete depend on.
