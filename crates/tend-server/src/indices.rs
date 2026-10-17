@@ -227,12 +227,6 @@ impl TodoIndex {
         self.index_page_with_key(page, key, &ContentType::journal(), Some(date));
     }
 
-    /// Index a sheet (custom content type)
-    pub fn index_sheet(&mut self, page: &Page, content_type: &ContentType, date: Option<NaiveDate>) {
-        let key = PageKey::sheet(&content_type.id, &page.name, date);
-        self.index_page_with_key(page, key, content_type, date);
-    }
-
     /// Internal method to index with a specific key
     fn index_page_with_key(
         &mut self,
@@ -281,16 +275,6 @@ impl TodoIndex {
     /// Remove all todos from a specific page
     pub fn remove_page(&mut self, key: &PageKey) {
         self.tasks.remove(key);
-    }
-
-    /// Remove a regular page from the index
-    pub fn remove_regular_page(&mut self, name: &str) {
-        self.remove_page(&PageKey::page(name));
-    }
-
-    /// Remove a journal from the index
-    pub fn remove_journal(&mut self, date: NaiveDate) {
-        self.remove_page(&PageKey::journal(date));
     }
 
     /// Get all tasks across all pages

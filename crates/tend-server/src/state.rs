@@ -532,19 +532,6 @@ impl GardenState {
         let _ = tokio::fs::write(&last_use_path, timestamp.to_string()).await;
     }
 
-    /// Delete the search index (for TTL expiry)
-    pub async fn delete_search_index(&self) -> anyhow::Result<()> {
-        let index_path = self.data_dir.join(".tend").join("search_index");
-        if index_path.exists() {
-            tokio::fs::remove_dir_all(&index_path).await?;
-            info!("Deleted expired search index: {}", index_path.display());
-        }
-        // Update status
-        let mut status = self.index_status.write().await;
-        *status = IndexStatus::Expired;
-        Ok(())
-    }
-
     /// Drop the in-memory search index if its TTL has elapsed.
     ///
     /// Encrypted gardens hold the index in RAM (never on disk), so this is the
@@ -1748,15 +1735,6 @@ impl AppState {
     /// GC task) can take per-garden write locks without holding the map.
     pub async fn loaded_user_states(&self) -> Vec<Arc<UserState>> {
         self.user_states.read().await.values().cloned().collect()
-    }
-
-    /// Broadcast an event to all connected WebSocket clients
-    pub fn broadcast(&self, event: WsEvent) {
-        // Ignore errors (no subscribers is fine)
-        let _ = self.event_sender.send(BroadcastEvent {
-            username: None, // Send to all users
-            event,
-        });
     }
 
     /// Broadcast an event to a specific user's WebSocket connections

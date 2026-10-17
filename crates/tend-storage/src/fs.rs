@@ -274,10 +274,6 @@ impl FileManager {
     }
 
     /// Get path to a page file
-    pub fn page_path(&self, name: &str) -> PathBuf {
-        self.root.join("pages").join(format!("{}.md", encode_filename(name)))
-    }
-
     /// Check if a path is one we're currently writing
     pub async fn is_pending_write(&self, path: &Path) -> bool {
         self.pending_writes.read().await.contains(path)

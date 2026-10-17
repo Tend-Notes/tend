@@ -136,29 +136,6 @@ impl Page {
         self.blocks.get(uuid)
     }
 
-    /// Get a mutable reference to a block
-    pub fn get_block_mut(&mut self, uuid: &Uuid) -> Option<&mut Block> {
-        self.blocks.get_mut(uuid)
-    }
-
-    /// Get all blocks in tree order (depth-first)
-    pub fn blocks_in_order(&self) -> Vec<&Block> {
-        let mut result = Vec::new();
-        for root_uuid in &self.root_blocks {
-            self.collect_blocks_recursive(root_uuid, &mut result);
-        }
-        result
-    }
-
-    fn collect_blocks_recursive<'a>(&'a self, uuid: &Uuid, result: &mut Vec<&'a Block>) {
-        if let Some(block) = self.blocks.get(uuid) {
-            result.push(block);
-            for child_uuid in &block.children {
-                self.collect_blocks_recursive(child_uuid, result);
-            }
-        }
-    }
-
     /// Get all wiki-links in this page
     pub fn all_wiki_links(&self) -> Vec<String> {
         let mut links = Vec::new();
@@ -169,30 +146,6 @@ impl Page {
         links.sort();
         links.dedup();
         links
-    }
-
-    /// Get all block references in this page
-    pub fn all_block_refs(&self) -> Vec<Uuid> {
-        let mut refs = Vec::new();
-        for block in self.blocks.values() {
-            refs.extend(block.extract_block_refs());
-        }
-        // Deduplicate
-        refs.sort();
-        refs.dedup();
-        refs
-    }
-
-    /// Get all tags in this page
-    pub fn all_tags(&self) -> Vec<String> {
-        let mut tags = Vec::new();
-        for block in self.blocks.values() {
-            tags.extend(block.extract_tags());
-        }
-        // Deduplicate
-        tags.sort();
-        tags.dedup();
-        tags
     }
 
     /// Check if this page is empty (no blocks or only empty blocks)

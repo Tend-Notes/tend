@@ -362,12 +362,6 @@ fn default_data_dir() -> PathBuf {
     gardens_root().join("Notes")
 }
 
-// Keep old name as alias for backwards compatibility
-#[deprecated(note = "Use base_dir() instead")]
-pub fn base_data_dir() -> PathBuf {
-    base_dir()
-}
-
 fn default_static_dir() -> PathBuf {
     std::env::var("TEND_STATIC_DIR")
         .map(PathBuf::from)
@@ -603,25 +597,6 @@ impl Config {
         Ok(config)
     }
 
-    /// Save configuration to file with restrictive permissions
-    pub fn save(&self) -> anyhow::Result<()> {
-        let base = base_dir();
-        std::fs::create_dir_all(&base)?;
-
-        let config_path = base.join("config.toml");
-        let content = toml::to_string_pretty(self)?;
-        std::fs::write(&config_path, content)?;
-
-        // Set restrictive permissions (0600 - owner read/write only)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let permissions = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(&config_path, permissions)?;
-        }
-
-        Ok(())
-    }
 }
 
 #[cfg(test)]
