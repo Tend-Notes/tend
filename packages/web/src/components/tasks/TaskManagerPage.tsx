@@ -10,6 +10,7 @@ import {
   selectNoDueDate,
   selectAllActive,
   selectCompleted,
+  isCompleted,
   type Task,
 } from '../../stores/taskStore';
 import { renderContentWithWikilinks } from '../../lib/renderTaskContent';
@@ -76,7 +77,7 @@ function TaskRow({
   const [editingText, setEditingText] = useState(false);
   const [draft, setDraft] = useState(task.content);
 
-  const isCompleted = task.status === 'DONE' || task.status === 'NEVER';
+  const completed = isCompleted(task);
 
   const cycleStatus = () => {
     const next = nextStatusKeyword(task.status);
@@ -153,7 +154,7 @@ function TaskRow({
         blockUuid={task.uuid}
         properties={properties}
         onPropertyChange={(key, value) => updateTask(task.uuid, { properties: { [key]: value } })}
-        isCompleted={isCompleted}
+        isCompleted={completed}
         taskContent={task.content}
         taskPage={{ name: task.pageName, contentType: task.contentType, sheetDate: task.journalDate }}
       />
