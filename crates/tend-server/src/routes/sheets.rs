@@ -23,23 +23,17 @@ use super::helpers::{apply_block_updates, apply_property_updates, default_about_
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
 
-/// Build the full page name for a sheet including the directory path.
-/// This is used for block index storage and navigation.
+/// Resolve the date a sheet is filed under: a date-foldered type always has
+/// one, defaulting to today when the request omitted it.
 ///
-/// Formats:
-/// - Non-date: `directory/name` (e.g., "person/John Smith")
-/// - SaveByDate: `directory/YYYY-MM-DD/name` (e.g., "meeting/2026-01-30/Standup")
-fn build_sheet_page_name(content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> String {
-    if content_type.is_date_foldered() {
-        if let Some(d) = date {
-            format!("{}/{}/{}", content_type.directory, d.format("%Y-%m-%d"), name)
-        } else {
-            // Default to today if no date provided
-            let today = chrono::Local::now().date_naive();
-            format!("{}/{}/{}", content_type.directory, today.format("%Y-%m-%d"), name)
-        }
+/// Date resolution belongs here, at the edge. `tend_core::qualify_name` is the
+/// single authority on the name *shape* and has no business guessing a date -
+/// it omits the segment when there is none.
+fn resolve_sheet_date(content_type: &ContentType, date: Option<NaiveDate>) -> Option<NaiveDate> {
+    if content_type.is_date_foldered() && date.is_none() {
+        Some(chrono::Local::now().date_naive())
     } else {
-        format!("{}/{}", content_type.directory, name)
+        date
     }
 }
 
@@ -272,12 +266,8 @@ pub async fn create_sheet(
     let content_type = get_content_type(&content_type_id, &user.username)?;
     let date = parse_date(&req.date)?;
 
-    // For save_by_date types, use today if no date provided
-    let date = if content_type.is_date_foldered() && date.is_none() {
-        Some(chrono::Local::now().date_naive())
-    } else {
-        date
-    };
+    // For date-foldered types, use today if no date provided
+    let date = resolve_sheet_date(&content_type, date);
 
     // Namespaced (Compilation) entries must carry a namespace: "namespace/name".
     if content_type.is_namespaced() && !req.name.contains('/') {
@@ -299,7 +289,7 @@ pub async fn create_sheet(
 
     // Create the page with correct content type
     // Use the full path as the page name for block index storage
-    let full_page_name = build_sheet_page_name(&content_type, &req.name, date);
+    let full_page_name = tend_core::qualify_name(&content_type, &req.name, date);
     let mut page = Page::new_sheet(&full_page_name, &content_type_id, date);
     // Title is the display name = the bare name as given. For a namespaced entry
     // that's "{compilation}/{leaf}" (e.g. "Acme/Chapter 14") — the same form
@@ -417,7 +407,8 @@ pub async fn create_compilation(
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
 
     let rel_name = format!("{}/About", namespace);
-    let about_path = build_sheet_page_name(&content_type, &rel_name, None);
+    let about_path =
+        tend_core::qualify_name(&content_type, &rel_name, resolve_sheet_date(&content_type, None));
 
     let user_state = state.get_user_state(&user.username).await?;
     let garden = user_state.garden.read().await;
@@ -468,7 +459,7 @@ pub async fn update_sheet(
         .unwrap_or_else(|_| {
             // For custom content types, use the full directory path as page name
             let page_name = if content_type.id != "page" && content_type.id != "journal" {
-                build_sheet_page_name(&content_type, &path.name, date)
+                tend_core::qualify_name(&content_type, &path.name, resolve_sheet_date(&content_type, date))
             } else {
                 path.name.clone()
             };
@@ -479,7 +470,8 @@ pub async fn update_sheet(
 
     // For custom content types, ensure page.name uses the full path format for block index
     if content_type.id != "page" && content_type.id != "journal" && !page.name.contains('/') {
-        page.name = build_sheet_page_name(&content_type, &path.name, date);
+        page.name =
+            tend_core::qualify_name(&content_type, &path.name, resolve_sheet_date(&content_type, date));
     }
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
