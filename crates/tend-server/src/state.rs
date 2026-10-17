@@ -192,6 +192,15 @@ impl UnifiedFileManager {
         }
     }
 
+    /// A sheet's file content as text, unparsed (decrypted for encrypted
+    /// gardens). For callers that need the raw bytes without a `Page`.
+    pub async fn read_sheet_raw(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> Result<String, StorageError> {
+        match self {
+            Self::Plain(fm) => fm.read_sheet_raw(content_type, name, date).await,
+            Self::Encrypted(efm) => efm.read_sheet_raw(content_type, name, date).await,
+        }
+    }
+
     /// List sheets as lightweight `PageMeta` derived from filenames only — no
     /// file reads or decrypts. Only `name` (canonical) and `journal_date` are
     /// meaningful; used to resolve which pages exist / their hashes cheaply.

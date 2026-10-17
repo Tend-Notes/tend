@@ -39,6 +39,44 @@ pub struct ReindexResponse {
     pub message: String,
 }
 
+/// Rebuild every index from disk, in dependency order, collecting failures
+/// rather than stopping at the first one.
+///
+/// Returns `(step, error)` pairs for whatever failed; an empty vec means all
+/// five rebuilt. The block index is the exception that is never reported: it
+/// does not exist for encrypted gardens, so "skipped" is normal and both
+/// callers only ever logged it.
+async fn rebuild_all_indices(
+    garden: &crate::state::GardenState,
+    content_types: &[tend_core::ContentType],
+) -> Vec<(&'static str, anyhow::Error)> {
+    let mut failures = Vec::new();
+
+    if let Err(e) = garden.rebuild_link_index(content_types).await {
+        failures.push(("link", e));
+    }
+
+    if garden.search_config.enabled {
+        if let Err(e) = garden.rebuild_search_index(content_types).await {
+            failures.push(("search", e));
+        }
+    }
+
+    if let Err(e) = garden.rebuild_block_index(content_types).await {
+        tracing::warn!("Block index rebuild skipped: {}", e);
+    }
+
+    if let Err(e) = garden.rebuild_tag_index(content_types).await {
+        failures.push(("tag", e));
+    }
+
+    if let Err(e) = garden.rebuild_todo_index(content_types).await {
+        failures.push(("todo", e));
+    }
+
+    failures
+}
+
 /// Rebuild all indices from disk
 ///
 /// This endpoint reads ALL pages and journals from disk and rebuilds:
@@ -72,76 +110,39 @@ pub async fn reindex(
         user.username, sheets_count
     );
 
-    // 1. Rebuild link index (requires read lock)
+    // Rebuild every index, then read the counts back out.
     {
         let garden = user_state.garden.read().await;
-        garden
-            .rebuild_link_index(&content_types)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to rebuild link index: {}", e)))?;
+        if let Some((step, err)) = rebuild_all_indices(&garden, &content_types).await.into_iter().next() {
+            return Err(AppError::Internal(format!(
+                "Failed to rebuild {} index: {}",
+                step, err
+            )));
+        }
     }
 
-    // 2. Rebuild search index in place (uses existing writer to avoid lock conflict)
     let search_doc_count = {
         let garden = user_state.garden.read().await;
         if garden.search_config.enabled {
-            garden
-                .rebuild_search_index(&content_types)
-                .await
-                .map_err(|e| AppError::Internal(format!("Failed to rebuild search index: {}", e)))?;
-
-            garden
-                .search_index
-                .as_ref()
-                .map(|idx| idx.clone())
+            garden.search_index.clone()
         } else {
             None
         }
     };
-
-    // Get the doc count outside the read lock
     let search_doc_count = if let Some(idx) = search_doc_count {
         Some(idx.read().await.num_docs())
     } else {
         None
     };
 
-    // 3. Rebuild block index (requires read lock)
     let block_count = {
         let garden = user_state.garden.read().await;
-        match garden.rebuild_block_index(&content_types).await {
-            Ok(()) => {
-                if let Some(block_index) = &garden.block_index {
-                    Some(block_index.lock().await.len().unwrap_or(0))
-                } else {
-                    None
-                }
-            }
-            Err(e) => {
-                // Block index might not be available (encrypted garden) - that's ok
-                tracing::warn!("Block index rebuild skipped: {}", e);
-                None
-            }
+        if let Some(block_index) = &garden.block_index {
+            Some(block_index.lock().await.len().unwrap_or(0))
+        } else {
+            None
         }
     };
-
-    // 4. Rebuild tag index (requires read lock)
-    {
-        let garden = user_state.garden.read().await;
-        garden
-            .rebuild_tag_index(&content_types)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to rebuild tag index: {}", e)))?;
-    }
-
-    // 5. Rebuild todo index (requires read lock and content types)
-    {
-        let garden = user_state.garden.read().await;
-        garden
-            .rebuild_todo_index(&content_types)
-            .await
-            .map_err(|e| AppError::Internal(format!("Failed to rebuild todo index: {}", e)))?;
-    }
 
     // Get final counts
     let (link_entries, tag_count, task_count) = {
@@ -213,46 +214,24 @@ pub async fn stabilize(
             }
         };
 
-        let root = garden.file_manager.root().to_path_buf();
-
         for sheet_meta in &sheets {
-            // Build the file path from root + directory structure
-            let file_path = if ct.id == "journal" {
-                if let Some(date) = sheet_meta.journal_date {
-                    root.join("journals").join(format!("{}.md", date.format("%Y-%m-%d")))
-                } else {
-                    failed += 1;
-                    continue;
-                }
-            } else if ct.id == "page" {
-                root.join("pages").join(format!("{}.md", sheet_meta.name))
-            } else if ct.is_date_foldered() {
-                if let Some(date) = sheet_meta.journal_date {
-                    // Extract the sheet name from the full path (directory/date/name)
-                    let name_part = sheet_meta.name
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or(&sheet_meta.name);
-                    root.join(&ct.directory)
-                        .join(date.format("%Y-%m-%d").to_string())
-                        .join(format!("{}.md", name_part))
-                } else {
-                    root.join(&ct.directory).join(format!("{}.md", sheet_meta.name))
-                }
-            } else {
-                // Strip directory prefix from name if present
-                let name_part = if sheet_meta.name.starts_with(&ct.directory) {
-                    &sheet_meta.name[ct.directory.len() + 1..]
-                } else {
-                    &sheet_meta.name
-                };
-                root.join(&ct.directory).join(format!("{}.md", name_part))
-            };
+            // Split the canonical name back into the bare name + date the file
+            // manager expects, then let it find and read the file: it owns
+            // filename encoding, the legacy un-encoded fallback, and decryption.
+            // Hand-building the path here missed all three, so encoded-name
+            // sheets were counted failed and every sheet in an encrypted garden
+            // read back as ciphertext.
+            let (bare_name, split_date) = tend_core::split_name(ct, &sheet_meta.name);
+            let sheet_date = sheet_meta.journal_date.or(split_date);
 
-            // Read the raw file content to check for footer
-            let raw = match tokio::fs::read_to_string(&file_path).await {
+            let raw = match garden
+                .file_manager
+                .read_sheet_raw(ct, bare_name, sheet_date)
+                .await
+            {
                 Ok(content) => content,
-                Err(_) => {
+                Err(e) => {
+                    tracing::warn!("Failed to read {}/{} for stabilization: {}", ct.id, sheet_meta.name, e);
                     failed += 1;
                     continue;
                 }
@@ -310,46 +289,9 @@ pub async fn stabilize(
     if stabilized > 0 {
         info!("Rebuilding indices after stabilization...");
 
-        // Rebuild link index
-        {
-            let garden = user_state.garden.read().await;
-            if let Err(e) = garden.rebuild_link_index(&content_types).await {
-                tracing::warn!("Failed to rebuild link index after stabilize: {}", e);
-            }
-        }
-
-        // Rebuild search index in place (uses existing writer to avoid lock conflict)
-        {
-            let garden = user_state.garden.read().await;
-            if garden.search_config.enabled {
-                if let Err(e) = garden.rebuild_search_index(&content_types).await {
-                    tracing::warn!("Failed to rebuild search index after stabilize: {}", e);
-                }
-            }
-        }
-
-        // Rebuild block index
-        {
-            let garden = user_state.garden.read().await;
-            if let Err(e) = garden.rebuild_block_index(&content_types).await {
-                tracing::warn!("Block index rebuild after stabilize skipped: {}", e);
-            }
-        }
-
-        // Rebuild tag index
-        {
-            let garden = user_state.garden.read().await;
-            if let Err(e) = garden.rebuild_tag_index(&content_types).await {
-                tracing::warn!("Failed to rebuild tag index after stabilize: {}", e);
-            }
-        }
-
-        // Rebuild todo index
-        {
-            let garden = user_state.garden.read().await;
-            if let Err(e) = garden.rebuild_todo_index(&content_types).await {
-                tracing::warn!("Failed to rebuild todo index after stabilize: {}", e);
-            }
+        let garden = user_state.garden.read().await;
+        for (step, err) in rebuild_all_indices(&garden, &content_types).await {
+            tracing::warn!("Failed to rebuild {} index after stabilize: {}", step, err);
         }
     }
 
