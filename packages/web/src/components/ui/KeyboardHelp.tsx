@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
 // Keyboard shortcuts help overlay
 
+import { ModalShell } from './ModalShell'
+
 interface KeyboardHelpProps {
   open: boolean
   onClose: () => void
@@ -41,15 +43,11 @@ function KeyboardHelp({ open, onClose }: KeyboardHelpProps) {
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
-      <div
-        className="overlay-backdrop fixed inset-0 bg-black/50 animate-fade-in"
-        onClick={onClose}
-      />
-
-      {/* Dialog */}
-      <div className="overlay-content relative bg-base-01 rounded-lg shadow-2xl border border-base-02 p-6 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+    <ModalShell
+      onBackdropClick={onClose}
+      maxWidth="max-w-2xl"
+      panelClassName="p-6 mx-4 max-h-[80vh] overflow-y-auto"
+    >
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-medium text-base-06">Keyboard Shortcuts</h2>
           <button
@@ -97,8 +95,7 @@ function KeyboardHelp({ open, onClose }: KeyboardHelpProps) {
             <kbd className="px-1.5 py-0.5 bg-base-02 text-base-05 rounded text-xs">/</kbd> to close
           </span>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   )
 }
 
