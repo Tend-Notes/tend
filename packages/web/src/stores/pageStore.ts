@@ -359,6 +359,126 @@ function scheduleDebouncedSave(get: StoreGet, set: ImmerSet) {
   }, SAVE_DEBOUNCE_MS)
 }
 
+
+/**
+ * One load sequence for every sheet the editor opens — page, custom-type
+ * sheet, or journal.
+ *
+ * navigateToPage and navigateToJournal used to carry verbatim copies of all of
+ * it: flush the pending save, reset the save timestamp and sync status, fetch,
+ * compare against a stored draft, commit the page, record the access, push
+ * history. The only real differences are which fetch runs and whether a 404
+ * means "create it", both of which are parameters here.
+ */
+interface LoadSheetArgs {
+  /** History/URL kind, and the name recorded as currentPageName. */
+  urlType: 'page' | 'content-type' | 'journal'
+  name: string
+  pushHistory: boolean
+  /** Fetch the sheet from the server. */
+  fetchPage: () => Promise<Page>
+  /** Create it when the fetch 404s. Omitted for journals, which always exist. */
+  createOn404?: () => Promise<{ page: Page; cursorPosition: CursorPosition | null }>
+  /** Fallback message when the fetch fails for any other reason. */
+  loadErrorMessage: string
+}
+
+async function loadSheet(
+  set: (fn: (state: PageState) => void) => void,
+  get: () => PageState,
+  args: LoadSheetArgs
+): Promise<void> {
+  const { urlType, name, pushHistory, fetchPage, createOn404, loadErrorMessage } = args
+
+  // Flush any pending saves before navigating away
+  await get().flushPendingSave()
+
+  // Reset save timestamp when navigating to prevent old timestamps
+  // from affecting the new page's file watcher handling
+  lastSaveTimestamp = 0
+
+  set((state) => {
+    state.isLoading = true
+    state.error = null
+    state.pendingDraftRecovery = null
+    state.viewingTasks = false
+  })
+
+  // Reset sync status when navigating to a new page
+  useSyncStatusStore.getState().reset()
+
+  const pushUrl = () => {
+    if (!pushHistory) return
+    const url = buildUrlPath(urlType, name)
+    window.history.pushState({ type: urlType, name }, '', url)
+  }
+
+  try {
+    const page = await fetchPage()
+
+    // Check for stale draft
+    const draft = await draftStore.getDraft(page.name)
+    if (draft && draft.serverVersion !== page.modifiedAt) {
+      // Found a draft that differs from server - offer recovery
+      set((state) => {
+        state.currentPage = page
+        state.currentPageName = name
+        state.isLoading = false
+        state.pendingDraftRecovery = {
+          pageName: draft.pageName,
+          blocks: draft.blocks,
+          rootBlocks: draft.rootBlocks,
+          savedAt: draft.savedAt,
+        }
+      })
+    } else {
+      // No stale draft - clear any existing draft for this page
+      if (draft) {
+        await draftStore.deleteDraft(page.name)
+      }
+      set((state) => {
+        state.currentPage = page
+        state.currentPageName = name
+        state.isLoading = false
+      })
+    }
+
+    // Record this access in recent sheets
+    recordSheetAccess(page)
+
+    // Update browser history
+    pushUrl()
+  } catch (e) {
+    // If the sheet doesn't exist (404), create it
+    if (createOn404 && e instanceof Error && e.message.includes('404')) {
+      try {
+        const { page: newPage, cursorPosition } = await createOn404()
+        set((state) => {
+          state.currentPage = newPage
+          state.currentPageName = name
+          state.isLoading = false
+          // Store cursor position to be consumed by editor
+          state.pendingCursorPosition = cursorPosition
+        })
+        // Record this access in recent sheets
+        recordSheetAccess(newPage)
+        // Update browser history
+        pushUrl()
+      } catch (createErr) {
+        set((state) => {
+          state.error = createErr instanceof Error ? createErr.message : 'Failed to create page'
+          state.isLoading = false
+        })
+      }
+      return
+    }
+    set((state) => {
+      state.error = e instanceof Error ? e.message : loadErrorMessage
+      state.isLoading = false
+    })
+  }
+}
+
 export const usePageStore = create<PageState>()(
   immer((set, get) => ({
     currentPage: null,
@@ -382,28 +502,11 @@ export const usePageStore = create<PageState>()(
     },
 
     navigateToPage: async (name: string, pushHistory = true) => {
-      // Flush any pending saves before navigating away
-      await get().flushPendingSave()
-
-      // Reset save timestamp when navigating to prevent old timestamps
-      // from affecting the new page's file watcher handling
-      lastSaveTimestamp = 0
-
-      set((state) => {
-        state.isLoading = true
-        state.error = null
-        state.pendingDraftRecovery = null
-        state.viewingTasks = false
-      })
-
-      // Reset sync status when navigating to a new page
-      useSyncStatusStore.getState().reset()
-
-      // Check if this is a content type path (e.g., "person/John Smith" or "meeting/2026-01-23/Name")
-      // by looking for a matching content type directory
+      // Check if this is a content type path (e.g., "person/John Smith" or
+      // "meeting/2026-01-23/Name") by looking for a matching content type
+      // directory. Decompose via the shared name authority: a known directory
+      // prefix means a custom type; anything else is a page (the bare fallback).
       const contentTypes = useSettingsStore.getState().contentTypes
-      // Decompose via the shared name authority: a known directory prefix means
-      // a custom type; anything else is a page (the bare fallback).
       const parsed = parseName(name, contentTypes)
       const contentType =
         parsed.contentTypeId === 'page'
@@ -412,160 +515,36 @@ export const usePageStore = create<PageState>()(
       const sheetName = parsed.bareName
       const sheetDate = parsed.date
 
-      try {
+      await loadSheet(set, get, {
+        urlType: contentType ? 'content-type' : 'page',
+        name,
+        pushHistory,
         // Use sheets API for content type paths, pages API for regular pages
-        const page = contentType
-          ? await api.sheets.get(contentType.id, sheetName, sheetDate)
-          : await api.pages.get(name)
-
-        // Check for stale draft
-        const draft = await draftStore.getDraft(page.name)
-        if (draft && draft.serverVersion !== page.modifiedAt) {
-          // Found a draft that differs from server - offer recovery
-          set((state) => {
-            state.currentPage = page
-            state.currentPageName = name
-            state.isLoading = false
-            state.pendingDraftRecovery = {
-              pageName: draft.pageName,
-              blocks: draft.blocks,
-              rootBlocks: draft.rootBlocks,
-              savedAt: draft.savedAt,
-            }
-          })
-        } else {
-          // No stale draft - clear any existing draft for this page
-          if (draft) {
-            await draftStore.deleteDraft(page.name)
+        fetchPage: () =>
+          contentType
+            ? api.sheets.get(contentType.id, sheetName, sheetDate)
+            : api.pages.get(name),
+        createOn404: async () => {
+          if (contentType) {
+            // Create sheet - may return cursor position from template
+            const response = await api.sheets.create(contentType.id, sheetName, { date: sheetDate })
+            return { page: response, cursorPosition: response.cursorPosition ?? null }
           }
-          set((state) => {
-            state.currentPage = page
-            state.currentPageName = name
-            state.isLoading = false
-          })
-        }
-
-        // Record this access in recent sheets
-        recordSheetAccess(page)
-
-        // Update browser history
-        if (pushHistory) {
-          // Use content-type URL path for custom content types, page path for regular pages
-          const urlType = contentType ? 'content-type' : 'page'
-          const url = buildUrlPath(urlType, name)
-          window.history.pushState({ type: urlType, name }, '', url)
-        }
-      } catch (e) {
-        // If page doesn't exist (404), create it
-        if (e instanceof Error && e.message.includes('404')) {
-          try {
-            // Create sheet or page based on content type
-            let newPage: Page
-            let cursorPosition: CursorPosition | null = null
-
-            if (contentType) {
-              // Create sheet - may return cursor position from template
-              const response = await api.sheets.create(contentType.id, sheetName, { date: sheetDate })
-              // Extract cursor position before treating response as Page
-              cursorPosition = response.cursorPosition ?? null
-              newPage = response
-            } else {
-              newPage = await api.pages.create(name)
-            }
-
-            set((state) => {
-              state.currentPage = newPage
-              state.currentPageName = name
-              state.isLoading = false
-              // Store cursor position to be consumed by editor
-              state.pendingCursorPosition = cursorPosition
-            })
-            // Record this access in recent sheets
-            recordSheetAccess(newPage)
-            // Update browser history
-            if (pushHistory) {
-              const urlType = contentType ? 'content-type' : 'page'
-              const url = buildUrlPath(urlType, name)
-              window.history.pushState({ type: urlType, name }, '', url)
-            }
-            return
-          } catch (createErr) {
-            set((state) => {
-              state.error = createErr instanceof Error ? createErr.message : 'Failed to create page'
-              state.isLoading = false
-            })
-            return
-          }
-        }
-        set((state) => {
-          state.error = e instanceof Error ? e.message : 'Failed to load page'
-          state.isLoading = false
-        })
-      }
+          const page = await api.pages.create(name)
+          return { page, cursorPosition: null }
+        },
+        loadErrorMessage: 'Failed to load page',
+      })
     },
 
     navigateToJournal: async (date: string, pushHistory = true) => {
-      // Flush any pending saves before navigating away
-      await get().flushPendingSave()
-
-      // Reset save timestamp when navigating to prevent old timestamps
-      // from affecting the new page's file watcher handling
-      lastSaveTimestamp = 0
-
-      set((state) => {
-        state.isLoading = true
-        state.error = null
-        state.pendingDraftRecovery = null
-        state.viewingTasks = false
+      await loadSheet(set, get, {
+        urlType: 'journal',
+        name: date,
+        pushHistory,
+        fetchPage: () => api.journals.get(date),
+        loadErrorMessage: 'Failed to load journal',
       })
-
-      // Reset sync status when navigating to a new page
-      useSyncStatusStore.getState().reset()
-
-      try {
-        const page = await api.journals.get(date)
-
-        // Check for stale draft
-        const draft = await draftStore.getDraft(page.name)
-        if (draft && draft.serverVersion !== page.modifiedAt) {
-          // Found a draft that differs from server - offer recovery
-          set((state) => {
-            state.currentPage = page
-            state.currentPageName = date
-            state.isLoading = false
-            state.pendingDraftRecovery = {
-              pageName: draft.pageName,
-              blocks: draft.blocks,
-              rootBlocks: draft.rootBlocks,
-              savedAt: draft.savedAt,
-            }
-          })
-        } else {
-          // No stale draft - clear any existing draft for this page
-          if (draft) {
-            await draftStore.deleteDraft(page.name)
-          }
-          set((state) => {
-            state.currentPage = page
-            state.currentPageName = date
-            state.isLoading = false
-          })
-        }
-
-        // Record this access in recent sheets
-        recordSheetAccess(page)
-
-        // Update browser history
-        if (pushHistory) {
-          const url = buildUrlPath('journal', date)
-          window.history.pushState({ type: 'journal', name: date }, '', url)
-        }
-      } catch (e) {
-        set((state) => {
-          state.error = e instanceof Error ? e.message : 'Failed to load journal'
-          state.isLoading = false
-        })
-      }
     },
 
     initializeFromUrl: async () => {
