@@ -16,6 +16,16 @@ const DATE = '2099-07-07'
 await seedJournal(DATE, [{ content: 'start ' }])
 
 const sheetNames = async () => (await (await fetch(`${API}/sheets/person`)).json()).map((s) => s.name)
+// The palette inserts the link immediately and creates in the background, so
+// poll rather than sleeping a fixed amount.
+const waitForSheet = async (name, ms = 8000) => {
+  const deadline = Date.now() + ms
+  for (;;) {
+    const names = await sheetNames()
+    if (names.includes(name) || Date.now() > deadline) return names
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
 const recents = (page) => page.evaluate(() => {
   const raw = localStorage.getItem('tend-recent-sheets')
   return raw ? JSON.stringify(JSON.parse(raw)) : '(none)'
@@ -42,7 +52,7 @@ await page.waitForTimeout(1200)
 
 const text = await page.evaluate(() => document.querySelector('.outline2 .ProseMirror')?.textContent || '')
 check('link inserted', text.includes('[[people/Ada Lovelace]]'))
-const names = await sheetNames()
+const names = await waitForSheet('people/Ada Lovelace')
 console.log('sheets after create:', JSON.stringify(names))
 check('sheet exists without visiting it', names.includes('people/Ada Lovelace'))
 
