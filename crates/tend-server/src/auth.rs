@@ -86,8 +86,12 @@ pub(crate) fn validate_username(username: &str) -> Result<(), AuthError> {
     Ok(())
 }
 
-/// Extract username from headers based on config
-fn extract_username_from_headers(
+/// Extract username from headers based on config.
+///
+/// The single authority on "who is this request from": it trims the header
+/// value and validates it. `ws.rs` uses it too, so a padded header resolves to
+/// the same identity over HTTP and WebSocket.
+pub(crate) fn extract_username_from_headers(
     headers: &HeaderMap,
     config: &Config,
 ) -> Result<String, AuthError> {
