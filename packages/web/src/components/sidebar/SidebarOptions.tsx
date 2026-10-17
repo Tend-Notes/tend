@@ -11,6 +11,7 @@ import { useUIStore } from '../../stores/uiStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi, isDemoMode, checkAuthResponse } from '../../lib/api'
+import { invalidateSheetList } from '../../lib/sheetListCache'
 import {
   getDarkThemes,
   getLightThemes,
@@ -1592,6 +1593,7 @@ function GardensSection() {
       }
 
       // Update state and reset all stores to load the new garden
+      invalidateSheetList()
       setCurrentGraphId(id)
       usePageStore.getState().reset()
       useUIStore.getState().reset()
@@ -1643,6 +1645,7 @@ function GardensSection() {
         throw new Error(data.error || 'Failed to unlock garden')
       }
 
+      invalidateSheetList()
       setCurrentGraphId(unlockGardenId)
       setUnlockGardenId(null)
       // Reset all stores and load the new garden's content types and default page

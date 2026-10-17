@@ -9,6 +9,7 @@ import * as api from '../lib/api'
 import { VersionConflictError } from '../lib/api'
 import * as draftStore from '../lib/draftStore'
 import { useActivityLogStore } from './activityLogStore'
+import { invalidateSheetList } from '../lib/sheetListCache'
 import { useSyncStatusStore } from './syncStatusStore'
 import { useSettingsStore, type ContentType } from './settingsStore'
 import { parseName, splitName } from '../lib/name'
@@ -466,11 +467,13 @@ export const usePageStore = create<PageState>()(
             if (contentType) {
               // Create sheet - may return cursor position from template
               const response = await api.sheets.create(contentType.id, sheetName, { date: sheetDate })
+              invalidateSheetList()
               // Extract cursor position before treating response as Page
               cursorPosition = response.cursorPosition ?? null
               newPage = response
             } else {
               newPage = await api.pages.create(name)
+              invalidateSheetList()
             }
 
             set((state) => {
@@ -600,6 +603,7 @@ export const usePageStore = create<PageState>()(
     createPage: async (name: string) => {
       try {
         const page = await api.pages.create(name)
+        invalidateSheetList()
         set((state) => {
           state.currentPage = page
           state.currentPageName = name
@@ -631,6 +635,7 @@ export const usePageStore = create<PageState>()(
         // Use sheets API for content type paths, pages API for regular pages
         if (contentType) {
           await api.sheets.delete(contentType.id, sheetName, sheetDate)
+          invalidateSheetList()
         } else {
           await api.pages.delete(name)
         }
