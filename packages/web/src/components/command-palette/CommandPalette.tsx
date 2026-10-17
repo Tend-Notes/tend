@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { Command } from 'cmdk'
 import { useEffect, useState, useCallback } from 'react'
 import { LinkPicker } from './LinkPicker'
+import { invalidateSheetList } from '../../lib/sheetListCache'
 import { usePageStore } from '../../stores/pageStore'
 import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore, usesDate, type ContentType } from '../../stores/settingsStore'
@@ -405,7 +406,7 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
                       // About dust jacket) and refresh so it's discoverable.
                       setLinkNamespace(ns)
                       api.sheets.createCompilation(ct.id, ns)
-                        .then(() => api.sheets.list(ct.id))
+                        .then(() => { invalidateSheetList(); return api.sheets.list(ct.id) })
                         .then((sheets) => setLinkingSheet((prev) => (prev ? { ...prev, sheets } : prev)))
                         .catch((e) => console.error('Failed to create compilation:', e))
                     }}

@@ -2,7 +2,7 @@
 // Wiki-link autocomplete popup for contenteditable blocks
 
 import { useEffect, useState, useCallback, useRef } from 'react'
-import * as api from '../../lib/api'
+import { listAllSheets } from '../../lib/sheetListCache'
 import type { PageMeta } from '../../types'
 import { useSettingsStore } from '../../stores/settingsStore'
 
@@ -20,20 +20,24 @@ export function WikiLinkPopup({ query, position, onSelect, onClose }: WikiLinkPo
   const popupRef = useRef<HTMLDivElement>(null)
   const contentTypes = useSettingsStore((s) => s.contentTypes)
 
-  // Load all sheets for all content types on mount
+  // Load the sheet listing on mount. The popup mounts once per `[[`, so this
+  // goes through the shared cache rather than refetching the whole garden
+  // every time the user types a trigger. `cancelled` keeps a late response
+  // from a closed popup out of state.
   useEffect(() => {
-    Promise.all(
-      contentTypes.map(ct => api.sheets.list(ct.id).catch(() => []))
-    )
-      .then((results) => {
-        // Flatten all sheets into one list
-        const allSheets = results.flat()
+    let cancelled = false
+    listAllSheets(contentTypes)
+      .then((allSheets) => {
+        if (cancelled) return
         setPages(allSheets)
         setLoading(false)
       })
       .catch(() => {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       })
+    return () => {
+      cancelled = true
+    }
   }, [contentTypes])
 
   // Filter pages by query
