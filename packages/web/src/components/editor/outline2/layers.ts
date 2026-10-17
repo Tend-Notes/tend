@@ -22,6 +22,7 @@ import { baseKeymap, chainCommands, deleteSelection, joinBackward } from 'prosem
 import { sinkListItem, liftListItem } from 'prosemirror-schema-list'
 import { listItemType } from './schema'
 import { uuidPlugin } from './uuidPlugin'
+import { withFreshSelection } from './freshSelection'
 import { moveListItem, toggleCollapse, splitListItemCleanTask } from './commands'
 import { ListItemView } from './nodeview'
 import { formattingPlugin, type NavHandlers } from './decorations'
@@ -67,8 +68,11 @@ export function outlinerLayer(): EditorLayer {
         'Shift-Tab': chainCommands(liftListItem(listItemType), () => true),
         'Mod-]': chainCommands(sinkListItem(listItemType), () => true),
         'Mod-[': chainCommands(liftListItem(listItemType), () => true),
-        'Alt-ArrowUp': moveListItem(-1),
-        'Alt-ArrowDown': moveListItem(1),
+        // withFreshSelection: a click-moved caret reaches ProseMirror only on
+        // the browser's async selectionchange, so an Alt+Arrow pressed right
+        // after a click used to move the previously focused bullet.
+        'Alt-ArrowUp': withFreshSelection(moveListItem(-1)),
+        'Alt-ArrowDown': withFreshSelection(moveListItem(1)),
         'Mod-.': toggleCollapse(),
         Backspace: chainCommands(deleteSelection, joinBackward),
       }),
