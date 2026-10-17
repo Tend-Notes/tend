@@ -61,20 +61,22 @@ export function outlinerLayer(): EditorLayer {
         // splitListItem's own empty-attrs override only applies to end-of-line
         // splits; splitListItemCleanTask clears the new bullet for every caret
         // position. The uuid plugin then mints a fresh uuid for the '' default.
-        Enter: splitListItemCleanTask(),
+        // withFreshSelection on every structural key: a caret or range moved
+        // with the mouse (or by a browser-handled key like End) reaches
+        // ProseMirror only on the async selectionchange, so a key pressed
+        // before that landed acted on the previous selection - Enter split at
+        // the old caret, Alt+Arrow moved the previously focused bullet.
+        Enter: withFreshSelection(splitListItemCleanTask()),
         // Chain a no-op returning true so structural keys never fall through to
         // the browser (focus escape).
-        Tab: chainCommands(sinkListItem(listItemType), () => true),
-        'Shift-Tab': chainCommands(liftListItem(listItemType), () => true),
-        'Mod-]': chainCommands(sinkListItem(listItemType), () => true),
-        'Mod-[': chainCommands(liftListItem(listItemType), () => true),
-        // withFreshSelection: a click-moved caret reaches ProseMirror only on
-        // the browser's async selectionchange, so an Alt+Arrow pressed right
-        // after a click used to move the previously focused bullet.
+        Tab: withFreshSelection(chainCommands(sinkListItem(listItemType), () => true)),
+        'Shift-Tab': withFreshSelection(chainCommands(liftListItem(listItemType), () => true)),
+        'Mod-]': withFreshSelection(chainCommands(sinkListItem(listItemType), () => true)),
+        'Mod-[': withFreshSelection(chainCommands(liftListItem(listItemType), () => true)),
         'Alt-ArrowUp': withFreshSelection(moveListItem(-1)),
         'Alt-ArrowDown': withFreshSelection(moveListItem(1)),
-        'Mod-.': toggleCollapse(),
-        Backspace: chainCommands(deleteSelection, joinBackward),
+        'Mod-.': withFreshSelection(toggleCollapse()),
+        Backspace: withFreshSelection(chainCommands(deleteSelection, joinBackward)),
       }),
     ],
     nodeViews: {
