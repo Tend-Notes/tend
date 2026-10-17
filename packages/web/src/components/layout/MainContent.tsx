@@ -75,6 +75,13 @@ export function MainContent() {
     setShowCalendar(false)
   }, [currentPage?.name])
 
+  // Before the loading gate: the task manager doesn't read currentPage, so a
+  // page load (background refresh included) must not replace it with a spinner
+  // and reset the view the user had chosen.
+  if (viewingTasks) {
+    return <TaskManagerPage />
+  }
+
   if (isLoading || !initialized) {
     return (
       <main className="flex-1 flex items-center justify-center">
@@ -101,10 +108,6 @@ export function MainContent() {
         </div>
       </main>
     )
-  }
-
-  if (viewingTasks) {
-    return <TaskManagerPage />
   }
 
   if (!currentPage) {

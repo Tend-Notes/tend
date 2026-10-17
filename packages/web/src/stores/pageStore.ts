@@ -74,8 +74,8 @@ interface PageState {
 
   // Actions
   loadTodaysJournal: () => Promise<void>
-  navigateToPage: (name: string, pushHistory?: boolean) => Promise<void>
-  navigateToJournal: (date: string, pushHistory?: boolean) => Promise<void>
+  navigateToPage: (name: string, pushHistory?: boolean, opts?: { background?: boolean }) => Promise<void>
+  navigateToJournal: (date: string, pushHistory?: boolean, opts?: { background?: boolean }) => Promise<void>
   createPage: (name: string) => Promise<void>
   deletePage: (name: string) => Promise<void>
   updateCurrentPage: (blocks: Block[], rootBlocksHint?: string[]) => Promise<void>
@@ -377,6 +377,12 @@ interface LoadSheetArgs {
   urlType: 'page' | 'content-type' | 'journal'
   name: string
   pushHistory: boolean
+  /**
+   * A refresh nobody asked for (the file-watcher reload). It must not change
+   * which view the user is looking at, and must not blank the screen with the
+   * loading state: the current content stays up until the new content lands.
+   */
+  background?: boolean
   /** Fetch the sheet from the server. */
   fetchPage: () => Promise<Page>
   /** Create it when the fetch 404s. Omitted for journals, which always exist. */
@@ -390,7 +396,7 @@ async function loadSheet(
   get: () => PageState,
   args: LoadSheetArgs
 ): Promise<void> {
-  const { urlType, name, pushHistory, fetchPage, createOn404, loadErrorMessage } = args
+  const { urlType, name, pushHistory, background, fetchPage, createOn404, loadErrorMessage } = args
 
   // Flush any pending saves before navigating away
   await get().flushPendingSave()
@@ -400,10 +406,12 @@ async function loadSheet(
   lastSaveTimestamp = 0
 
   set((state) => {
-    state.isLoading = true
+    if (!background) {
+      state.isLoading = true
+      state.viewingTasks = false
+    }
     state.error = null
     state.pendingDraftRecovery = null
-    state.viewingTasks = false
   })
 
   // Reset sync status when navigating to a new page
@@ -503,7 +511,7 @@ export const usePageStore = create<PageState>()(
       return get().navigateToJournal(today)
     },
 
-    navigateToPage: async (name: string, pushHistory = true) => {
+    navigateToPage: async (name: string, pushHistory = true, opts?: { background?: boolean }) => {
       // Check if this is a content type path (e.g., "person/John Smith" or
       // "meeting/2026-01-23/Name") by looking for a matching content type
       // directory. Decompose via the shared name authority: a known directory
@@ -521,6 +529,7 @@ export const usePageStore = create<PageState>()(
         urlType: contentType ? 'content-type' : 'page',
         name,
         pushHistory,
+        background: opts?.background,
         // Use sheets API for content type paths, pages API for regular pages
         fetchPage: () =>
           contentType
@@ -541,11 +550,12 @@ export const usePageStore = create<PageState>()(
       })
     },
 
-    navigateToJournal: async (date: string, pushHistory = true) => {
+    navigateToJournal: async (date: string, pushHistory = true, opts?: { background?: boolean }) => {
       await loadSheet(set, get, {
         urlType: 'journal',
         name: date,
         pushHistory,
+        background: opts?.background,
         fetchPage: () => api.journals.get(date),
         loadErrorMessage: 'Failed to load journal',
       })
