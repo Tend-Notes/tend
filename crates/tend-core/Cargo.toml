@@ -13,7 +13,6 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
-comrak = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4"

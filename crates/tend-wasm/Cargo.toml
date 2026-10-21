@@ -1,0 +1,44 @@
+[package]
+name = "tend-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "WebAssembly bridge exposing Tend's file format to the browser"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tend-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wasm-bindgen = "0.2"
+
+# The server's own encryption and filename encoding, without the filesystem
+# layer (tokio/notify do not build for wasm). Same code, so the browser writes
+# byte-identical files.
+tend-storage = { workspace = true, default-features = false }
+# Only for `secrecy::ExposeSecret` when marshalling key strings.
+age = { workspace = true }
+
+# uuid v4 needs a randomness source; on wasm that is the browser's crypto via
+# getrandom's "wasm_js" backend. Harmless on native targets.
+uuid = { workspace = true, features = ["js"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Randomness on wasm comes from the browser's crypto. Two major versions of
+# getrandom are in the tree — uuid uses 0.3, age's dependencies use 0.2 — and
+# each needs its web backend turned on explicitly. These entries exist purely
+# so cargo's feature unification enables them; no code here calls getrandom.
+getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+# The interop tests drive the server's filesystem layer, so they need the
+# feature the wasm build deliberately leaves off.
+tend-storage = { workspace = true, features = ["fs"] }
+tokio = { workspace = true }
+tempfile = { workspace = true }
+uuid = { workspace = true }

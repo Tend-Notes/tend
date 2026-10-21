@@ -6,17 +6,24 @@ license.workspace = true
 authors.workspace = true
 description = "File system operations for Tend"
 
+[features]
+# The filesystem layer (FileManager, EncryptedFileManager, watcher). Off for
+# wasm, which keeps only `encryption` and `names`.
+default = ["fs"]
+fs = ["dep:tokio", "dep:notify", "dep:notify-debouncer-full", "dep:anyhow"]
+
 [dependencies]
 tend-core = { workspace = true }
-tokio = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
-notify = { workspace = true }
-notify-debouncer-full = { workspace = true }
 chrono = { workspace = true }
 age = { workspace = true }
 secrecy = "0.10"
+
+tokio = { workspace = true, optional = true }
+notify = { workspace = true, optional = true }
+notify-debouncer-full = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
