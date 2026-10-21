@@ -34,3 +34,6 @@ result
 ANONYMIZE-*.md
 CLAUDE.md
 REVIEW-REMEDIATION-*.md
+
+# wasm build output (make wasm)
+packages/web/src/lib/wasm/generated/

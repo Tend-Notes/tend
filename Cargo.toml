@@ -40,7 +40,11 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Regex
-regex = "1"
+# unicode-perl only: `\s` in the block-footer pattern is a Unicode-aware
+# class, so dropping it breaks parsing at runtime (the pattern is built in a
+# LazyLock, so it panics on first use rather than failing to compile). The rest
+# of the Unicode tables are unused by this crate's ASCII patterns.
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 
 # Web framework
 axum = { version = "0.8", features = ["ws", "macros"] }
