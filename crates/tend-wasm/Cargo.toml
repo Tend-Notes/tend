@@ -18,7 +18,10 @@ wasm-bindgen = "0.2"
 # The server's own encryption and filename encoding, without the filesystem
 # layer (tokio/notify do not build for wasm). Same code, so the browser writes
 # byte-identical files.
-tend-storage = { workspace = true, default-features = false }
+# An explicit path dependency, NOT `workspace = true`: cargo ignores a
+# member's `default-features = false` when the workspace entry does not also
+# set it, which silently pulled tokio/mio in and broke the wasm build.
+tend-storage = { path = "../tend-storage", default-features = false }
 # Only for `secrecy::ExposeSecret` when marshalling key strings.
 age = { workspace = true }
 
@@ -38,7 +41,7 @@ getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 pretty_assertions = "1.4"
 # The interop tests drive the server's filesystem layer, so they need the
 # feature the wasm build deliberately leaves off.
-tend-storage = { workspace = true, features = ["fs"] }
+tend-storage = { path = "../tend-storage", features = ["fs"] }
 tokio = { workspace = true }
 tempfile = { workspace = true }
 uuid = { workspace = true }
