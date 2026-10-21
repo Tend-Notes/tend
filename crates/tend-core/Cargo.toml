@@ -14,5 +14,16 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
 
+# Regex features are split by target, and both halves are deliberate:
+#
+# - Unicode tables are off everywhere. All six patterns in this crate are
+#   ASCII (bullets, `key:: value`, wikilinks, tags, the block footer), so the
+#   tables were dead weight — ~110K gzipped of it in the wasm bundle.
+# - `perf` (lazy DFA, literal prefilters) stays on for native builds, where the
+#   server parses whole gardens, and off for wasm, where it costs another
+#   ~110K gzipped to speed up parsing a handful of files at a time.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl", "perf"] }
+
 [dev-dependencies]
 pretty_assertions = "1.4"

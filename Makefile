@@ -26,4 +26,4 @@ wasm:
 	scripts/build-wasm.sh
 
 clean-wasm:
-	rm -rf packages/web/src/lib/wasm target/wasm32-unknown-unknown
+	rm -rf packages/web/src/lib/wasm/generated target/wasm32-unknown-unknown
