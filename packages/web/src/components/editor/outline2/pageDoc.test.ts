@@ -49,3 +49,57 @@ describe('pageDoc round-trip', () => {
     expect(() => doc.check()).not.toThrow()
   })
 })
+
+// Regression: a brand-new sheet has no blocks, so the editor renders a single
+// placeholder bullet. That bullet used to carry an empty uuid, which the uuid
+// plugin minted on the first keystroke — until the plugin learned to skip plain
+// typing. The empty uuid then survived into the save payload, and the server
+// rejects it with 400 "Invalid UUID" on every retry.
+describe('a page with no blocks', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  it('gives its placeholder bullet a real uuid', () => {
+    const { blocks, rootBlocks } = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].uuid).toMatch(UUID_RE)
+    expect(rootBlocks).toEqual([blocks[0].uuid])
+  })
+
+  it('mints a different uuid each time, so two new sheets cannot collide', () => {
+    const first = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] })).blocks[0].uuid
+    const second = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] })).blocks[0].uuid
+
+    expect(first).not.toBe(second)
+  })
+})
+
+describe('docToBlocks uuid backstop', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  it('never emits a block without a uuid, whatever the doc holds', () => {
+    // Belt and braces: the editor should not produce an empty uuid, but a block
+    // that reaches the server without one costs the user a save loop, so this
+    // is the last line of defence rather than an assumption.
+    const doc = pageToDoc({
+      rootBlocks: ['A'],
+      blocks: {
+        A: block('A', 'parent', null, ['']),
+        '': block('', 'child with no uuid', 'A', []),
+      },
+    })
+    const { blocks, rootBlocks } = docToBlocks(doc)
+
+    expect(blocks).toHaveLength(2)
+    // Existing ids are left alone; only the missing one is minted.
+    for (const b of blocks) expect(b.uuid).not.toBe('')
+    expect(blocks.find((b) => b.content === 'child with no uuid')!.uuid).toMatch(UUID_RE)
+    expect(rootBlocks).toEqual(['A'])
+
+    // And the parent/child wiring still refers to the minted ids.
+    const parent = blocks.find((b) => b.content === 'parent')!
+    const child = blocks.find((b) => b.content === 'child with no uuid')!
+    expect(parent.children).toEqual([child.uuid])
+    expect(child.parentUuid).toBe(parent.uuid)
+  })
+})
