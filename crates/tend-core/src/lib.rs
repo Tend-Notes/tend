@@ -15,7 +15,7 @@ pub mod page;
 pub mod parser;
 pub mod serializer;
 
-pub use block::Block;
+pub use block::{Block, BlockData};
 pub use block_metadata::{BlockMetadata, ParsedContent};
 pub use content_type::{ContentType, Organization};
 pub use error::CoreError;

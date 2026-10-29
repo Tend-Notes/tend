@@ -18,7 +18,7 @@ use crate::routes::pages::BlockData;
 use crate::state::AppState;
 
 use super::gardens::load_user_content_types;
-use super::helpers::{apply_block_updates, apply_property_updates, default_about_body, remove_from_all_indices, update_all_indices_with_content_type};
+use super::helpers::{default_about_body, remove_from_all_indices, update_all_indices_with_content_type};
 
 /// Marker for cursor position in templates
 const CURSOR_MARKER: &str = "{{cursor}}";
@@ -475,8 +475,8 @@ pub async fn update_sheet(
     }
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
-    apply_block_updates(&mut page, req.blocks, req.version)?;
-    apply_property_updates(&mut page, req.properties);
+    page.apply_block_updates(req.blocks, req.version)?;
+    page.apply_property_updates(req.properties);
 
     garden.file_manager.write_sheet(&content_type, &page, date).await?;
 

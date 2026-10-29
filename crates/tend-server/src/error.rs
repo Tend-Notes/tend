@@ -113,6 +113,26 @@ impl From<tend_storage::StorageError> for AppError {
     }
 }
 
+impl From<tend_core::CoreError> for AppError {
+    fn from(e: tend_core::CoreError) -> Self {
+        match e {
+            // The optimistic-concurrency failure the client turns back into a
+            // conflict dialog; it needs the current version, not just a message.
+            tend_core::CoreError::VersionConflict { current, .. } => AppError::Conflict {
+                current_version: current,
+                message: e.to_string(),
+            },
+            tend_core::CoreError::InvalidUuid(_)
+            | tend_core::CoreError::InvalidDate(_)
+            | tend_core::CoreError::ParseError(_) => AppError::BadRequest(e.to_string()),
+            tend_core::CoreError::BlockNotFound(msg) | tend_core::CoreError::PageNotFound(msg) => {
+                AppError::NotFound(msg)
+            }
+            tend_core::CoreError::SerializationError(_) => AppError::Internal(e.to_string()),
+        }
+    }
+}
+
 impl From<tend_search::SearchError> for AppError {
     fn from(e: tend_search::SearchError) -> Self {
         AppError::Search(e)

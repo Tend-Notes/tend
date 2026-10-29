@@ -5,105 +5,11 @@
 //! to reduce code duplication.
 
 use chrono::NaiveDate;
-use tend_core::{Block, ContentType, Page};
+use tend_core::{ContentType, Page};
 use tracing::warn;
 
-use crate::error::AppError;
 use tend_index::PageKey;
 use crate::state::GardenState;
-
-use super::pages::BlockData;
-
-/// Apply block updates to a page from a request.
-///
-/// This function:
-/// 1. Checks for version conflicts if `expected_version` is provided
-/// 2. Clears existing blocks from the page
-/// 3. Parses and adds all blocks from the request data
-/// 4. Increments the page version and updates the timestamp
-///
-/// # Arguments
-/// * `page` - The page to update (mutably)
-/// * `blocks` - Block data from the API request
-/// * `expected_version` - Optional version for conflict detection
-///
-/// # Errors
-/// Returns `AppError::Conflict` if version mismatch, or `AppError::BadRequest` for invalid UUIDs.
-pub fn apply_block_updates(
-    page: &mut Page,
-    blocks: Vec<BlockData>,
-    expected_version: Option<u64>,
-) -> Result<(), AppError> {
-    // Version conflict check
-    if let Some(expected) = expected_version {
-        if page.version != expected {
-            return Err(AppError::Conflict {
-                current_version: page.version,
-                message: format!(
-                    "Version mismatch: expected {}, current {}",
-                    expected, page.version
-                ),
-            });
-        }
-    }
-
-    // Clear existing blocks
-    page.blocks.clear();
-    page.root_blocks.clear();
-
-    // Add blocks from request
-    for block_data in blocks {
-        let uuid = block_data
-            .uuid
-            .parse()
-            .map_err(|_| AppError::BadRequest("Invalid UUID".to_string()))?;
-
-        let mut block = Block::with_uuid(uuid, &block_data.content);
-
-        block.parent_uuid = block_data
-            .parent_uuid
-            .as_ref()
-            .and_then(|s| s.parse().ok());
-
-        block.children = block_data
-            .children
-            .iter()
-            .filter_map(|s| s.parse().ok())
-            .collect();
-
-        block.collapsed = block_data.collapsed;
-        block.properties = block_data.properties;
-
-        page.add_block(block);
-    }
-
-    // Increment version and update timestamp
-    page.version += 1;
-    page.touch();
-
-    Ok(())
-}
-
-/// Merge page-level property changes into a page before writing.
-///
-/// `Some(v)` sets the key, `None` removes it. Keys not present in `properties`
-/// are left untouched, so server-set properties (e.g. `readonly`) survive
-/// clients that don't echo them back.
-pub fn apply_property_updates(
-    page: &mut Page,
-    properties: std::collections::HashMap<String, Option<String>>,
-) {
-    for (key, value) in properties {
-        match value {
-            Some(v) => {
-                page.properties.insert(key, v);
-            }
-            None => {
-                page.properties.remove(&key);
-            }
-        }
-    }
-}
 
 /// Update all indices (search, link, block, tag, todo) for a page.
 ///
