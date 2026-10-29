@@ -544,6 +544,65 @@ write a note, lock, unlock, reconnect, and assert no plaintext in IndexedDB.
 
 ---
 
+## Future: moving a garden between local and server
+
+Not in this plan's scope, and the reason the local-garden dialog says plainly
+that Tend will not move a garden for you. Both directions are wanted; they are
+not symmetrical, and the asymmetry is the whole design.
+
+### Export: a server garden to a local folder
+
+The easy direction, and it needs no server work at all. The client already has
+both backends and the dispatcher that chooses between them, so an export is a
+read loop over the server backend and a write loop through the local one — the
+same calls the app already makes, pointed at two gardens instead of one.
+
+Encryption is independent of the source: the browser does the encrypting, so an
+unencrypted server garden can export to an encrypted local garden, and the
+passphrase never leaves the page. That makes this also the answer to "I want
+this off the server now", which is a likely reason to want it.
+
+What travels: every sheet of every content type, the content types themselves
+(into `.tend/content-types.json`), and the templates. What does not: UI state,
+which is per-garden and will be rebuilt, and drafts, which belong to an editing
+session rather than to the garden.
+
+### Import: a local folder into a server garden
+
+The hard direction, and the one to be careful with. The server cannot see the
+folder, so the browser has to read and decrypt every sheet locally and send it
+up. For an *encrypted* local garden that is a plaintext upload of exactly the
+notes the user chose to keep off the server — the one thing this whole feature
+exists to prevent. So it cannot be a quiet convenience:
+
+- it has to be explicit about what it is doing, in the same terms the
+  local-garden dialog uses;
+- the destination garden should be encrypted, and the UI should say so if it is
+  not, because otherwise the notes end up at rest in the clear on the server;
+- content in flight is protected only by TLS, which is a different guarantee
+  from the one the user picked.
+
+It should not be bolted onto `importApi`. That is a server-side zip/Logseq
+importer with its own error-quarantine flow; this is client-driven and
+per-sheet, and sharing the route would mean uploading the folder as an archive —
+one large plaintext blob instead of many, which is worse, not better.
+
+### Shared concerns
+
+- **Content types.** Both directions have to reconcile
+  `.tend/content-types.json` with the server's per-user registry, which is the
+  asymmetry already recorded below.
+- **Collisions.** A destination that already holds a sheet of the same name
+  needs overwrite / skip / rename, decided once for the run. No merge, for the
+  same reason there is none for a write conflict.
+- **Interruptibility.** A garden of any size is many operations. It has to
+  report what landed, survive being stopped, and be safe to run again — which
+  argues for making the collision rule "skip" the default on a re-run.
+- **Verification.** The honest check is a round trip: export a garden, import
+  it back into a fresh server garden, and compare every sheet's serialized
+  bytes. The bridge makes that meaningful, since both sides serialize with the
+  same code.
+
 ## Not verified / open
 
 - ~~**`age` + `getrandom` for `wasm32-unknown-unknown`**~~ — settled: it builds.
