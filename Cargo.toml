@@ -7,6 +7,7 @@ members = [
     "crates/tend-git",
     "crates/tend-links",
     "crates/tend-blocks",
+    "crates/tend-index",
     "crates/tend-server",
     "crates/tend-wasm",
 ]
@@ -83,6 +84,7 @@ tend-search = { path = "crates/tend-search" }
 tend-git = { path = "crates/tend-git" }
 tend-links = { path = "crates/tend-links" }
 tend-blocks = { path = "crates/tend-blocks" }
+tend-index = { path = "crates/tend-index" }
 tend-wasm = { path = "crates/tend-wasm" }
 
 [profile.release]

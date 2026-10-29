@@ -3,6 +3,14 @@
 //!
 //! These indices are populated on garden load and updated incrementally
 //! when pages are saved, avoiding full scans on every API request.
+//!
+//! Its own crate rather than a module of the server, for two reasons. The
+//! other four indices (links, search, blocks) are already crates, and these
+//! two were the odd ones out — untestable without standing up a server. And
+//! reading a task status out of block text is content interpretation, so a
+//! local-folder garden has to do it exactly as the server does; this crate is
+//! pure (no tokio, no filesystem) and compiles to wasm, so the browser calls
+//! the same code instead of a second implementation of it that could drift.
 
 use chrono::NaiveDate;
 use regex::Regex;

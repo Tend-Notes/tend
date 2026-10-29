@@ -9,7 +9,7 @@ use tend_core::{Block, ContentType, Page};
 use tracing::warn;
 
 use crate::error::AppError;
-use crate::indices::PageKey;
+use tend_index::PageKey;
 use crate::state::GardenState;
 
 use super::pages::BlockData;

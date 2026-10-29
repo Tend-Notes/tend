@@ -4024,6 +4024,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tend-index"
+version = "0.7.0"
+dependencies = [
+ "chrono",
+ "getrandom 0.3.4",
+ "regex",
+ "serde",
+ "tend-core",
+ "uuid",
+]
+
+[[package]]
 name = "tend-links"
 version = "0.7.0"
 dependencies = [
@@ -4070,6 +4082,7 @@ dependencies = [
  "tend-blocks",
  "tend-core",
  "tend-git",
+ "tend-index",
  "tend-links",
  "tend-search",
  "tend-storage",

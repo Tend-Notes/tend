@@ -18,7 +18,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 use crate::config::{ensure_user_dir, user_gardens_json_path, user_gardens_root, Config, GitConfig};
-use crate::indices::{TagIndex, TodoIndex};
+use tend_index::{TagIndex, TodoIndex};
 use crate::routes::helpers::is_default_about;
 use crate::ws::{BroadcastEvent, EventSender, WsEvent};
 use std::time::Duration;
