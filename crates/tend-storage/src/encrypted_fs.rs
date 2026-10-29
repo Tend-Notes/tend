@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 use secrecy::{ExposeSecret, SecretString};
-use tend_core::parser::{parse_journal_filename, parse_markdown};
+use tend_core::parser::parse_markdown;
 use tend_core::serializer::serialize_page;
 use tend_core::{ContentType, Page, PageMeta};
 use tokio::sync::RwLock;
@@ -24,12 +24,12 @@ use crate::encryption::{
 };
 use crate::error::StorageError;
 use crate::fs::{
-    decode_filename, encode_filename, ensure_within_root, restrict_dir, restrict_file,
+    dir_name, ensure_within_root, push_ref, restrict_dir, restrict_file,
     validate_safe_name,
 };
-
-/// File extension for encrypted files
-const ENCRYPTED_EXT: &str = "md.age";
+// Same sheet-path rules the plain manager uses, differing only in the
+// extension; see `crate::paths`.
+use crate::paths::{sheet_meta, sheet_ref_meta, sheet_rel, sort_sheets, ENCRYPTED_EXT};
 
 /// On-disk location (under the garden) of the passphrase-wrapped X25519 identity.
 const IDENTITY_FILE: &str = "identity.age";
@@ -369,41 +369,32 @@ impl EncryptedFileManager {
 
     // ========== Sheet (Content Type) Operations ==========
 
-    /// Get path to an encrypted sheet file for a content type
+    /// Get path to an encrypted sheet file for a content type.
+    ///
+    /// The layout rules live in [`crate::paths::sheet_rel`]; this only anchors
+    /// them at the garden root and supplies today's date for a date-foldered
+    /// type the caller left open, so the pure function never reads the clock.
     fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
-        let dir = self.root.join(&content_type.directory);
-        if content_type.is_namespaced() {
-            if let Some((namespace, leaf)) = name.rsplit_once('/') {
-                dir.join(namespace)
-                    .join(format!("{}.{}", encode_filename(leaf), ENCRYPTED_EXT))
-            } else {
-                dir.join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
-            }
-        } else if content_type.is_date_foldered() {
-            let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
-            dir.join(d.format("%Y-%m-%d").to_string())
-                .join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
-        } else {
-            dir.join(format!("{}.{}", encode_filename(name), ENCRYPTED_EXT))
-        }
+        self.join_rel(sheet_rel(content_type, name, self.filed_under(content_type, date), ENCRYPTED_EXT, true))
     }
 
     /// Raw (unencoded) sheet path for backwards compatibility
     fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
-        let dir = self.root.join(&content_type.directory);
-        if content_type.is_namespaced() {
-            if let Some((namespace, leaf)) = name.rsplit_once('/') {
-                dir.join(namespace).join(format!("{}.{}", leaf, ENCRYPTED_EXT))
-            } else {
-                dir.join(format!("{}.{}", name, ENCRYPTED_EXT))
-            }
-        } else if content_type.is_date_foldered() {
-            let d = date.unwrap_or_else(|| chrono::Local::now().date_naive());
-            dir.join(d.format("%Y-%m-%d").to_string())
-                .join(format!("{}.{}", name, ENCRYPTED_EXT))
+        self.join_rel(sheet_rel(content_type, name, self.filed_under(content_type, date), ENCRYPTED_EXT, false))
+    }
+
+    /// The date a date-foldered sheet is filed under, defaulting to today.
+    fn filed_under(&self, content_type: &ContentType, date: Option<NaiveDate>) -> Option<NaiveDate> {
+        if content_type.is_date_foldered() {
+            Some(date.unwrap_or_else(|| chrono::Local::now().date_naive()))
         } else {
-            dir.join(format!("{}.{}", name, ENCRYPTED_EXT))
+            date
         }
+    }
+
+    /// Anchor relative path segments at the garden root.
+    fn join_rel(&self, segments: Vec<String>) -> PathBuf {
+        segments.iter().fold(self.root.clone(), |path, seg| path.join(seg))
     }
 
     /// Ensure content type directory exists
@@ -443,7 +434,7 @@ impl EncryptedFileManager {
             };
             let block_count = tend_core::parser::count_blocks(&content);
             let (created_at, modified_at) = crate::fs::file_timestamps(&path).await;
-            sheets.push(crate::fs::sheet_meta(
+            sheets.push(sheet_meta(
                 content_type,
                 &name,
                 date,
@@ -453,11 +444,7 @@ impl EncryptedFileManager {
             ));
         }
 
-        if content_type.is_date_named() {
-            sheets.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
-        } else {
-            sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
-        }
+        sort_sheets(&mut sheets, content_type);
         Ok(sheets)
     }
 
@@ -487,83 +474,42 @@ impl EncryptedFileManager {
         }
 
         let mut refs = Vec::new();
-        let ext_suffix = format!(".{}", ENCRYPTED_EXT);
 
         if content_type.is_date_foldered() {
+            // Scan date subdirectories; the directory name is the date.
             let mut date_dirs = tokio::fs::read_dir(&base_dir).await?;
             while let Some(date_entry) = date_dirs.next_entry().await? {
                 let date_path = date_entry.path();
-                if date_path.is_dir() {
-                    let date = date_path
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-
-                    let mut entries = tokio::fs::read_dir(&date_path).await?;
-                    while let Some(entry) = entries.next_entry().await? {
-                        let path = entry.path();
-                        if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                            if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
-                                refs.push((decode_filename(raw_name), date, path.clone()));
-                            }
-                        }
-                    }
+                if !date_path.is_dir() {
+                    continue;
+                }
+                let dirs = vec![dir_name(&date_path)];
+                let mut entries = tokio::fs::read_dir(&date_path).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    push_ref(&mut refs, content_type, &dirs, entry.path(), ENCRYPTED_EXT);
                 }
             }
         } else if content_type.is_namespaced() {
             // Walk namespace subfolders (any depth); bare name = relative path
             // with the leaf decoded ("MyBook/Chapter 14").
-            let mut stack: Vec<(PathBuf, String)> = vec![(base_dir.clone(), String::new())];
-            while let Some((dir, rel)) = stack.pop() {
+            let mut stack: Vec<(PathBuf, Vec<String>)> = vec![(base_dir.clone(), Vec::new())];
+            while let Some((dir, dirs)) = stack.pop() {
                 let mut entries = tokio::fs::read_dir(&dir).await?;
                 while let Some(entry) = entries.next_entry().await? {
                     let path = entry.path();
                     if path.is_dir() {
-                        let seg = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                        let next_rel = if rel.is_empty() {
-                            seg.to_string()
-                        } else {
-                            format!("{}/{}", rel, seg)
-                        };
-                        stack.push((path, next_rel));
-                    } else if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                        if let Some(raw_name) = filename.strip_suffix(&ext_suffix) {
-                            let bare = if rel.is_empty() {
-                                decode_filename(raw_name)
-                            } else {
-                                format!("{}/{}", rel, decode_filename(raw_name))
-                            };
-                            refs.push((bare, None, path.clone()));
-                        }
+                        let mut next = dirs.clone();
+                        next.push(dir_name(&path));
+                        stack.push((path, next));
+                    } else {
+                        push_ref(&mut refs, content_type, &dirs, path, ENCRYPTED_EXT);
                     }
                 }
             }
         } else {
             let mut entries = tokio::fs::read_dir(&base_dir).await?;
             while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                if !filename.ends_with(&ext_suffix) {
-                    continue;
-                }
-                // Date-named types (journals): "YYYY-MM-DD.md.age" -> base "YYYY-MM-DD.md".
-                let name = if content_type.is_date_named() {
-                    let Some(base) = filename.strip_suffix(".age") else {
-                        continue;
-                    };
-                    match parse_journal_filename(base) {
-                        Some(d) => d.format("%Y-%m-%d").to_string(),
-                        None => continue,
-                    }
-                } else {
-                    let Some(raw_name) = filename.strip_suffix(&ext_suffix) else {
-                        continue;
-                    };
-                    decode_filename(raw_name)
-                };
-                refs.push((name, None, path));
+                push_ref(&mut refs, content_type, &[], entry.path(), ENCRYPTED_EXT);
             }
         }
 
@@ -582,7 +528,7 @@ impl EncryptedFileManager {
             .collect_sheet_refs(content_type)
             .await?
             .into_iter()
-            .map(|(name, date, _)| crate::fs::sheet_ref_meta(content_type, &name, date))
+            .map(|(name, date, _)| sheet_ref_meta(content_type, &name, date))
             .collect())
     }
 
@@ -805,6 +751,7 @@ impl EncryptedFileManager {
 mod tests {
     use super::*;
     use crate::encryption::encrypt;
+    use crate::names::encode_filename;
     use tempfile::TempDir;
 
     async fn setup() -> (TempDir, EncryptedFileManager) {

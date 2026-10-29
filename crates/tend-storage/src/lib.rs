@@ -11,13 +11,15 @@
 //!
 //! `fs` (default) pulls in the filesystem layer: `FileManager`,
 //! `EncryptedFileManager` and the watcher, all of which need tokio and notify.
-//! With it off, what remains is the platform-independent core — age encryption
-//! and filename encoding — which is what the wasm bridge compiles against so
-//! the browser writes byte-identical files. See `crates/tend-wasm`.
+//! With it off, what remains is the platform-independent core — age
+//! encryption, filename encoding and the sheet-path rules — which is what the
+//! wasm bridge compiles against so the browser writes byte-identical files.
+//! See `crates/tend-wasm`.
 
 pub mod encryption;
 pub mod error;
 pub mod names;
+pub mod paths;
 
 #[cfg(feature = "fs")]
 pub mod encrypted_fs;
@@ -29,6 +31,7 @@ pub mod watcher;
 pub use encryption::{decrypt, encrypt, is_age_encrypted, EncryptionError};
 pub use error::StorageError;
 pub use names::{decode_filename, encode_filename, validate_safe_name};
+pub use paths::{sheet_meta, sheet_ref, sheet_ref_meta, sheet_rel, sort_sheets, ENCRYPTED_EXT, MD_EXT};
 
 #[cfg(feature = "fs")]
 pub use encrypted_fs::EncryptedFileManager;

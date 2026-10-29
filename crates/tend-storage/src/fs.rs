@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use chrono::{NaiveDate, Utc};
-use tend_core::parser::{parse_journal_filename, parse_markdown};
+use tend_core::parser::parse_markdown;
 use tend_core::serializer::serialize_page;
 use tend_core::{ContentType, Page, PageMeta};
 use tokio::sync::RwLock;
@@ -19,6 +19,9 @@ use crate::error::StorageError;
 // (which has no tokio/notify); re-exported here so every existing caller and
 // `tend_storage::fs::encode_filename` path keeps working unchanged.
 pub use crate::names::{decode_filename, encode_filename, validate_safe_name};
+// The sheet-path rules and the listing metadata moved to `paths` for the same
+// reason, and because `encrypted_fs` had its own copy of all of them.
+use crate::paths::{sheet_meta, sheet_ref, sheet_ref_meta, sheet_rel, sort_sheets, MD_EXT};
 
 /// Manages file operations for the garden
 pub struct FileManager {
@@ -102,24 +105,30 @@ pub(crate) fn ensure_within_root(root: &Path, path: &Path) -> Result<(), Storage
     }
 }
 
-/// Build a lightweight `PageMeta` for a sheet from just its name + date (no file
-/// read). Only `name` (canonicalized) and `journal_date` are meaningful; the
-/// rest are placeholders. Used by the name-only listing that resolves which
-/// pages exist without reading/parsing their bodies.
-pub(crate) fn sheet_ref_meta(
+/// A directory's own name, as a listing walk needs it.
+pub(crate) fn dir_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Record `path` as a sheet of `content_type` if its filename says it is one.
+/// `dirs` are the directory names between the content-type directory and the
+/// file; `ext` is the garden's sheet extension. Anything else in the tree is
+/// ignored. Shared with the encrypted manager, whose walk differs only in `ext`.
+pub(crate) fn push_ref(
+    refs: &mut Vec<(String, Option<NaiveDate>, PathBuf)>,
     content_type: &ContentType,
-    bare_name: &str,
-    date: Option<NaiveDate>,
-) -> PageMeta {
-    PageMeta {
-        name: tend_core::qualify_name(content_type, bare_name, date),
-        title: bare_name.to_string(),
-        content_type: content_type.id.clone(),
-        is_journal: content_type.is_date_named(),
-        journal_date: date,
-        block_count: 0,
-        created_at: Utc::now(),
-        modified_at: Utc::now(),
+    dirs: &[String],
+    path: PathBuf,
+    ext: &str,
+) {
+    let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
+        return;
+    };
+    if let Some((name, date)) = sheet_ref(content_type, dirs, filename, ext) {
+        refs.push((name, date, path));
     }
 }
 
@@ -135,50 +144,6 @@ pub(crate) async fn file_timestamps(
             meta.modified().map(Into::into).unwrap_or(now),
         ),
         Err(_) => (now, now),
-    }
-}
-
-/// Build the full `PageMeta` for a sheet from its name/date + a block count +
-/// file timestamps, WITHOUT parsing the body — mirroring exactly the metadata
-/// `read_sheet` + `PageMeta::from` produce (only `block_count` needs the body,
-/// and it's counted cheaply). See the `sheet_meta_matches_read_sheet` test.
-pub(crate) fn sheet_meta(
-    content_type: &ContentType,
-    bare_name: &str,
-    date: Option<NaiveDate>,
-    block_count: usize,
-    created_at: chrono::DateTime<Utc>,
-    modified_at: chrono::DateTime<Utc>,
-) -> PageMeta {
-    // For date-named types (journals) the name IS the date.
-    let resolved_date = if content_type.is_date_named() {
-        NaiveDate::parse_from_str(bare_name, "%Y-%m-%d").ok()
-    } else {
-        date
-    };
-    let is_journal = content_type.id == "journal";
-    let title = if is_journal {
-        resolved_date
-            .map(|d| d.format("%A, %B %-d, %Y").to_string())
-            .unwrap_or_else(|| bare_name.to_string())
-    } else {
-        bare_name.to_string()
-    };
-    // journal_date is set for journals and for any date-foldered type.
-    let journal_date = if is_journal || content_type.is_date_foldered() {
-        resolved_date
-    } else {
-        None
-    };
-    PageMeta {
-        name: tend_core::qualify_name(content_type, bare_name, resolved_date),
-        title,
-        content_type: content_type.id.clone(),
-        is_journal,
-        journal_date,
-        block_count,
-        created_at,
-        modified_at,
     }
 }
 
@@ -328,50 +293,32 @@ impl FileManager {
 
     // ========== Sheet (Content Type) Operations ==========
 
-    /// Get path to a sheet file for a content type
-    /// If save_by_date is true, includes date subfolder: {directory}/{date}/{name}.md
-    /// Otherwise: {directory}/{name}.md
+    /// Get path to a sheet file for a content type.
+    ///
+    /// The layout rules live in [`crate::paths::sheet_rel`]; this only anchors
+    /// them at the garden root and supplies today's date for a date-foldered
+    /// type the caller left open, so the pure function never reads the clock.
     pub fn sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
-        let dir = self.root.join(&content_type.directory);
-        if content_type.is_namespaced() {
-            // `name` is "namespace/leaf"; the namespace is a real subfolder, only
-            // the leaf filename is encoded.
-            if let Some((namespace, leaf)) = name.rsplit_once('/') {
-                dir.join(namespace).join(format!("{}.md", encode_filename(leaf)))
-            } else {
-                dir.join(format!("{}.md", encode_filename(name)))
-            }
-        } else if content_type.is_date_foldered() {
-            if let Some(d) = date {
-                dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", encode_filename(name)))
-            } else {
-                let today = chrono::Local::now().date_naive();
-                dir.join(today.format("%Y-%m-%d").to_string()).join(format!("{}.md", encode_filename(name)))
-            }
-        } else {
-            dir.join(format!("{}.md", encode_filename(name)))
-        }
+        self.join_rel(sheet_rel(content_type, name, self.filed_under(content_type, date), MD_EXT, true))
     }
 
     /// Raw (unencoded) sheet path for backwards compatibility with pre-encoding files
     fn raw_sheet_path(&self, content_type: &ContentType, name: &str, date: Option<NaiveDate>) -> PathBuf {
-        let dir = self.root.join(&content_type.directory);
-        if content_type.is_namespaced() {
-            if let Some((namespace, leaf)) = name.rsplit_once('/') {
-                dir.join(namespace).join(format!("{}.md", leaf))
-            } else {
-                dir.join(format!("{}.md", name))
-            }
-        } else if content_type.is_date_foldered() {
-            if let Some(d) = date {
-                dir.join(d.format("%Y-%m-%d").to_string()).join(format!("{}.md", name))
-            } else {
-                let today = chrono::Local::now().date_naive();
-                dir.join(today.format("%Y-%m-%d").to_string()).join(format!("{}.md", name))
-            }
+        self.join_rel(sheet_rel(content_type, name, self.filed_under(content_type, date), MD_EXT, false))
+    }
+
+    /// The date a date-foldered sheet is filed under, defaulting to today.
+    fn filed_under(&self, content_type: &ContentType, date: Option<NaiveDate>) -> Option<NaiveDate> {
+        if content_type.is_date_foldered() {
+            Some(date.unwrap_or_else(|| chrono::Local::now().date_naive()))
         } else {
-            dir.join(format!("{}.md", name))
+            date
         }
+    }
+
+    /// Anchor relative path segments at the garden root.
+    fn join_rel(&self, segments: Vec<String>) -> PathBuf {
+        segments.iter().fold(self.root.clone(), |path, seg| path.join(seg))
     }
 
     /// Ensure content type directory exists (and date subdirectory if save_by_date)
@@ -406,54 +353,34 @@ impl FileManager {
         let mut refs = Vec::new();
 
         if content_type.is_date_foldered() {
-            // Scan date subdirectories
+            // Scan date subdirectories; the directory name is the date.
             let mut date_dirs = tokio::fs::read_dir(&base_dir).await?;
             while let Some(date_entry) = date_dirs.next_entry().await? {
                 let date_path = date_entry.path();
-                if date_path.is_dir() {
-                    // Parse date from directory name
-                    let date = date_path
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .and_then(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-
-                    let mut entries = tokio::fs::read_dir(&date_path).await?;
-                    while let Some(entry) = entries.next_entry().await? {
-                        let path = entry.path();
-                        if path.extension().is_some_and(|e| e == "md") {
-                            if let Some(raw_name) = path.file_stem().and_then(|s| s.to_str()) {
-                                refs.push((decode_filename(raw_name), date, path));
-                            }
-                        }
-                    }
+                if !date_path.is_dir() {
+                    continue;
+                }
+                let dirs = vec![dir_name(&date_path)];
+                let mut entries = tokio::fs::read_dir(&date_path).await?;
+                while let Some(entry) = entries.next_entry().await? {
+                    push_ref(&mut refs, content_type, &dirs, entry.path(), MD_EXT);
                 }
             }
         } else if content_type.is_namespaced() {
-            // Walk namespace subfolders (any depth). Each .md file's bare name is
-            // its path relative to the content-type dir, leaf decoded:
+            // Walk namespace subfolders (any depth). Each file's bare name is its
+            // path relative to the content-type dir, leaf decoded:
             // "MyBook/Chapter 14".
-            let mut stack: Vec<(PathBuf, String)> = vec![(base_dir.clone(), String::new())];
-            while let Some((dir, rel)) = stack.pop() {
+            let mut stack: Vec<(PathBuf, Vec<String>)> = vec![(base_dir.clone(), Vec::new())];
+            while let Some((dir, dirs)) = stack.pop() {
                 let mut entries = tokio::fs::read_dir(&dir).await?;
                 while let Some(entry) = entries.next_entry().await? {
                     let path = entry.path();
                     if path.is_dir() {
-                        let seg = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                        let next_rel = if rel.is_empty() {
-                            seg.to_string()
-                        } else {
-                            format!("{}/{}", rel, seg)
-                        };
-                        stack.push((path, next_rel));
-                    } else if path.extension().is_some_and(|e| e == "md") {
-                        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            let bare = if rel.is_empty() {
-                                decode_filename(stem)
-                            } else {
-                                format!("{}/{}", rel, decode_filename(stem))
-                            };
-                            refs.push((bare, None, path));
-                        }
+                        let mut next = dirs.clone();
+                        next.push(dir_name(&path));
+                        stack.push((path, next));
+                    } else {
+                        push_ref(&mut refs, content_type, &dirs, path, MD_EXT);
                     }
                 }
             }
@@ -461,27 +388,7 @@ impl FileManager {
             // Flat directory listing (page, journal, custom-flat).
             let mut entries = tokio::fs::read_dir(&base_dir).await?;
             while let Some(entry) = entries.next_entry().await? {
-                let path = entry.path();
-                if path.extension().is_none_or(|e| e != "md") {
-                    continue;
-                }
-                let Some(filename) = path.file_name().and_then(|s| s.to_str()) else {
-                    continue;
-                };
-                // Date-named types (journals): only date-named files, normalized
-                // through the parsed date so legacy separators map to canonical.
-                let name = if content_type.is_date_named() {
-                    match parse_journal_filename(filename) {
-                        Some(d) => d.format("%Y-%m-%d").to_string(),
-                        None => continue,
-                    }
-                } else {
-                    match path.file_stem().and_then(|s| s.to_str()) {
-                        Some(stem) => decode_filename(stem),
-                        None => continue,
-                    }
-                };
-                refs.push((name, None, path));
+                push_ref(&mut refs, content_type, &[], entry.path(), MD_EXT);
             }
         }
 
@@ -520,12 +427,7 @@ impl FileManager {
             sheets.push(sheet_meta(content_type, &name, date, block_count, created_at, modified_at));
         }
 
-        // Date-named types sort by date; everything else by modified time.
-        if content_type.is_date_named() {
-            sheets.sort_by_key(|a| std::cmp::Reverse(a.journal_date));
-        } else {
-            sheets.sort_by_key(|a| std::cmp::Reverse(a.modified_at));
-        }
+        sort_sheets(&mut sheets, content_type);
 
         Ok(sheets)
     }
