@@ -55,22 +55,10 @@ impl TagIndex {
         // Remove existing tags for this page
         self.remove_page(&page.name);
 
-        // Extract tags from all blocks
         let mut page_tag_list = Vec::new();
-
-        for block in page.blocks.values() {
-            for tag in block.extract_tags() {
-                let tag_lower = tag.to_lowercase();
-                page_tag_list.push(tag_lower.clone());
-
-                self.tags
-                    .entry(tag_lower)
-                    .or_default()
-                    .push(TagOccurrence {
-                        page_name: page.name.clone(),
-                        block_uuid: block.uuid,
-                    });
-            }
+        for (tag, occurrence) in tags_in_page(page) {
+            page_tag_list.push(tag.clone());
+            self.tags.entry(tag).or_default().push(occurrence);
         }
 
         if !page_tag_list.is_empty() {
@@ -202,6 +190,67 @@ impl PageKey {
     }
 }
 
+/// Every task in a page, in no particular order.
+///
+/// This is the interpretation step, split out from the index that stores it:
+/// deciding that a block whose content starts with a status keyword *is* a
+/// task, and that the rest of the line is its text. A local-folder garden
+/// calls this through the wasm bridge and keeps its own aggregation, so the
+/// two can never disagree about what counts as a task.
+///
+/// A block with no status keyword is not a task and yields nothing; a keyword
+/// with no text after it is a task with empty content, which is what someone
+/// who has just typed `TODO` has.
+pub fn tasks_in_page(
+    page: &Page,
+    content_type: &ContentType,
+    date: Option<NaiveDate>,
+) -> Vec<TaskItem> {
+    let mut tasks = Vec::new();
+    for block in page.blocks.values() {
+        let Some(captures) = STATUS_PATTERN.captures(&block.content) else {
+            continue;
+        };
+        tasks.push(TaskItem {
+            uuid: block.uuid.to_string(),
+            status: captures.get(1).unwrap().as_str().to_string(),
+            content: captures.get(2).map(|m| m.as_str()).unwrap_or("").to_string(),
+            page_name: page.name.clone(),
+            page_title: page.title.clone(),
+            content_type: content_type.id.clone(),
+            is_journal: content_type.id == "journal",
+            journal_date: date.map(|d| d.to_string()),
+            due_date: block.properties.get("due_date").cloned(),
+            start_date: block.properties.get("start_date").cloned(),
+            priority: block.properties.get("priority").cloned(),
+            work_log: block.properties.get("work_log").cloned(),
+        });
+    }
+    tasks
+}
+
+/// Every tag occurrence in a page, as `(lowercased tag, where it occurs)`.
+///
+/// Tags are matched case-insensitively — `#Work` and `#work` are one tag — and
+/// the lowercased form is the key everything else uses. Split out for the same
+/// reason as [`tasks_in_page`]: the matching is interpretation, the maps that
+/// hold the result are not.
+pub fn tags_in_page(page: &Page) -> Vec<(String, TagOccurrence)> {
+    let mut out = Vec::new();
+    for block in page.blocks.values() {
+        for tag in block.extract_tags() {
+            out.push((
+                tag.to_lowercase(),
+                TagOccurrence {
+                    page_name: page.name.clone(),
+                    block_uuid: block.uuid,
+                },
+            ));
+        }
+    }
+    out
+}
+
 /// In-memory index of all todos across the garden
 #[derive(Debug, Default)]
 pub struct TodoIndex {
@@ -246,35 +295,7 @@ impl TodoIndex {
         // Remove existing todos for this page
         self.tasks.remove(&key);
 
-        // Extract todos from all blocks
-        let mut page_tasks = Vec::new();
-
-        for block in page.blocks.values() {
-            if let Some(captures) = STATUS_PATTERN.captures(&block.content) {
-                let status = captures.get(1).unwrap().as_str().to_string();
-                let content = captures
-                    .get(2)
-                    .map(|m| m.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                page_tasks.push(TaskItem {
-                    uuid: block.uuid.to_string(),
-                    status,
-                    content,
-                    page_name: page.name.clone(),
-                    page_title: page.title.clone(),
-                    content_type: content_type.id.clone(),
-                    is_journal: content_type.id == "journal",
-                    journal_date: date.map(|d| d.to_string()),
-                    due_date: block.properties.get("due_date").cloned(),
-                    start_date: block.properties.get("start_date").cloned(),
-                    priority: block.properties.get("priority").cloned(),
-                    work_log: block.properties.get("work_log").cloned(),
-                });
-            }
-        }
-
+        let page_tasks = tasks_in_page(page, content_type, date);
         if !page_tasks.is_empty() {
             self.tasks.insert(key, page_tasks);
         }
@@ -310,7 +331,6 @@ impl TodoIndex {
 mod tests {
     use super::*;
     use tend_core::Block;
-    use uuid::Uuid;
 
     fn make_page(name: &str, blocks: Vec<Block>) -> Page {
         let mut page = Page::new(name);
@@ -426,5 +446,137 @@ mod tests {
         let tasks = index.get_all_tasks();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].content, "New task");
+    }
+}
+
+#[cfg(test)]
+mod extraction_tests {
+    use super::*;
+    use tend_core::Block;
+
+    fn page_of(blocks: Vec<Block>) -> Page {
+        let mut page = Page::new("Notes");
+        for block in blocks {
+            page.add_block(block);
+        }
+        page
+    }
+
+    /// content -> Some((status, text)) when the block is a task, else None.
+    #[test]
+    fn a_block_is_a_task_only_when_it_opens_with_a_status_keyword() {
+        let cases: &[(&str, Option<(&str, &str)>)] = &[
+            ("TODO write the thing", Some(("TODO", "write the thing"))),
+            ("DOING write the thing", Some(("DOING", "write the thing"))),
+            ("DONE write the thing", Some(("DONE", "write the thing"))),
+            ("NOW write the thing", Some(("NOW", "write the thing"))),
+            ("LATER write the thing", Some(("LATER", "write the thing"))),
+            ("NEVER write the thing", Some(("NEVER", "write the thing"))),
+            // Just typed the keyword and nothing yet: a task with no text.
+            ("TODO", Some(("TODO", ""))),
+            // Not a task: the keyword has to open the block.
+            ("I should TODO this", None),
+            ("", None),
+            ("ordinary note", None),
+            // Case-sensitive by design — "Todo" is prose, not a status.
+            ("Todo write the thing", None),
+        ];
+
+        for (content, expected) in cases {
+            let page = page_of(vec![Block::new(*content)]);
+            let tasks = tasks_in_page(&page, &ContentType::page(), None);
+            match expected {
+                Some((status, text)) => {
+                    assert_eq!(tasks.len(), 1, "{content:?} should be one task");
+                    assert_eq!(tasks[0].status, *status, "status of {content:?}");
+                    assert_eq!(tasks[0].content, *text, "text of {content:?}");
+                }
+                None => assert!(tasks.is_empty(), "{content:?} should not be a task"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_task_carries_the_block_properties_the_task_manager_edits() {
+        let mut block = Block::new("TODO file the return");
+        block.properties.insert("due_date".into(), "2026-11-01".into());
+        block.properties.insert("start_date".into(), "2026-10-29".into());
+        block.properties.insert("priority".into(), "1".into());
+        block.properties.insert("work_log".into(), "[]".into());
+
+        let tasks = tasks_in_page(&page_of(vec![block]), &ContentType::page(), None);
+
+        assert_eq!(tasks[0].due_date.as_deref(), Some("2026-11-01"));
+        assert_eq!(tasks[0].start_date.as_deref(), Some("2026-10-29"));
+        assert_eq!(tasks[0].priority.as_deref(), Some("1"));
+        assert_eq!(tasks[0].work_log.as_deref(), Some("[]"));
+    }
+
+    #[test]
+    fn a_journal_task_is_marked_as_one_and_dated() {
+        let date = NaiveDate::from_ymd_opt(2026, 10, 29).unwrap();
+        let tasks = tasks_in_page(
+            &page_of(vec![Block::new("TODO stand up")]),
+            &ContentType::journal(),
+            Some(date),
+        );
+
+        assert!(tasks[0].is_journal);
+        assert_eq!(tasks[0].journal_date.as_deref(), Some("2026-10-29"));
+        assert_eq!(tasks[0].content_type, "journal");
+    }
+
+    #[test]
+    fn a_page_with_no_tasks_yields_none() {
+        let tasks = tasks_in_page(
+            &page_of(vec![Block::new("just thinking out loud")]),
+            &ContentType::page(),
+            None,
+        );
+        assert!(tasks.is_empty());
+    }
+
+    #[test]
+    fn tags_are_lowercased_so_one_tag_is_one_tag() {
+        // #Work and #work are the same tag; the lowercased form is the key.
+        let page = page_of(vec![Block::new("#Work and #work and #WORK")]);
+        let tags = tags_in_page(&page);
+
+        assert_eq!(tags.len(), 3);
+        assert!(tags.iter().all(|(tag, _)| tag == "work"));
+    }
+
+    #[test]
+    fn every_tag_occurrence_names_its_own_block() {
+        let first = Block::new("#alpha here");
+        let second = Block::new("#beta and #gamma");
+        let (first_uuid, second_uuid) = (first.uuid, second.uuid);
+
+        let tags = tags_in_page(&page_of(vec![first, second]));
+
+        let mut found: Vec<(String, bool)> = tags
+            .into_iter()
+            .map(|(tag, occurrence)| {
+                assert_eq!(occurrence.page_name, "Notes");
+                let from_first = occurrence.block_uuid == first_uuid;
+                assert!(from_first || occurrence.block_uuid == second_uuid);
+                (tag, from_first)
+            })
+            .collect();
+        found.sort();
+
+        assert_eq!(
+            found,
+            vec![
+                ("alpha".to_string(), true),
+                ("beta".to_string(), false),
+                ("gamma".to_string(), false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_page_with_no_tags_yields_none() {
+        assert!(tags_in_page(&page_of(vec![Block::new("no hashes here")])).is_empty());
     }
 }
