@@ -86,6 +86,30 @@ export function LocalGardens() {
   const [formError, setFormError] = useState<string | null>(null)
   const [unlockId, setUnlockId] = useState<string | null>(null)
   const [confirmForget, setConfirmForget] = useState<string | null>(null)
+  const [reloading, setReloading] = useState(false)
+  const [watching, setWatching] = useState(false)
+
+  // Whether the folder is being watched decides what the Reload button is for:
+  // a convenience, or the only way to notice an outside change.
+  useEffect(() => {
+    if (!openId) {
+      setWatching(false)
+      return
+    }
+    void import('../../lib/local/localBackend').then(({ isWatchingFolder }) => {
+      setWatching(isWatchingFolder())
+    })
+  }, [openId])
+
+  const reload = async () => {
+    setReloading(true)
+    try {
+      const { reloadFromDisk } = await import('../../lib/local/localBackend')
+      await reloadFromDisk()
+    } finally {
+      setReloading(false)
+    }
+  }
 
   useEffect(() => {
     void refresh()
@@ -229,7 +253,24 @@ export function LocalGardens() {
             <span className="text-xs text-base-05 truncate">{garden.name}</span>
           </div>
           {openId === garden.id ? (
-            <span className="text-xs text-base-0D px-2">Active</span>
+            <div className="flex items-center gap-1 pr-1">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void reload()
+                }}
+                disabled={reloading}
+                className="px-1.5 py-0.5 text-xs text-base-04 hover:text-base-05 transition-colors disabled:opacity-50"
+                title={
+                  watching
+                    ? 'Tend is watching this folder. Reload anyway.'
+                    : 'This browser cannot watch the folder, so changes made outside Tend need a reload.'
+                }
+              >
+                {reloading ? 'Reloading…' : 'Reload'}
+              </button>
+              <span className="text-xs text-base-0D">Active</span>
+            </div>
           ) : confirmForget === garden.id ? (
             <div className="flex items-center gap-1 pr-1">
               <button

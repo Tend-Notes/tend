@@ -25,6 +25,7 @@ import { useUIStore } from './stores/uiStore'
 import { useSettingsStore } from './stores/settingsStore'
 import { useAutoCommit } from './hooks/useAutoCommit'
 import { useWebSocket } from './hooks/useWebSocket'
+import { useLocalFolderWatch } from './hooks/useLocalFolderWatch'
 import { useTheme } from './hooks/useTheme'
 import { contentTypes as contentTypesApi, identity, isDemoMode, AuthExpiredError } from './lib/api'
 import { useAuthStore } from './stores/authStore'
@@ -60,6 +61,9 @@ function App() {
 
   // Initialize WebSocket connection for real-time updates (skip in demo mode)
   useWebSocket()
+  // The local-folder counterpart: the WebSocket is not subscribed while a local
+  // garden is open, so this is what notices the folder changing under Tend.
+  useLocalFolderWatch()
 
   // Apply theme based on user settings
   useTheme()

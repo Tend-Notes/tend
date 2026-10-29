@@ -44,6 +44,25 @@ export class StaleWriteError extends Error {
   }
 }
 
+/**
+ * A read could not be completed because the file was changing underneath it.
+ *
+ * `getFile()` hands back a snapshot — path, size, mtime — and the bytes are
+ * fetched only when something reads them. If the file changes in between, the
+ * read fails rather than returning a torn mix of old and new content, which is
+ * the behaviour we want: a torn markdown note is a mangled page, and a torn
+ * `.age` file is an undecryptable blob. The documented remedy is to call
+ * `getFile()` again, so the store retries once. A second failure means
+ * something really is writing to the file, which is the same condition as
+ * `StaleWriteError` and reaches the UI by the same path.
+ */
+export class StaleReadError extends Error {
+  constructor(readonly path: string, readonly cause?: unknown) {
+    super(`${path} is being written by something else`)
+    this.name = 'StaleReadError'
+  }
+}
+
 /** The handle is no longer usable: permission withdrawn, or folder gone. */
 export class FolderUnavailableError extends Error {
   constructor(message: string, readonly cause?: unknown) {
@@ -54,6 +73,11 @@ export class FolderUnavailableError extends Error {
 
 function isNotFound(e: unknown): boolean {
   return e instanceof Error && e.name === 'NotFoundError'
+}
+
+/** A read that lost a race with a writer, rather than a broken handle. */
+function isUnreadable(e: unknown): boolean {
+  return e instanceof Error && (e.name === 'NotReadableError' || e.name === 'NotReadableErr')
 }
 
 /** Split a garden-relative path, rejecting anything that could escape it. */
@@ -68,11 +92,45 @@ export function splitPath(path: string): { dirs: string[]; name: string } {
 }
 
 export class LocalFolderStore {
+  /**
+   * Paths this store is part-way through writing.
+   *
+   * The folder watcher reads this to drop the `modified` records our own saves
+   * cause; without it every save would trigger a reload of the note just
+   * saved. `tend-storage`'s watcher keeps exactly the same set
+   * (`crates/tend-storage/src/watcher.rs`), and for the same reason.
+   */
+  private readonly writing = new Set<string>()
+
+  /** Writes held for another attempt after a transient failure. */
+  private readonly queued = new Map<string, { data: Uint8Array; attempts: number }>()
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+
   constructor(private readonly root: FileSystemDirectoryHandle) {}
 
   /** The folder's own name, for display ("which folder is this garden?"). */
   get folderName(): string {
     return this.root.name
+  }
+
+  /**
+   * The garden's directory handle.
+   *
+   * Exposed for the folder watcher, which `observe()`s the handle itself. The
+   * rest of the app addresses files by path and has no business holding this.
+   */
+  get directory(): FileSystemDirectoryHandle {
+    return this.root
+  }
+
+  /** Whether this store is mid-write on `path`. Read by the folder watcher. */
+  isWriting(path: string): boolean {
+    return this.writing.has(path)
+  }
+
+  /** How many writes are waiting to be retried. For the UI's save indicator. */
+  get queuedWrites(): number {
+    return this.queued.size
   }
 
   // --- permissions ---------------------------------------------------------
@@ -147,15 +205,34 @@ export class LocalFolderStore {
     }
   }
 
-  /** Read a file, or null when it does not exist. */
+  /**
+   * Read a file, or null when it does not exist.
+   *
+   * Retried once on a failed read, which is the documented remedy for losing a
+   * race with a writer. A second failure is a real condition, not a blip, and
+   * is reported as `StaleReadError` rather than letting a DOM exception escape.
+   */
   async read(path: string): Promise<ReadResult | null> {
     const handle = await this.fileHandle(path, false)
     if (!handle) return null
-    const file = await handle.getFile()
-    return {
-      bytes: new Uint8Array(await file.arrayBuffer()),
-      lastModified: file.lastModified,
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const file = await handle.getFile()
+        return {
+          bytes: new Uint8Array(await file.arrayBuffer()),
+          lastModified: file.lastModified,
+        }
+      } catch (e) {
+        if (!isUnreadable(e)) {
+          if (isNotFound(e)) return null
+          throw new FolderUnavailableError(`could not read ${path}`, e)
+        }
+        if (attempt === 1) throw new StaleReadError(path, e)
+      }
     }
+    // Unreachable: the loop either returns or throws.
+    throw new StaleReadError(path)
   }
 
   /** Read a file as UTF-8 text, or null. */
@@ -189,6 +266,7 @@ export class LocalFolderStore {
     options: WriteOptions = {}
   ): Promise<number> {
     const { expectedLastModified } = options
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
 
     if (expectedLastModified !== undefined) {
       const actual = await this.lastModified(path)
@@ -199,12 +277,38 @@ export class LocalFolderStore {
       }
     }
 
+    // In the set before the write and out of it after, so the watcher can tell
+    // our own `modified` record from someone else's.
+    this.writing.add(path)
+    try {
+      return await this.writeBytes(path, bytes)
+    } catch (e) {
+      // A transient failure must not lose the edit: hold the bytes and try
+      // again. The caller carries on, and the editor with it.
+      if (e instanceof FolderUnavailableError) {
+        this.queueWrite(path, bytes)
+        throw e
+      }
+      throw e
+    } finally {
+      this.writing.delete(path)
+    }
+  }
+
+  /** The write itself, with no staleness check and no queueing. */
+  private async writeBytes(path: string, bytes: Uint8Array): Promise<number> {
     const handle = await this.fileHandle(path, true)
     if (!handle) throw new FolderUnavailableError(`could not create ${path}`)
 
-    const writable = await handle.createWritable()
+    let writable: FileSystemWritableFileStream
     try {
-      await writable.write(typeof data === 'string' ? new TextEncoder().encode(data) : data)
+      writable = await handle.createWritable()
+    } catch (e) {
+      throw new FolderUnavailableError(`could not open ${path} for writing`, e)
+    }
+
+    try {
+      await writable.write(bytes)
       await writable.close()
     } catch (e) {
       // Leave the previous contents in place rather than a half-written file.
@@ -213,6 +317,68 @@ export class LocalFolderStore {
     }
 
     return (await this.lastModified(path)) ?? 0
+  }
+
+  // --- the retry queue -----------------------------------------------------
+  //
+  // A write can fail for reasons that have nothing to do with the edit:
+  // permission dropped after a restart, an external drive briefly unmounted, a
+  // sync client mid-operation. Those are measured in seconds, so the bytes are
+  // held in memory and re-attempted. Anything that has to survive a page reload
+  // is the draft store's job, not this one's.
+
+  /** How long to wait before the Nth attempt, capped. */
+  private static retryDelay(attempts: number): number {
+    return Math.min(1000 * 2 ** attempts, 30_000)
+  }
+
+  private queueWrite(path: string, data: Uint8Array): void {
+    const existing = this.queued.get(path)
+    // A newer write supersedes an older queued one: the last edit is the one
+    // the user means.
+    this.queued.set(path, { data, attempts: existing?.attempts ?? 0 })
+    this.scheduleRetry()
+  }
+
+  private scheduleRetry(): void {
+    if (this.retryTimer || this.queued.size === 0) return
+    const attempts = Math.min(...[...this.queued.values()].map((q) => q.attempts))
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      void this.flushQueue()
+    }, LocalFolderStore.retryDelay(attempts))
+  }
+
+  /**
+   * Re-attempt every queued write. Returns how many landed.
+   *
+   * Public so the UI can offer "try again now" and so a test does not have to
+   * wait on a timer.
+   */
+  async flushQueue(): Promise<number> {
+    let written = 0
+    for (const [path, entry] of [...this.queued]) {
+      this.writing.add(path)
+      try {
+        await this.writeBytes(path, entry.data)
+        this.queued.delete(path)
+        written += 1
+      } catch {
+        // Still failing. Keep it, and back off further.
+        this.queued.set(path, { ...entry, attempts: entry.attempts + 1 })
+      } finally {
+        this.writing.delete(path)
+      }
+    }
+    this.scheduleRetry()
+    return written
+  }
+
+  /** Stop retrying. Called when the garden closes; queued edits are dropped. */
+  cancelQueuedWrites(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.retryTimer = null
+    this.queued.clear()
   }
 
   /** Delete a file. Missing is success: the caller wanted it gone. */

@@ -5,6 +5,7 @@ import { FakeDirectoryHandle } from './handleFake'
 import {
   LocalFolderStore,
   StaleWriteError,
+  StaleReadError,
   FolderUnavailableError,
   splitPath,
 } from './LocalFolderStore'
@@ -266,5 +267,100 @@ describe('folderName', () => {
   it('exposes the folder name for display', async () => {
     const { store: s } = store()
     expect(s.folderName).toBe('garden')
+  })
+})
+
+// A read hands back a snapshot and fetches the bytes later, so it can lose a
+// race with a writer. The documented remedy is to ask again, which is what the
+// store does — once. A second failure is a real condition, not a blip.
+describe('a read that loses a race with a writer', () => {
+  it('retries once and succeeds', async () => {
+    const { root, store: s } = store({ 'pages/A.md': 'hello' })
+    root.failReads('pages/A.md', 1)
+
+    const result = await s.readText('pages/A.md')
+    expect(result?.text).toBe('hello')
+  })
+
+  it('gives up on the second failure, as the staleness condition', async () => {
+    const { root, store: s } = store({ 'pages/A.md': 'hello' })
+    root.failReads('pages/A.md', 2)
+
+    await expect(s.read('pages/A.md')).rejects.toBeInstanceOf(StaleReadError)
+  })
+
+  it('does not turn a missing file into a failed read', async () => {
+    const { store: s } = store()
+    expect(await s.read('pages/Nothing.md')).toBeNull()
+  })
+})
+
+// A write can fail for reasons that have nothing to do with the edit: a drive
+// briefly unmounted, a sync client mid-operation, permission just dropped. The
+// edit must not be lost while that resolves.
+describe('the write retry queue', () => {
+  it('holds a failed write and lands it on the retry', async () => {
+    const { root, store: s } = store()
+    root.failWrites('pages/A.md', 1)
+
+    await expect(s.write('pages/A.md', 'milk')).rejects.toBeInstanceOf(FolderUnavailableError)
+    expect(s.queuedWrites).toBe(1)
+    // The content is not there yet, but it is not lost either. The file itself
+    // exists and is empty: getFileHandle({create: true}) creates it before the
+    // write can fail, which is what the real API does too. The retry fills it.
+    expect(root.snapshot()['pages/A.md']).toBe('')
+
+    expect(await s.flushQueue()).toBe(1)
+    expect(s.queuedWrites).toBe(0)
+    expect(root.snapshot()['pages/A.md']).toBe('milk')
+  })
+
+  it('keeps a write that is still failing, rather than dropping it', async () => {
+    const { root, store: s } = store()
+    root.failWrites('pages/A.md', 3)
+
+    await expect(s.write('pages/A.md', 'milk')).rejects.toThrow()
+    expect(await s.flushQueue()).toBe(0)
+    expect(s.queuedWrites).toBe(1)
+
+    // Third attempt consumes the last injected failure; the fourth lands.
+    expect(await s.flushQueue()).toBe(0)
+    expect(await s.flushQueue()).toBe(1)
+    expect(root.snapshot()['pages/A.md']).toBe('milk')
+  })
+
+  it('keeps only the newest write for a path', async () => {
+    const { root, store: s } = store()
+    root.failWrites('pages/A.md', 2)
+
+    await expect(s.write('pages/A.md', 'first')).rejects.toThrow()
+    await expect(s.write('pages/A.md', 'second')).rejects.toThrow()
+    expect(s.queuedWrites).toBe(1)
+
+    await s.flushQueue()
+    // The last edit is the one the user means.
+    expect(root.snapshot()['pages/A.md']).toBe('second')
+  })
+
+  it('reports the path as being written while a write is in flight', async () => {
+    const { store: s } = store()
+    expect(s.isWriting('pages/A.md')).toBe(false)
+
+    const writing = s.write('pages/A.md', 'milk')
+    // Synchronously after the call, the path is held — which is what the folder
+    // watcher reads to tell our own save from someone else's.
+    expect(s.isWriting('pages/A.md')).toBe(true)
+    await writing
+    expect(s.isWriting('pages/A.md')).toBe(false)
+  })
+
+  it('drops queued edits when the garden closes', async () => {
+    const { root, store: s } = store()
+    root.failWrites('pages/A.md', 1)
+    await expect(s.write('pages/A.md', 'milk')).rejects.toThrow()
+    expect(s.queuedWrites).toBe(1)
+
+    s.cancelQueuedWrites()
+    expect(s.queuedWrites).toBe(0)
   })
 })

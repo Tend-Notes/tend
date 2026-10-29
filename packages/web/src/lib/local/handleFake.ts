@@ -30,6 +30,18 @@ function notAllowed(): Error {
   return err
 }
 
+/**
+ * What the real API throws when a file changes between `getFile()` and reading
+ * its bytes. Not an error to swallow: the alternative is a torn read, which for
+ * a markdown note is a mangled page and for an `.age` file an undecryptable
+ * blob.
+ */
+function notReadable(name: string): Error {
+  const err = new Error(`${name} could not be read`)
+  err.name = 'NotReadableError'
+  return err
+}
+
 interface FakeFile {
   bytes: Uint8Array
   lastModified: number
@@ -44,10 +56,41 @@ class FakeRoot {
   grantOn: FileSystemPermissionState = 'granted'
   requests = 0
 
+  /**
+   * Paths whose next N reads throw, by path. The real API fails a read with
+   * NotReadableError when the file changes between `getFile()` and reading its
+   * bytes, and the documented remedy is to call `getFile()` again — so a test
+   * has to be able to fail once and succeed on the retry.
+   */
+  readFailures = new Map<string, number>()
+  /** Same, for writes: a transient failure the retry queue should absorb. */
+  writeFailures = new Map<string, number>()
+  /** Observers watching this tree, notified on every change. */
+  observers = new Set<(records: FakeChangeRecord[]) => void>()
+
   tick(): number {
     this.clock += 1000
     return this.clock
   }
+
+  /** Consume one injected failure for `path`, if any is pending. */
+  shouldFail(kind: 'read' | 'write', path: string): boolean {
+    const map = kind === 'read' ? this.readFailures : this.writeFailures
+    const left = map.get(path) ?? 0
+    if (left <= 0) return false
+    map.set(path, left - 1)
+    return true
+  }
+
+  notify(records: FakeChangeRecord[]): void {
+    for (const observer of this.observers) observer(records)
+  }
+}
+
+/** The shape FileSystemObserver hands to its callback. */
+export interface FakeChangeRecord {
+  type: 'appeared' | 'disappeared' | 'modified' | 'moved' | 'unknown' | 'errored'
+  relativePathComponents: string[]
 }
 
 export class FakeFileHandle {
@@ -65,14 +108,21 @@ export class FakeFileHandle {
     return f
   }
 
+  /** This file's path from the tree root, for failure injection and records. */
+  private get path(): string {
+    return this.dir.pathOf(this.name)
+  }
+
   async getFile(): Promise<File> {
     const { bytes, lastModified } = this.file
+    if (this.root.shouldFail('read', this.path)) throw notReadable(this.name)
     // A real File, so callers can use arrayBuffer()/text() as they would.
     return new File([bytes as BlobPart], this.name, { lastModified })
   }
 
   async createWritable(): Promise<FileSystemWritableFileStream> {
     this.root.permission === 'granted' || (() => { throw notAllowed() })()
+    if (this.root.shouldFail('write', this.path)) throw notReadable(this.name)
 
     const chunks: Uint8Array[] = []
     const dir = this.dir
@@ -92,7 +142,14 @@ export class FakeFileHandle {
           bytes.set(c, at)
           at += c.length
         }
+        const existed = dir.files.has(name)
         dir.files.set(name, { bytes, lastModified: root.tick() })
+        root.notify([
+          {
+            type: existed ? 'modified' : 'appeared',
+            relativePathComponents: dir.pathOf(name).split('/'),
+          },
+        ])
       },
       async abort() {
         chunks.length = 0
@@ -119,8 +176,15 @@ export class FakeDirectoryHandle {
 
   constructor(
     readonly name: string,
-    private readonly root: FakeRoot = new FakeRoot()
+    private readonly root: FakeRoot = new FakeRoot(),
+    /** This directory's path from the tree root; '' for the root itself. */
+    private readonly prefix: string = ''
   ) {}
+
+  /** A child's path from the tree root, which is how changes are addressed. */
+  pathOf(child: string): string {
+    return this.prefix ? `${this.prefix}/${child}` : child
+  }
 
   /** Build a root handle, optionally seeded with `path -> contents`. */
   static create(seed: Record<string, string | Uint8Array> = {}): FakeDirectoryHandle {
@@ -141,7 +205,7 @@ export class FakeDirectoryHandle {
     for (const part of parts) {
       let next = dir.dirs.get(part)
       if (!next) {
-        next = new FakeDirectoryHandle(part, this.root)
+        next = new FakeDirectoryHandle(part, this.root, dir.pathOf(part))
         dir.dirs.set(part, next)
       }
       dir = next
@@ -183,7 +247,7 @@ export class FakeDirectoryHandle {
     if (!options?.create) throw notFound(name)
 
     if (this.root.permission !== 'granted') throw notAllowed()
-    const dir = new FakeDirectoryHandle(name, this.root)
+    const dir = new FakeDirectoryHandle(name, this.root, this.pathOf(name))
     this.dirs.set(name, dir)
     return dir as unknown as FileSystemDirectoryHandle
   }
@@ -201,15 +265,21 @@ export class FakeDirectoryHandle {
   }
 
   async removeEntry(name: string, options?: { recursive?: boolean }): Promise<void> {
-    if (this.files.delete(name)) return
-    const dir = this.dirs.get(name)
-    if (!dir) throw notFound(name)
-    if (!options?.recursive && (dir.files.size || dir.dirs.size)) {
-      const err = new Error(`${name} is not empty`)
-      err.name = 'InvalidModificationError'
-      throw err
+    if (this.root.permission !== 'granted') throw notAllowed()
+    const had = this.files.delete(name)
+    if (!had) {
+      const dir = this.dirs.get(name)
+      if (!dir) throw notFound(name)
+      if (!options?.recursive && (dir.files.size > 0 || dir.dirs.size > 0)) {
+        const err = new Error(`${name} is not empty`)
+        err.name = 'InvalidModificationError'
+        throw err
+      }
+      this.dirs.delete(name)
     }
-    this.dirs.delete(name)
+    this.root.notify([
+      { type: 'disappeared', relativePathComponents: this.pathOf(name).split('/') },
+    ])
   }
 
   async *entries(): AsyncIterableIterator<[string, FileSystemHandle]> {
@@ -256,6 +326,54 @@ export class FakeDirectoryHandle {
   /** How many times requestPermission() was called — a gesture is required. */
   get permissionRequests(): number {
     return this.root.requests
+  }
+
+  /**
+   * Make the next `times` reads of `path` throw NotReadableError, which is
+   * what the real API does when a file changes between `getFile()` and reading
+   * its bytes. One failure exercises the retry; two exercise giving up.
+   */
+  failReads(path: string, times = 1): void {
+    this.root.readFailures.set(path, times)
+  }
+
+  /** Same for writes, for the transient failure the retry queue absorbs. */
+  failWrites(path: string, times = 1): void {
+    this.root.writeFailures.set(path, times)
+  }
+
+  /**
+   * Push change records at every observer, as the browser would. Lets a test
+   * drive a remote change, a burst, or an `unknown` record — the one that means
+   * events were *missed* and the whole garden has to be re-read.
+   */
+  emit(records: FakeChangeRecord[]): void {
+    this.root.notify(records)
+  }
+
+  /** Watchers currently observing this tree. */
+  get observerCount(): number {
+    return this.root.observers.size
+  }
+
+  /** A FileSystemObserver stand-in, for `vi.stubGlobal('FileSystemObserver', …)`. */
+  observerClass(): new (callback: (records: FakeChangeRecord[]) => void) => {
+    observe: () => void
+    disconnect: () => void
+  } {
+    const root = this.root
+    return class {
+      private readonly listener: (records: FakeChangeRecord[]) => void
+      constructor(callback: (records: FakeChangeRecord[]) => void) {
+        this.listener = (records) => callback(records)
+      }
+      observe() {
+        root.observers.add(this.listener)
+      }
+      disconnect() {
+        root.observers.delete(this.listener)
+      }
+    }
   }
 
   /** Simulate the folder being deleted or moved away. */

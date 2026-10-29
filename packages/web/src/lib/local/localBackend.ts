@@ -63,6 +63,7 @@ import {
   type GardenSession,
 } from './gardenFiles'
 import { backlinksOf, buildIndex, searchIndex, type GardenIndex } from './gardenIndex'
+import { canWatch, watchGarden, type GardenWatcher } from './gardenWatcher'
 
 /** No garden is open, so there is nothing to read. */
 export class NoLocalGardenError extends Error {
@@ -90,6 +91,31 @@ let cachedIndex: Promise<GardenIndex> | null = null
  */
 const servedAt = new Map<string, number>()
 
+let watcher: GardenWatcher | null = null
+
+/**
+ * Told when the folder changed outside Tend, with the garden-relative paths.
+ *
+ * The backend does not navigate or render, so it reports rather than acts: the
+ * UI decides whether to reload what is on screen. `paths` is empty when events
+ * were missed and the whole garden has been re-read.
+ */
+type FolderChangeListener = (paths: string[]) => void
+const folderChangeListeners = new Set<FolderChangeListener>()
+
+/** Subscribe to outside changes to the open garden's folder. Returns the unsubscribe. */
+export function onFolderChange(listener: FolderChangeListener): () => void {
+  folderChangeListeners.add(listener)
+  return () => {
+    folderChangeListeners.delete(listener)
+  }
+}
+
+/** Whether the open garden is being watched, as opposed to needing a manual reload. */
+export function isWatchingFolder(): boolean {
+  return watcher?.active ?? false
+}
+
 /**
  * Open a garden, or close the current one with `null`.
  *
@@ -98,10 +124,61 @@ const servedAt = new Map<string, number>()
  * leave no decrypted content behind.
  */
 export function setLocalSession(next: GardenSession | null): void {
+  watcher?.stop()
+  watcher = null
+  session?.store.cancelQueuedWrites()
+
   session = next
   cachedTypes = null
   cachedIndex = null
   servedAt.clear()
+
+  if (next) startWatching(next)
+}
+
+/**
+ * Watch the open garden's folder.
+ *
+ * A change outside Tend drops the scan and the served-mtime record for the
+ * affected sheets, so the next read picks up the new content and the next save
+ * checks against it rather than refusing forever. Then the UI is told, so it
+ * can reload what is on screen.
+ */
+function startWatching(open: GardenSession): void {
+  if (!canWatch()) return
+
+  watcher = watchGarden(
+    open.store.directory,
+    open.store,
+    {
+      onChanged: (paths) => {
+        cachedIndex = null
+        // Only the sheets that actually changed lose their baseline; the rest
+        // keep theirs, so an unrelated edit elsewhere cannot clear a genuine
+        // conflict.
+        void forgetChangedSheets(paths)
+        for (const notify of folderChangeListeners) notify(paths)
+      },
+      onDesynchronized: () => {
+        // Events were missed: nothing about the folder can be assumed.
+        cachedIndex = null
+        servedAt.clear()
+        for (const notify of folderChangeListeners) notify([])
+      },
+    }
+  )
+}
+
+/** Drop the served-mtime record for whichever sheets the given files hold. */
+async function forgetChangedSheets(paths: string[]): Promise<void> {
+  try {
+    const scanned = await index()
+    for (const sheet of scanned.sheets.values()) {
+      if (paths.includes(sheet.ref.path)) servedAt.delete(sheet.page.name)
+    }
+  } catch {
+    // The rescan failed; the baselines stay, and the next read will try again.
+  }
 }
 
 /** The open garden. Exported for the flows that need the store directly. */
@@ -637,6 +714,22 @@ export const stabilize = {
       message: `Stabilized ${stabilized} sheet${stabilized === 1 ? '' : 's'} in this folder`,
     }
   },
+}
+
+/**
+ * Re-read the folder from scratch.
+ *
+ * The fallback behind the watcher: a browser without `FileSystemObserver`, or a
+ * user who knows something changed and does not want to wait. Every baseline
+ * goes too, so a sheet edited outside Tend is served fresh rather than refusing
+ * the next save.
+ */
+export async function reloadFromDisk(): Promise<void> {
+  cachedTypes = null
+  cachedIndex = null
+  servedAt.clear()
+  await index()
+  for (const notify of folderChangeListeners) notify([])
 }
 
 /** Tests only. */
