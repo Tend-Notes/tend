@@ -8,10 +8,8 @@ import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet
 import { usePageStore } from '../../stores/pageStore'
 import { UnlockGardenDialog } from '../ui/UnlockGardenDialog'
 import { useUIStore } from '../../stores/uiStore'
-import { useSyncStatusStore } from '../../stores/syncStatusStore'
-import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi, isDemoMode, checkAuthResponse } from '../../lib/api'
-import { invalidateSheetList } from '../../lib/sheetListCache'
+import { activateGarden } from '../../stores/gardenSwitch'
 import {
   getDarkThemes,
   getLightThemes,
@@ -1592,22 +1590,8 @@ function GardensSection() {
         return
       }
 
-      // Update state and reset all stores to load the new garden
-      invalidateSheetList()
       setCurrentGraphId(id)
-      usePageStore.getState().reset()
-      useUIStore.getState().reset()
-      useSyncStatusStore.getState().reset()
-      useRecentSheetsStore.getState().reset()
-      // Load the new garden's content types
-      const types = await contentTypesApi.list()
-      useSettingsStore.getState().setContentTypes(types)
-      // Reset the URL to home first: a stale /page/<name> from the previous
-      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
-      // leaking the page across gardens.
-      window.history.replaceState(null, '', '/')
-      // Load the new garden's default page
-      await usePageStore.getState().initializeFromUrl()
+      await activateGarden()
     } catch (err) {
       // Ignore AbortError - either our timeout or page reload aborted the request.
       // If it's a real timeout, the page won't reload and user can retry.
@@ -1645,23 +1629,9 @@ function GardensSection() {
         throw new Error(data.error || 'Failed to unlock garden')
       }
 
-      invalidateSheetList()
       setCurrentGraphId(unlockGardenId)
       setUnlockGardenId(null)
-      // Reset all stores and load the new garden's content types and default page
-      usePageStore.getState().reset()
-      useUIStore.getState().reset()
-      useSyncStatusStore.getState().reset()
-      useRecentSheetsStore.getState().reset()
-      // Load the new garden's content types
-      const types = await contentTypesApi.list()
-      useSettingsStore.getState().setContentTypes(types)
-      // Reset the URL to home first: a stale /page/<name> from the previous
-      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
-      // leaking the page across gardens.
-      window.history.replaceState(null, '', '/')
-      // Load the new garden's default page
-      await usePageStore.getState().initializeFromUrl()
+      await activateGarden()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to unlock garden')
     } finally {
