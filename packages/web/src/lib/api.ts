@@ -25,8 +25,10 @@ import type {
   BlockUpdateResult,
 } from '../types'
 
-// Demo mode detection
-export const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true'
+// Demo mode detection. Owned by backend.ts, which seeds the initial backend
+// from it; re-exported here because this is where callers already import it.
+export { isDemoMode } from './backend'
+import { isDemoMode } from './backend'
 
 // Import demo API for proxying (tree-shaken in non-demo builds)
 import * as demoApi from './demoApi'
