@@ -42,6 +42,15 @@ export interface RegistryStore {
   listGardens(): Promise<LocalGarden[]>
   putGarden(garden: LocalGarden): Promise<void>
   removeGarden(id: string): Promise<void>
+  /**
+   * Whether the chosen folder will still be known next session.
+   *
+   * False when the handle could not be written — a private window, site data
+   * blocked, or storage otherwise unavailable. The folder still works for this
+   * session; the user just has to pick it again next time, and deserves to be
+   * told rather than surprised.
+   */
+  rootPersists(): boolean
 }
 
 const DB_NAME = 'tend-local-gardens'
@@ -75,24 +84,59 @@ function run<T>(store: IDBObjectStore, request: IDBRequest<T>): Promise<T> {
 
 /** The real store, backed by IndexedDB. */
 export class IndexedDbRegistry implements RegistryStore {
+  /**
+   * The root this session is using, when it could not be written to IndexedDB.
+   *
+   * Persisting the handle is what lets a folder be reopened after a restart,
+   * but it is not what makes it usable *now*. Storage can refuse — a private
+   * window, site data blocked — and refusing the whole feature in that case
+   * would be a worse answer than working for the session and saying so.
+   */
+  private memoryRoot: FileSystemDirectoryHandle | null = null
+  private persisted = true
+
+  rootPersists(): boolean {
+    return this.persisted
+  }
+
   private async tx(name: string, mode: IDBTransactionMode): Promise<IDBObjectStore> {
     const db = await open()
     return db.transaction(name, mode).objectStore(name)
   }
 
   async getRoot(): Promise<FileSystemDirectoryHandle | null> {
-    const store = await this.tx(HANDLES, 'readonly')
-    return (await run(store, store.get(ROOT_KEY))) ?? null
+    if (this.memoryRoot) return this.memoryRoot
+    try {
+      const store = await this.tx(HANDLES, 'readonly')
+      return (await run(store, store.get(ROOT_KEY))) ?? null
+    } catch {
+      return null
+    }
   }
 
   async setRoot(handle: FileSystemDirectoryHandle): Promise<void> {
-    const store = await this.tx(HANDLES, 'readwrite')
-    await run(store, store.put(handle, ROOT_KEY))
+    try {
+      const store = await this.tx(HANDLES, 'readwrite')
+      await run(store, store.put(handle, ROOT_KEY))
+      this.memoryRoot = null
+      this.persisted = true
+    } catch {
+      // Keep it for the session rather than losing the folder the user just
+      // chose. They will be asked again next time.
+      this.memoryRoot = handle
+      this.persisted = false
+    }
   }
 
   async clearRoot(): Promise<void> {
-    const store = await this.tx(HANDLES, 'readwrite')
-    await run(store, store.delete(ROOT_KEY))
+    this.memoryRoot = null
+    this.persisted = true
+    try {
+      const store = await this.tx(HANDLES, 'readwrite')
+      await run(store, store.delete(ROOT_KEY))
+    } catch {
+      // Nothing stored to clear.
+    }
   }
 
   async listGardens(): Promise<LocalGarden[]> {
@@ -116,6 +160,10 @@ export class IndexedDbRegistry implements RegistryStore {
 export class MemoryRegistry implements RegistryStore {
   private root: FileSystemDirectoryHandle | null = null
   private gardens = new Map<string, LocalGarden>()
+
+  rootPersists() {
+    return false
+  }
 
   async getRoot() {
     return this.root

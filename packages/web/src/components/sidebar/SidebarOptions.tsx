@@ -1588,6 +1588,10 @@ function GardensSection() {
 
   const handleSwitchGarden = async (id: string) => {
     try {
+      // A local garden may be open. Close it first: its identity has to be
+      // dropped, and the dispatcher has to stop routing to it, before anything
+      // is asked of the server.
+      await useLocalGardenStore.getState().close()
       // Use AbortController with timeout to detect backend hangs
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
@@ -1638,6 +1642,7 @@ function GardensSection() {
 
     try {
       setUnlocking(true)
+      await useLocalGardenStore.getState().close()
       setError(null)
       // No checkAuthResponse here: this endpoint answers a wrong passphrase
       // with 401, which has nothing to do with the proxy session.

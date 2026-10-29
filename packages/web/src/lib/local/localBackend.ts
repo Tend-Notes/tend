@@ -314,11 +314,71 @@ async function getSheet(
   date?: string
 ): Promise<Page> {
   const contentType = await typeById(contentTypeId)
+  const wasm = await loadWasm()
+  // The same guard the server applies on every read and write: the content
+  // type's directory and the sheet name are both interpolated into a path.
+  wasm.validate_safe_name(name)
+  wasm.validate_safe_name(contentType.directory)
+
   const loaded = await readSheet(current(), contentType, name, date)
-  if (!loaded) throw new Error(`Sheet '${name}' not found`)
+  if (!loaded) {
+    // Journals only: a date with no file is an empty journal, not an error.
+    // Today's journal is the first thing the app opens, so this is the
+    // difference between a working garden and "Sheet not found".
+    if (contentType.id === 'journal') return emptySheet(contentType, name, date)
+    throw new Error(`Sheet '${name}' not found`)
+  }
   // The user has now been shown this version; a later save checks against it.
   servedAt.set(loaded.page.name, loaded.lastModified)
   return loaded.page
+}
+
+// --- tag pages ---------------------------------------------------------------
+//
+// A tag has no file: its page is synthetic, and its content is the backlinks of
+// everything that mentions it. The server builds the same thing; the copy for
+// the sync-state tags has to differ, because what those states mean for a local
+// garden is not what they mean for a server one — there is no repository to
+// commit to and no remote to push to.
+
+const SYSTEM_TAGS: Record<string, string> = {
+  saved:
+    'Your changes have been written to the folder on this machine. They are on disk, and they have not been sent anywhere.',
+  stored:
+    'Your changes are on disk in your garden folder. A local garden has no version control of its own — whatever backs up that folder is what backs these up.',
+  'backed up':
+    'A local folder garden is not backed up by Tend. Its safety is whatever you have arranged for the folder itself.',
+  unsaved:
+    'You have changes that have not yet been written to the folder. These exist only in your browser and will be lost if you close the tab.',
+}
+
+function tagPage(tagName: string): Page {
+  const system = SYSTEM_TAGS[tagName]
+  const uuid = crypto.randomUUID()
+  const block = {
+    uuid,
+    content: system ?? `Pages and blocks tagged with #${tagName}.`,
+    parentUuid: null,
+    children: [] as string[],
+    collapsed: false,
+    properties: system ? { readonly: 'true' } : ({} as Record<string, string>),
+    depth: 0,
+  }
+  const now = new Date().toISOString()
+  return {
+    name: `tags/${tagName}`,
+    title: `tags/${tagName}`,
+    rootBlocks: [uuid],
+    blocks: { [uuid]: block },
+    // A system tag's page is not editable, there or here.
+    properties: system ? { readonly: 'true' } : {},
+    contentType: 'page',
+    isJournal: false,
+    journalDate: null,
+    createdAt: now,
+    modifiedAt: now,
+    version: 1,
+  }
 }
 
 async function updateSheet(
@@ -456,7 +516,8 @@ function defaultAboutBody(compilation: string): string {
 
 export const pages = {
   list: async (): Promise<PageMeta[]> => (await index()).listings.get('page') ?? [],
-  get: (name: string) => getSheet('page', name),
+  get: async (name: string): Promise<Page> =>
+    name.startsWith('tags/') ? tagPage(name.slice('tags/'.length)) : getSheet('page', name),
   create: (name: string, content?: string) =>
     createSheet('page', name, { content }).then(({ cursorPosition: _, ...page }) => page as Page),
   update: (name: string, blocks: BlockData[], version?: number) =>

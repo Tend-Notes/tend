@@ -21,6 +21,27 @@ function samplePage(): Pick<Page, 'blocks' | 'rootBlocks'> {
   }
 }
 
+describe('a page with no blocks', () => {
+  it('gives the placeholder item a real uuid', () => {
+    // The bug this closes: the placeholder used to carry uuid '', on the
+    // assumption that uuidPlugin would fill it in. That plugin skips the scan
+    // for inline-only steps, and typing is inline-only — so the first
+    // keystroke on a brand-new page sent a block with no uuid and the save was
+    // rejected with "Invalid block UUID". Every new journal hit it.
+    const { blocks, rootBlocks } = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    expect(rootBlocks).toEqual([blocks[0].uuid])
+  })
+
+  it('gives a different uuid each time, so two pages do not share one', () => {
+    const first = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
+    const second = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
+    expect(first.blocks[0].uuid).not.toBe(second.blocks[0].uuid)
+  })
+})
+
 describe('pageDoc round-trip', () => {
   it('page -> doc -> blocks preserves structure, content, uuids, collapsed, properties', () => {
     const page = samplePage()

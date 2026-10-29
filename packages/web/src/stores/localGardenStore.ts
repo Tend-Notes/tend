@@ -20,7 +20,7 @@
 // unlocked and is dropped on lock.
 
 import { create } from 'zustand'
-import { setActiveBackend } from '../lib/backend'
+import { isDemoMode, setActiveBackend } from '../lib/backend'
 import {
   createLocalGarden,
   forgetLocalGarden,
@@ -41,6 +41,11 @@ interface LocalGardenState {
   /** Where the gardens root stands, without having prompted for anything. */
   status: RootStatus
   gardens: LocalGarden[]
+  /**
+   * False when this browser could not store the chosen folder, so it will have
+   * to be picked again next session. The folder works now either way.
+   */
+  rootRemembered: boolean
   /** The open local garden's id, or null when a server garden is active. */
   openId: string | null
   busy: boolean
@@ -97,6 +102,7 @@ export const useLocalGardenStore = create<LocalGardenState>((set, get) => ({
   supported: isSupported(),
   status: { state: isSupported() ? 'none' : 'unsupported' },
   gardens: [],
+  rootRemembered: true,
   openId: null,
   busy: false,
   error: null,
@@ -110,7 +116,7 @@ export const useLocalGardenStore = create<LocalGardenState>((set, get) => ({
         rootStatus(registry),
         registry.listGardens(),
       ])
-      set({ status, gardens, error: null })
+      set({ status, gardens, rootRemembered: registry.rootPersists(), error: null })
     } catch (e) {
       set({ error: message(e, 'Could not read the local-garden list') })
     }
@@ -225,6 +231,9 @@ export const useLocalGardenStore = create<LocalGardenState>((set, get) => ({
     // Dropping the session drops the identity and every derived index with it.
     const { setLocalSession } = await backend()
     setLocalSession(null)
+    // Back to the server, or every later call is refused by a dispatcher still
+    // pointed at a garden that is no longer open.
+    setActiveBackend({ kind: isDemoMode ? 'demo' : 'server' })
     clearGardenState()
   },
 

@@ -6,6 +6,7 @@
 // shaped for pageStore.updateCurrentPage.
 
 import { Node as PMNode } from 'prosemirror-model'
+import { v4 as uuidv4 } from 'uuid'
 import type { Block, Page } from '../../../types'
 import { outlineSchema } from './schema'
 
@@ -24,19 +25,37 @@ function itemToJSON(page: Pick<Page, 'blocks'>, uuid: string): Record<string, un
   return { type: 'list_item', attrs: { uuid, collapsed: b.collapsed, properties: b.properties }, content }
 }
 
-const EMPTY_DOC = {
-  type: 'doc',
-  content: [
-    {
-      type: 'bullet_list',
-      content: [{ type: 'list_item', attrs: { uuid: '', collapsed: false, properties: {} }, content: [{ type: 'line' }] }],
-    },
-  ],
+/**
+ * The document for a page with no blocks: one empty item to type into.
+ *
+ * Built fresh each time so the item gets a real uuid. It used to be a constant
+ * with `uuid: ''`, on the assumption that `uuidPlugin` would fill it in — but
+ * that plugin skips the scan for inline-only steps, and plain typing is
+ * inline-only. So on a brand-new page the first keystroke sent a block with an
+ * empty uuid, and the save was rejected with "Invalid block UUID". The
+ * placeholder needs an identity from the start, like every other item.
+ */
+function emptyDoc() {
+  return {
+    type: 'doc',
+    content: [
+      {
+        type: 'bullet_list',
+        content: [
+          {
+            type: 'list_item',
+            attrs: { uuid: uuidv4(), collapsed: false, properties: {} },
+            content: [{ type: 'line' }],
+          },
+        ],
+      },
+    ],
+  }
 }
 
 export function pageToDoc(page: Pick<Page, 'blocks' | 'rootBlocks'>): PMNode {
   const roots = page.rootBlocks.filter((u) => page.blocks[u])
-  if (roots.length === 0) return outlineSchema.nodeFromJSON(EMPTY_DOC)
+  if (roots.length === 0) return outlineSchema.nodeFromJSON(emptyDoc())
   return outlineSchema.nodeFromJSON({
     type: 'doc',
     content: [{ type: 'bullet_list', content: roots.map((u) => itemToJSON(page, u)) }],

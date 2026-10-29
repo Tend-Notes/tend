@@ -66,6 +66,7 @@ export function LocalGardens() {
     supported,
     status,
     gardens,
+    rootRemembered,
     openId,
     busy,
     error,
@@ -74,6 +75,7 @@ export function LocalGardens() {
     reconnect,
     create,
     open,
+    close,
     forget,
     clearError,
   } = useLocalGardenStore()
@@ -181,6 +183,13 @@ export function LocalGardens() {
         Local gardens live in this browser on this machine, and never reach the server.
       </p>
 
+      {status.state === 'ready' && !rootRemembered && (
+        <p className="text-xs text-base-0A">
+          This browser will not remember the folder after you close it, so you will be asked
+          for it again. Your notes are unaffected.
+        </p>
+      )}
+
       {error && (
         <div className="flex items-start justify-between gap-2 px-2 py-1.5 text-xs text-base-08 bg-base-08/10 rounded">
           <span>{error}</span>
@@ -268,6 +277,20 @@ export function LocalGardens() {
                 }
               >
                 {reloading ? 'Reloading…' : 'Reload'}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void close()
+                }}
+                className="px-1.5 py-0.5 text-xs text-base-04 hover:text-base-05 transition-colors"
+                title={
+                  garden.encrypted
+                    ? 'Close this garden and drop its key from memory.'
+                    : 'Close this garden.'
+                }
+              >
+                {garden.encrypted ? 'Lock' : 'Close'}
               </button>
               <span className="text-xs text-base-0D">Active</span>
             </div>
