@@ -21,7 +21,7 @@
 // says comes from the wasm bridge, which is the server's own code. This module
 // decides none of it; it only walks directories and moves bytes.
 
-import type { Page } from '../../types'
+import type { Page, PageMeta } from '../../types'
 import { GardenLockedError, type ContentType } from '../api'
 import { loadWasm, type TendWasm } from '../wasm'
 import { LocalFolderStore, StaleWriteError } from './LocalFolderStore'
@@ -278,6 +278,8 @@ export async function splitName(
 /** A sheet read and parsed, with the mtime its next write will check. */
 export interface LoadedSheet {
   page: Page
+  /** Listing metadata, built by the bridge from the same rules the server uses. */
+  meta: PageMeta
   lastModified: number
   path: string
 }
@@ -297,8 +299,9 @@ export async function readSheet(
 /**
  * Read a sheet whose file is already known.
  *
- * The parse needs the qualified name because the file does not carry it, and
- * the content type and date because a Page records both.
+ * The file does not carry the page's canonical name, content type or date —
+ * those come from where it sits — so the bridge derives all of them, including
+ * a journal's date, which is its *filename*, not a folder it is in.
  */
 export async function readSheetAt(
   session: GardenSession,
@@ -311,17 +314,31 @@ export async function readSheetAt(
   if (!file) return null
 
   const wasm = await loadWasm()
-  const qualified = await qualifiedName(contentType, name, date)
-  const page = JSON.parse(wasm.parse_markdown(file.text, qualified)) as Page
+  const page = JSON.parse(
+    wasm.parse_markdown(file.text, await qualifiedName(contentType, name, date))
+  ) as Page
 
-  // The parser works out the block tree; the content type and date come from
-  // where the file sits, which only the caller knows.
-  const resolved = filedUnder(contentType, date) ?? null
-  page.contentType = contentType.id
-  page.isJournal = contentType.id === 'journal'
-  page.journalDate = page.isJournal || contentType.organization === 'dateFoldered' ? resolved : null
+  // The File System Access API reports only lastModified, so a created time is
+  // not available; the server reads both from the filesystem. Both are reported
+  // as the mtime rather than inventing one.
+  const meta = JSON.parse(
+    wasm.sheet_meta(
+      JSON.stringify(contentType),
+      name,
+      filedUnder(contentType, date),
+      Object.keys(page.blocks).length,
+      BigInt(file.lastModified),
+      BigInt(file.lastModified)
+    )
+  ) as PageMeta
 
-  return { page, lastModified: file.lastModified, path }
+  page.name = meta.name
+  page.title = meta.title
+  page.contentType = meta.contentType
+  page.isJournal = meta.isJournal
+  page.journalDate = meta.journalDate
+
+  return { page, meta, lastModified: file.lastModified, path }
 }
 
 /**

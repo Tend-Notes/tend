@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tend_core::normalize_name as normalize_page_name;
 use tend_core::Block;
 use thiserror::Error;
 use tokio::fs;
@@ -66,15 +67,6 @@ pub struct BacklinkResult {
     pub block_uuid: Uuid,
     /// Type of link
     pub link_type: LinkType,
-}
-
-/// Normalize a page name for consistent hashing
-///
-/// Normalization:
-/// - Converts to lowercase
-/// - Trims leading and trailing whitespace
-fn normalize_page_name(name: &str) -> String {
-    name.trim().to_lowercase()
 }
 
 /// Hash a page name using SHA-256

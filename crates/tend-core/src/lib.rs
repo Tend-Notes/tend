@@ -20,6 +20,9 @@ pub use block::{Block, BlockData};
 pub use block_metadata::{BlockMetadata, ParsedContent};
 pub use content_type::{ContentType, Organization};
 pub use error::CoreError;
-pub use name::{parse as parse_name, qualify as qualify_name, split as split_name, ParsedName};
+pub use name::{
+    normalize as normalize_name, parse as parse_name, qualify as qualify_name,
+    split as split_name, ParsedName,
+};
 pub use page::{Page, PageMeta};
 pub use template::{instantiate, strip_cursor_marker, CursorPosition, CURSOR_MARKER};

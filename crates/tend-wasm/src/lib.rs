@@ -327,6 +327,19 @@ fn sheet_ext(encrypted: bool) -> &'static str {
     }
 }
 
+/// Every link out of a page: wiki-links and tags, each with the folded form a
+/// backlink lookup keys on.
+///
+/// The browser builds its own backlink, wikilink-target and graph maps from
+/// these; the grammar of a link, and how a name is folded for matching, stay
+/// here.
+pub fn extract_links_impl(page_json: &str) -> Result<String, String> {
+    let page: Page =
+        serde_json::from_str(page_json).map_err(|e| format!("invalid Page JSON: {e}"))?;
+    let links = tend_index::links_in_page(&page);
+    serde_json::to_string(&links).map_err(|e| format!("could not encode links: {e}"))
+}
+
 // ---------------------------------------------------------------------------
 // Filename encoding
 // ---------------------------------------------------------------------------
@@ -427,6 +440,11 @@ pub fn extract_tasks(
 #[wasm_bindgen]
 pub fn extract_tags(page_json: &str) -> Result<String, JsError> {
     extract_tags_impl(page_json).map_err(|e| JsError::new(&e))
+}
+
+#[wasm_bindgen]
+pub fn extract_links(page_json: &str) -> Result<String, JsError> {
+    extract_links_impl(page_json).map_err(|e| JsError::new(&e))
 }
 
 #[wasm_bindgen]
@@ -786,6 +804,20 @@ mod derived_data_tests {
     }
 
     #[test]
+    fn links_come_back_with_both_forms_and_both_kinds() {
+        let links: Vec<serde_json::Value> =
+            serde_json::from_str(&extract_links_impl(&page_json()).unwrap()).unwrap();
+
+        let tags: Vec<&serde_json::Value> =
+            links.iter().filter(|l| l["kind"] == "tag").collect();
+        assert_eq!(tags.len(), 2, "both tags in the page: {links:?}");
+        assert_eq!(tags[0]["pageName"], "2026-10-29");
+        // The written form is kept, and the match key is folded.
+        let folded: Vec<&str> = tags.iter().map(|l| l["normalized"].as_str().unwrap()).collect();
+        assert!(folded.contains(&"tax"), "{folded:?}");
+    }
+
+    #[test]
     fn bad_input_is_reported_rather_than_panicking() {
         // Each of the three parse steps on this boundary, since a local garden
         // feeds all of them from JS where the types are not checked.
@@ -793,6 +825,7 @@ mod derived_data_tests {
         assert!(extract_tasks_impl("not json", &journal_type_json(), None).is_err());
         assert!(extract_tasks_impl(&page_json(), "not json", None).is_err());
         assert!(extract_tasks_impl(&page_json(), &journal_type_json(), Some("29/10/2026")).is_err());
+        assert!(extract_links_impl("not json").is_err());
     }
 }
 

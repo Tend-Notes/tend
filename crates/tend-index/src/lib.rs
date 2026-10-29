@@ -262,6 +262,60 @@ pub fn tags_in_page(page: &Page) -> Vec<TagRef> {
     out
 }
 
+/// What a link in a page points at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LinkKind {
+    /// `[[Another Page]]`
+    WikiLink,
+    /// `#tag`, which the link index also treats as a link.
+    Tag,
+}
+
+/// A link as found in a page: what it points at, and the block it is in.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkRef {
+    /// The target as written, for display.
+    pub target: String,
+    /// The target folded for matching — what a backlink lookup keys on.
+    pub normalized: String,
+    pub kind: LinkKind,
+    pub page_name: String,
+    pub block_uuid: Uuid,
+}
+
+/// Every link out of a page: wiki-links and tags, in block order.
+///
+/// Same split as [`tasks_in_page`] and [`tags_in_page`] — finding the links is
+/// interpretation, and the maps that answer "what links here?" are bookkeeping
+/// the caller does for itself. Both kinds come back because the link index
+/// stores both, and a tag page's backlinks are the blocks that mention the tag.
+pub fn links_in_page(page: &Page) -> Vec<LinkRef> {
+    let mut out = Vec::new();
+    for block in page.blocks.values() {
+        for target in block.extract_wiki_links() {
+            out.push(LinkRef {
+                normalized: tend_core::normalize_name(&target),
+                target,
+                kind: LinkKind::WikiLink,
+                page_name: page.name.clone(),
+                block_uuid: block.uuid,
+            });
+        }
+        for target in block.extract_tags() {
+            out.push(LinkRef {
+                normalized: tend_core::normalize_name(&target),
+                target,
+                kind: LinkKind::Tag,
+                page_name: page.name.clone(),
+                block_uuid: block.uuid,
+            });
+        }
+    }
+    out
+}
+
 /// In-memory index of all todos across the garden
 #[derive(Debug, Default)]
 pub struct TodoIndex {
@@ -589,5 +643,44 @@ mod extraction_tests {
     #[test]
     fn a_page_with_no_tags_yields_none() {
         assert!(tags_in_page(&page_of(vec![Block::new("no hashes here")])).is_empty());
+    }
+
+    #[test]
+    fn links_come_back_with_their_target_folded_for_matching() {
+        let mut page = Page::new("Project");
+        page.add_block(Block::new("see [[My Page]] and [[  Other Page  ]]"));
+
+        let links = links_in_page(&page);
+        let wiki: Vec<_> = links.iter().filter(|l| l.kind == LinkKind::WikiLink).collect();
+        assert_eq!(wiki.len(), 2);
+
+        let by_target: Vec<(&str, &str)> =
+            wiki.iter().map(|l| (l.target.as_str(), l.normalized.as_str())).collect();
+        assert!(by_target.contains(&("My Page", "my page")), "{by_target:?}");
+        // The written form is kept for display; only the match key is folded.
+        assert!(
+            by_target.iter().any(|(t, n)| t.trim() == "Other Page" && *n == "other page"),
+            "{by_target:?}"
+        );
+    }
+
+    #[test]
+    fn a_tag_is_a_link_too() {
+        // The link index stores tags as links, so a tag page has backlinks.
+        let mut page = Page::new("Project");
+        page.add_block(Block::new("about #Work"));
+
+        let links = links_in_page(&page);
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].kind, LinkKind::Tag);
+        assert_eq!((links[0].target.as_str(), links[0].normalized.as_str()), ("Work", "work"));
+        assert_eq!(links[0].page_name, "Project");
+    }
+
+    #[test]
+    fn a_page_with_no_links_yields_none() {
+        let mut page = Page::new("Project");
+        page.add_block(Block::new("nothing to see"));
+        assert!(links_in_page(&page).is_empty());
     }
 }
