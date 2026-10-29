@@ -148,6 +148,177 @@ describe.skipIf(!built)('tend-wasm bridge (compiled)', () => {
       expect(wasm.unwrap_identity(wrapped, 'pass phrase')).toBe(identity)
     })
   })
+
+  // Saving a page, creating one from a template, and resolving where a sheet's
+  // file lives. The Rust suite covers the rules; what only the compiled module
+  // can show is that the values survive the boundary — an optional u64, an
+  // optional string, a millisecond timestamp as i64.
+  describe('page interpretation', () => {
+    const UUID_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const UUID_B = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+
+    const page = (over: Record<string, unknown> = {}) =>
+      JSON.stringify({
+        name: 'Shopping',
+        title: 'Shopping',
+        rootBlocks: [],
+        blocks: {},
+        properties: {},
+        contentType: 'page',
+        isJournal: false,
+        journalDate: null,
+        createdAt: '2026-10-29T00:00:00Z',
+        modifiedAt: '2026-10-29T00:00:00Z',
+        version: 1,
+        ...over,
+      })
+
+    const blockData = (uuid: string, content: string, parent: string | null, children: string[]) => ({
+      uuid,
+      content,
+      parent_uuid: parent,
+      children,
+      collapsed: false,
+      properties: {},
+    })
+
+    it('applies a save and bumps the version', () => {
+      const blocks = JSON.stringify([
+        blockData(UUID_A, 'milk', null, [UUID_B]),
+        blockData(UUID_B, 'oat', UUID_A, []),
+      ])
+      const saved = JSON.parse(wasm.apply_block_updates(page(), blocks, undefined))
+
+      expect(Object.keys(saved.blocks)).toHaveLength(2)
+      expect(saved.rootBlocks).toEqual([UUID_A])
+      expect(saved.blocks[UUID_B].parentUuid).toBe(UUID_A)
+      expect(saved.version).toBe(2)
+    })
+
+    it('refuses a stale save and names the current version', () => {
+      const blocks = JSON.stringify([blockData(UUID_A, 'milk', null, [])])
+      // The optional u64 crosses as a number; 1 matches, 7 does not.
+      expect(() => wasm.apply_block_updates(page(), blocks, 1n)).not.toThrow()
+      expect(() => wasm.apply_block_updates(page(), blocks, 7n)).toThrow(/current 1/)
+    })
+
+    it('sets and removes page properties', () => {
+      const start = page({ properties: { readonly: 'true' } })
+      const updated = JSON.parse(
+        wasm.apply_property_updates(start, JSON.stringify({ longform: 'true', readonly: null }))
+      )
+      expect(updated.properties).toEqual({ longform: 'true' })
+    })
+
+    it('instantiates a template and reports the caret', () => {
+      const template = page({
+        rootBlocks: [UUID_A],
+        blocks: {
+          [UUID_A]: {
+            uuid: UUID_A,
+            content: 'TODO {{cursor}}',
+            parentUuid: null,
+            children: [],
+            collapsed: false,
+            properties: {},
+            depth: 0,
+          },
+        },
+      })
+      const { page: made, cursorPosition } = JSON.parse(
+        wasm.instantiate_template(template, page())
+      )
+
+      const uuids = Object.keys(made.blocks)
+      expect(uuids).toHaveLength(1)
+      expect(uuids[0]).not.toBe(UUID_A)
+      expect(made.blocks[uuids[0]].content).toBe('TODO ')
+      expect(cursorPosition).toEqual({ blockUuid: uuids[0], offset: 5 })
+    })
+
+    it('strips a cursor marker from content typed directly', () => {
+      expect(JSON.parse(wasm.strip_cursor_marker('a {{cursor}}b', true))).toEqual({
+        content: 'a b',
+        offset: 2,
+      })
+      expect(JSON.parse(wasm.strip_cursor_marker('a {{cursor}}b', false))).toEqual({
+        content: 'a b',
+        offset: null,
+      })
+    })
+  })
+
+  describe('sheet paths', () => {
+    const flat = JSON.stringify({
+      id: 'note',
+      name: 'Note',
+      directory: 'notes',
+      organization: 'flat',
+      template: '',
+    })
+    const dated = JSON.stringify({
+      id: 'meeting',
+      name: 'Meeting',
+      directory: 'meetings',
+      organization: 'dateFoldered',
+      template: '',
+    })
+    const journal = JSON.stringify({
+      id: 'journal',
+      name: 'Journal',
+      directory: 'journals',
+      organization: 'dateNamed',
+      template: '',
+    })
+
+    it('gives the segments a directory handle is walked with', () => {
+      expect(JSON.parse(wasm.sheet_rel_path(flat, '1:1 Jamie Parker', undefined, false, true))).toEqual([
+        'notes',
+        '1%3A1 Jamie Parker.md',
+      ])
+      expect(JSON.parse(wasm.sheet_rel_path(flat, 'Shopping', undefined, true, true))).toEqual([
+        'notes',
+        'Shopping.md.age',
+      ])
+      expect(JSON.parse(wasm.sheet_rel_path(dated, 'Standup', '2025-01-18', false, true))).toEqual([
+        'meetings',
+        '2025-01-18',
+        'Standup.md',
+      ])
+    })
+
+    it('reads a filename back into a name and a date', () => {
+      expect(JSON.parse(wasm.sheet_ref(flat, '[]', '1%3A1 Jamie Parker.md', false))).toEqual({
+        name: '1:1 Jamie Parker',
+        date: null,
+      })
+      expect(JSON.parse(wasm.sheet_ref(dated, '["2025-01-18"]', 'Standup.md', false))).toEqual({
+        name: 'Standup',
+        date: '2025-01-18',
+      })
+      expect(JSON.parse(wasm.sheet_ref(flat, '[]', 'notes.txt', false))).toBeNull()
+    })
+
+    it('builds listing metadata from a file timestamp', () => {
+      // The i64 crossing: File.lastModified is milliseconds since the epoch.
+      const ms = Date.UTC(2025, 0, 18, 12, 0, 0)
+      const meta = JSON.parse(wasm.sheet_meta(journal, '2025-01-18', undefined, 3, BigInt(ms), BigInt(ms)))
+
+      expect(meta.title).toBe('Saturday, January 18, 2025')
+      expect(meta.isJournal).toBe(true)
+      expect(meta.blockCount).toBe(3)
+      expect(meta.journalDate).toBe('2025-01-18')
+      expect(new Date(meta.modifiedAt).getTime()).toBe(ms)
+    })
+
+    it('orders a journal listing newest first', () => {
+      const older = wasm.sheet_meta(journal, '2025-01-18', undefined, 0, 0n, 0n)
+      const newer = wasm.sheet_meta(journal, '2025-03-01', undefined, 0, 0n, 0n)
+      const sorted = JSON.parse(wasm.sort_sheets(`[${older},${newer}]`, journal))
+
+      expect(sorted.map((s: { name: string }) => s.name)).toEqual(['2025-03-01', '2025-01-18'])
+    })
+  })
 })
 
 // The loader the app actually calls. Importing it here also proves Vite can
