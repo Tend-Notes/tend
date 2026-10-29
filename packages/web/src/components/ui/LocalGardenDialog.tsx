@@ -10,7 +10,10 @@
 //
 // Deliberately not a warning. Keeping notes off a server is the point of the
 // feature, not a risk to be talked out of; the list is what changes, not a
-// reason to reconsider.
+// reason to reconsider. The one sentence that *is* reassurance — a garden
+// missing from the list means the folder needs reconnecting, not that notes are
+// gone — earns its place, because that is the moment a user would otherwise
+// assume the worst.
 
 import { GardenChoiceDialog } from './GardenChoiceDialog'
 
@@ -45,35 +48,34 @@ export function LocalGardenDialog({ needsFolder, onContinue, onCancel }: LocalGa
     <GardenChoiceDialog
       icon={<FolderIcon />}
       title="Keep this garden in a local folder"
-      intro="Its notes will live in a folder on this machine and never reach the server. That changes a few things:"
+      intro="Your garden's notes will live in a folder on your computer and not sync to the Tend server. That changes a few things:"
       bullets={[
         <>
           <strong className="text-base-05">Only this browser, on this machine.</strong> The
           garden will not appear in Tend on your other devices, or in another browser here.
-          Nothing is lost when it does not — there is simply nothing there to find.
         </>,
         <>
-          <strong className="text-base-05">No version control or backup from Tend.</strong>{' '}
-          The server owns the git repository, and it cannot see this folder. Whatever backs up
-          the folder is what backs up these notes.
+          <strong className="text-base-05">Version control and backup are up to you.</strong>{' '}
+          Tend does not actively manage local gardens, so you will have to set up any version
+          control and backup functionality you'd like to use. Please note that some solutions,
+          such as OneDrive and similar services, may corrupt notes.
         </>,
         <>
           <strong className="text-base-05">No importing.</strong> Import runs on the server,
-          into a server garden.
+          into a server garden only.
         </>,
         <>
-          <strong className="text-base-05">Search works, ordered differently.</strong> It is
-          built in your browser from the folder, so results match but their ranking will not
-          be identical to a server garden's.
+          <strong className="text-base-05">The files are not locked in.</strong> You can edit
+          unencrypted files in any editor you'd like, and you can decrypt encrypted notes
+          using common decryption tools, even if Tend isn't working.
         </>,
         <>
-          <strong className="text-base-05">The files are not locked in.</strong> They are the
-          same markdown Tend writes everywhere else, readable with any editor, and{' '}
-          <code className="text-base-0C">age</code> decrypts an encrypted one on its own.
-          Moving a garden between local and server is not something Tend does for you.
+          <strong className="text-base-05">You may have to reconnect from time to time.</strong>{' '}
+          You may have to occasionally choose to reconnect Tend to your local folder. If Tend
+          does not display your local garden, that doesn't mean your notes are lost — just try
+          the "reconnect" option for your local garden in settings.
         </>,
       ]}
-      note="Whether a garden is local is fixed when it is created."
       prompt={
         needsFolder
           ? 'You will be asked to choose the folder your local gardens live in. Each one is created as a subfolder of it.'
