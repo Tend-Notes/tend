@@ -219,6 +219,42 @@ pub fn sheet_ref_impl(
     serde_json::to_string(&value).map_err(|e| format!("could not encode result: {e}"))
 }
 
+// ---------------------------------------------------------------------------
+// Canonical sheet names
+// ---------------------------------------------------------------------------
+//
+// The name a Page carries, which links and indices key on. It is NOT the path:
+// a flat built-in type's canonical name is the bare name, while a custom type's
+// is directory-prefixed. Subtle enough that the browser must not reproduce it.
+
+/// The canonical name for a content type + bare name (+ date).
+pub fn qualify_name_impl(
+    content_type_json: &str,
+    bare_name: &str,
+    date: Option<&str>,
+) -> Result<String, String> {
+    let content_type = parse_content_type(content_type_json)?;
+    Ok(tend_core::qualify_name(
+        &content_type,
+        bare_name,
+        parse_date(date)?,
+    ))
+}
+
+/// Split a canonical name back into its bare name and date.
+///
+/// The inverse of [`qualify_name_impl`], for a content type already known.
+/// Returns `{ "name": string, "date": string | null }`.
+pub fn split_name_impl(content_type_json: &str, canonical: &str) -> Result<String, String> {
+    let content_type = parse_content_type(content_type_json)?;
+    let (bare, date) = tend_core::split_name(&content_type, canonical);
+    serde_json::to_string(&serde_json::json!({
+        "name": bare,
+        "date": date.map(|d| d.format("%Y-%m-%d").to_string()),
+    }))
+    .map_err(|e| format!("could not encode result: {e}"))
+}
+
 /// A sheet's `PageMeta` from its name and date alone, for a listing that has
 /// not read the files.
 pub fn sheet_ref_meta_impl(
@@ -472,6 +508,20 @@ pub fn sheet_meta(
 #[wasm_bindgen]
 pub fn sort_sheets(sheets_json: &str, content_type_json: &str) -> Result<String, JsError> {
     sort_sheets_impl(sheets_json, content_type_json).map_err(|e| JsError::new(&e))
+}
+
+#[wasm_bindgen]
+pub fn qualify_name(
+    content_type_json: &str,
+    bare_name: &str,
+    date: Option<String>,
+) -> Result<String, JsError> {
+    qualify_name_impl(content_type_json, bare_name, date.as_deref()).map_err(|e| JsError::new(&e))
+}
+
+#[wasm_bindgen]
+pub fn split_name(content_type_json: &str, canonical: &str) -> Result<String, JsError> {
+    split_name_impl(content_type_json, canonical).map_err(|e| JsError::new(&e))
 }
 
 #[wasm_bindgen]
@@ -971,5 +1021,84 @@ mod sheet_path_tests {
         assert!(sheet_ref_impl(&note_type_json(), "not json", "A.md", false).is_err());
         assert!(sheet_meta_impl(&note_type_json(), "A", None, 0, i64::MAX, 0).is_err());
         assert!(sort_sheets_impl("not json", &note_type_json()).is_err());
+    }
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    fn flat_builtin() -> String {
+        serde_json::to_string(&tend_core::ContentType::page()).unwrap()
+    }
+
+    fn journal() -> String {
+        serde_json::to_string(&tend_core::ContentType::journal()).unwrap()
+    }
+
+    fn dated_custom() -> String {
+        let mut ct = tend_core::ContentType::new("meeting", "Meeting", "meetings");
+        ct.organization = tend_core::Organization::DateFoldered;
+        serde_json::to_string(&ct).unwrap()
+    }
+
+    fn flat_custom() -> String {
+        serde_json::to_string(&tend_core::ContentType::new("person", "Person", "person")).unwrap()
+    }
+
+    /// The forms `tend_core::name` documents, which the browser must not guess.
+    #[test]
+    fn qualify_name_table() {
+        let cases = [
+            // A built-in flat type's canonical name is the BARE name — no prefix.
+            (flat_builtin(), "My Page", None, "My Page"),
+            (journal(), "2026-01-21", None, "2026-01-21"),
+            // A custom type's is directory-prefixed.
+            (flat_custom(), "John", None, "person/John"),
+            (
+                dated_custom(),
+                "Standup",
+                Some("2026-01-30"),
+                // The DIRECTORY, not the type id.
+                "meetings/2026-01-30/Standup",
+            ),
+            // A dated type with no date keeps the prefix but drops the folder.
+            (dated_custom(), "Standup", None, "meetings/Standup"),
+        ];
+        for (ct, bare, date, want) in cases {
+            assert_eq!(
+                qualify_name_impl(&ct, bare, date).unwrap(),
+                want,
+                "qualify_name({bare:?}, {date:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn split_name_inverts_qualify_name() {
+        let cases = [
+            (flat_builtin(), "My Page", None),
+            (journal(), "2026-01-21", Some("2026-01-21")),
+            (flat_custom(), "John", None),
+            (dated_custom(), "Standup", Some("2026-01-30")),
+        ];
+        for (ct, bare, date) in cases {
+            let canonical = qualify_name_impl(&ct, bare, date).unwrap();
+            let split: serde_json::Value =
+                serde_json::from_str(&split_name_impl(&ct, &canonical).unwrap()).unwrap();
+            assert_eq!(split["name"], bare, "round trip of {canonical:?}");
+            match date {
+                // A journal's bare name IS its date, so the split reports it.
+                Some(d) => assert_eq!(split["date"], d, "date of {canonical:?}"),
+                None => assert!(split["date"].is_null(), "no date for {canonical:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn bad_name_input_is_reported_rather_than_panicking() {
+        assert!(qualify_name_impl("not json", "A", None).is_err());
+        assert!(qualify_name_impl(&flat_builtin(), "A", Some("18/01/2025")).is_err());
+        assert!(split_name_impl("not json", "A").is_err());
     }
 }
