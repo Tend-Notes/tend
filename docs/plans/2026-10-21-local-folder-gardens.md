@@ -565,6 +565,20 @@ write a note, lock, unlock, reconnect, and assert no plaintext in IndexedDB.
   registry and are mirrored to `.tend/content-types.json`, but a server pointed
   at the folder reads its own per-user registry instead, so custom types would
   need re-declaring there. Documented, not solved here.
+- **Git in a local folder.** Detecting that the chosen folder is already a git
+  repository is trivial — `.git` is an ordinary directory entry through the
+  handle — and worth doing, so Tend can say so rather than leaving the user
+  guessing whether their notes are being committed. *Making* commits is a
+  different matter and is deliberately not attempted: the browser cannot run
+  `git`, so it would mean `isomorphic-git` over the folder handle (~250K
+  gzipped on top of the ~450K bridge, plus an `fs` shim for the File System
+  Access API) and a second git implementation alongside the server's `gix`.
+  Two implementations of the same thing is the divergence the wasm bridge
+  exists to prevent for the file format, and there is no reason to accept it
+  here instead. If it is wanted, the shape is an explicit per-garden setting
+  the user turns on, not detection that silently starts committing — and
+  whatever does it has to apply `tend-git`'s `ensure_gitignore` first, or the
+  link index and UI state end up committed, which has happened before.
 - **Nothing has run in a browser.** The wasm bridge is exercised under Node and
   the store against an in-memory handle fake; `showDirectoryPicker` needs a user
   gesture, so the real API stays untested until the task 7 UI exists.
