@@ -221,6 +221,20 @@ export class FakeDirectoryHandle {
     }
   }
 
+  /**
+   * Path segments from here down to `other`, or null when it is not a
+   * descendant. This is the containment check the gardens root relies on, so
+   * the fake has to model it.
+   */
+  async resolve(other: FileSystemHandle): Promise<string[] | null> {
+    if ((other as unknown) === (this as unknown)) return []
+    for (const [name, dir] of this.dirs) {
+      const below = await dir.resolve(other)
+      if (below) return [name, ...below]
+    }
+    return null
+  }
+
   async queryPermission(): Promise<FileSystemPermissionState> {
     return this.root.permission
   }
