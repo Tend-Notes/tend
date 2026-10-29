@@ -30,8 +30,18 @@ import type {
 export { isDemoMode } from './backend'
 import { isDemoMode } from './backend'
 
-// Import demo API for proxying (tree-shaken in non-demo builds)
+// The other implementations are reached through dispatch(), which imports them
+// dynamically — so neither demo mode nor the local-garden backend (which pulls
+// in the ~450K wasm bridge) lands in the main chunk.
+import { dispatch } from './dispatch'
+// Statically imported only for `importApi` below; every other group reaches
+// demoApi through a dynamic import.
 import * as demoApi from './demoApi'
+
+const demoGroup = <K extends keyof typeof import('./demoApi')>(name: K) => async () =>
+  (await import('./demoApi'))[name]
+const localGroup = <K extends keyof typeof import('./local/localBackend')>(name: K) => async () =>
+  (await import('./local/localBackend'))[name]
 
 const API_BASE = '/api/v1'
 
@@ -277,7 +287,11 @@ const _pages = {
     fetchJson<BacklinkRef[]>(`${API_BASE}/pages/${encodeURIComponent(name)}/backlinks`),
 }
 
-export const pages = isDemoMode ? demoApi.pages : _pages
+export const pages = dispatch('pages', {
+  server: _pages,
+  demo: demoGroup('pages'),
+  local: localGroup('pages'),
+})
 
 // ============================================================================
 // Journals API
@@ -295,7 +309,11 @@ const _journals = {
     }),
 }
 
-export const journals = isDemoMode ? demoApi.journals : _journals
+export const journals = dispatch('journals', {
+  server: _journals,
+  demo: demoGroup('journals'),
+  local: localGroup('journals'),
+})
 
 // ============================================================================
 // Search API
@@ -331,7 +349,11 @@ const _search = {
   status: () => fetchJson<SearchStatus>(`${API_BASE}/search/status`),
 }
 
-export const search = isDemoMode ? demoApi.search : _search
+export const search = dispatch('search', {
+  server: _search,
+  demo: demoGroup('search'),
+  local: localGroup('search'),
+})
 
 // ============================================================================
 // Links API
@@ -347,7 +369,11 @@ const _links = {
     fetchJson<WikilinkTargetsResponse>(`${API_BASE}/links/wikilink-targets`),
 }
 
-export const links = isDemoMode ? demoApi.links : _links
+export const links = dispatch('links', {
+  server: _links,
+  demo: demoGroup('links'),
+  local: localGroup('links'),
+})
 
 // ============================================================================
 // Graph API
@@ -357,7 +383,11 @@ const _graph = {
   get: () => fetchJson<Graph>(`${API_BASE}/graph`),
 }
 
-export const graph = isDemoMode ? demoApi.graph : _graph
+export const graph = dispatch('graph', {
+  server: _graph,
+  demo: demoGroup('graph'),
+  local: localGroup('graph'),
+})
 
 // ============================================================================
 // Tags API
@@ -372,7 +402,11 @@ const _tags = {
   list: () => fetchJson<TagInfo[]>(`${API_BASE}/tags`),
 }
 
-export const tags = isDemoMode ? demoApi.tags : _tags
+export const tags = dispatch('tags', {
+  server: _tags,
+  demo: demoGroup('tags'),
+  local: localGroup('tags'),
+})
 
 // ============================================================================
 // Todos API
@@ -401,7 +435,11 @@ const _todos = {
   list: () => fetchJson<TaskList>(`${API_BASE}/todos`),
 }
 
-export const todos = isDemoMode ? demoApi.todos : _todos
+export const todos = dispatch('todos', {
+  server: _todos,
+  demo: demoGroup('todos'),
+  local: localGroup('todos'),
+})
 
 // ============================================================================
 // Git API
@@ -473,7 +511,10 @@ const _git = {
     }),
 }
 
-export const git = isDemoMode ? demoApi.git : _git
+export const git = dispatch('git', {
+  server: _git,
+  demo: demoGroup('git'),
+})
 
 // ============================================================================
 // Gardens API
@@ -570,7 +611,10 @@ const _gardens = {
     }),
 }
 
-export const gardens = isDemoMode ? demoApi.gardens : _gardens
+export const gardens = dispatch('gardens', {
+  server: _gardens,
+  demo: demoGroup('gardens'),
+})
 
 // ============================================================================
 // Templates API
@@ -587,7 +631,11 @@ const _templates = {
     }),
 }
 
-export const templates = isDemoMode ? demoApi.templates : _templates
+export const templates = dispatch('templates', {
+  server: _templates,
+  demo: demoGroup('templates'),
+  local: localGroup('templates'),
+})
 
 // ============================================================================
 // Content Types API
@@ -611,7 +659,11 @@ const _contentTypes = {
     }),
 }
 
-export const contentTypes = isDemoMode ? demoApi.contentTypes : _contentTypes
+export const contentTypes = dispatch('contentTypes', {
+  server: _contentTypes,
+  demo: demoGroup('contentTypes'),
+  local: localGroup('contentTypes'),
+})
 
 // ============================================================================
 // Sheets API
@@ -664,7 +716,11 @@ const _sheets = {
   },
 }
 
-export const sheets = isDemoMode ? demoApi.sheets : _sheets
+export const sheets = dispatch('sheets', {
+  server: _sheets,
+  demo: demoGroup('sheets'),
+  local: localGroup('sheets'),
+})
 
 // ============================================================================
 // Identity API
@@ -678,7 +734,10 @@ const _identity = {
   whoami: () => fetchJson<WhoamiResponse>(`${API_BASE}/whoami`),
 }
 
-export const identity = isDemoMode ? demoApi.identity : _identity
+export const identity = dispatch('identity', {
+  server: _identity,
+  demo: demoGroup('identity'),
+})
 
 // ============================================================================
 // User API
@@ -710,7 +769,11 @@ const _user = {
     }),
 }
 
-export const user = isDemoMode ? demoApi.user : _user
+export const user = dispatch('user', {
+  server: _user,
+  demo: demoGroup('user'),
+  local: localGroup('user'),
+})
 
 // ============================================================================
 // Blocks API
@@ -750,7 +813,11 @@ const _blocks = {
     }),
 }
 
-export const blocks = isDemoMode ? demoApi.blocks : _blocks
+export const blocks = dispatch('blocks', {
+  server: _blocks,
+  demo: demoGroup('blocks'),
+  local: localGroup('blocks'),
+})
 
 // ============================================================================
 // Import API
@@ -878,6 +945,10 @@ const _importApi = {
   },
 }
 
+// Not dispatched: `importApi` nests a group (`errors`) inside itself, so it is
+// not the flat shape dispatch() takes. It is also server-and-demo only — there
+// is nothing to import *into* in a local garden — so the build-time choice is
+// still the right one here.
 export const importApi = isDemoMode ? demoApi.importApi : _importApi
 
 // ============================================================================
@@ -900,7 +971,10 @@ const _reindex = {
     }),
 }
 
-export const reindex = isDemoMode ? demoApi.reindex : _reindex
+export const reindex = dispatch('reindex', {
+  server: _reindex,
+  demo: demoGroup('reindex'),
+})
 
 // ============================================================================
 // Stabilize API
@@ -920,4 +994,8 @@ const _stabilize = {
     }),
 }
 
-export const stabilize = isDemoMode ? demoApi.stabilize : _stabilize
+export const stabilize = dispatch('stabilize', {
+  server: _stabilize,
+  demo: demoGroup('stabilize'),
+  local: localGroup('stabilize'),
+})
