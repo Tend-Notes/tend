@@ -49,6 +49,55 @@ pub fn parse_markdown_impl(content: &str, name: &str) -> Result<String, String> 
 }
 
 // ---------------------------------------------------------------------------
+// Derived data: tasks and tags
+// ---------------------------------------------------------------------------
+//
+// A local garden builds its own task list, tag list, backlinks and graph in
+// memory, with no server to ask. Only the reading-meaning-out-of-a-block half
+// comes from here; the aggregation (which tag appears how often, which pages
+// link where) is bookkeeping the caller does for itself, and nothing in it can
+// disagree with the server about the file format.
+//
+// Per page and stateless, deliberately. An index living in wasm would hold the
+// garden's decrypted content in linear memory, which the browser's garbage
+// collector does not reclaim — locking the garden would then mean freeing a
+// wasm object correctly rather than dropping a reference.
+
+/// Every task in a page: the blocks that open with a status keyword.
+///
+/// `content_type_json` is the sheet's content type (its `id` decides whether
+/// the task is a journal entry) and `date` its filed-under date as
+/// `YYYY-MM-DD`, or null for a type that is not dated.
+pub fn extract_tasks_impl(
+    page_json: &str,
+    content_type_json: &str,
+    date: Option<&str>,
+) -> Result<String, String> {
+    let page: Page =
+        serde_json::from_str(page_json).map_err(|e| format!("invalid Page JSON: {e}"))?;
+    let content_type: tend_core::ContentType = serde_json::from_str(content_type_json)
+        .map_err(|e| format!("invalid ContentType JSON: {e}"))?;
+    let date = match date {
+        Some(d) => Some(
+            chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+                .map_err(|e| format!("invalid date {d:?}: {e}"))?,
+        ),
+        None => None,
+    };
+
+    let tasks = tend_index::tasks_in_page(&page, &content_type, date);
+    serde_json::to_string(&tasks).map_err(|e| format!("could not encode tasks: {e}"))
+}
+
+/// Every tag occurrence in a page, lowercased, with the block it was found in.
+pub fn extract_tags_impl(page_json: &str) -> Result<String, String> {
+    let page: Page =
+        serde_json::from_str(page_json).map_err(|e| format!("invalid Page JSON: {e}"))?;
+    let tags = tend_index::tags_in_page(&page);
+    serde_json::to_string(&tags).map_err(|e| format!("could not encode tags: {e}"))
+}
+
+// ---------------------------------------------------------------------------
 // Filename encoding
 // ---------------------------------------------------------------------------
 
@@ -135,6 +184,20 @@ fn parse_identity(identity: &str) -> Result<Identity, String> {
 // ---------------------------------------------------------------------------
 // wasm_bindgen exports
 // ---------------------------------------------------------------------------
+
+#[wasm_bindgen]
+pub fn extract_tasks(
+    page_json: &str,
+    content_type_json: &str,
+    date: Option<String>,
+) -> Result<String, JsError> {
+    extract_tasks_impl(page_json, content_type_json, date.as_deref()).map_err(|e| JsError::new(&e))
+}
+
+#[wasm_bindgen]
+pub fn extract_tags(page_json: &str) -> Result<String, JsError> {
+    extract_tags_impl(page_json).map_err(|e| JsError::new(&e))
+}
 
 #[wasm_bindgen]
 pub fn encode_filename(name: &str) -> String {
@@ -301,3 +364,110 @@ mod tests {
         assert!(serialize_page_impl("not json at all").is_err());
     }
 }
+
+#[cfg(test)]
+mod derived_data_tests {
+    use super::*;
+
+    /// A page holding a task, a tagged block and an ordinary one.
+    fn page_json() -> String {
+        serde_json::json!({
+            "name": "2026-10-29",
+            "title": "2026-10-29",
+            "rootBlocks": ["11111111-1111-4111-8111-111111111111"],
+            "blocks": {
+                "11111111-1111-4111-8111-111111111111": {
+                    "uuid": "11111111-1111-4111-8111-111111111111",
+                    "content": "TODO file the return",
+                    "parentUuid": null,
+                    "children": [],
+                    "collapsed": false,
+                    "properties": { "due_date": "2026-11-01", "priority": "1" },
+                    "depth": 0
+                },
+                "22222222-2222-4222-8222-222222222222": {
+                    "uuid": "22222222-2222-4222-8222-222222222222",
+                    "content": "about #Tax and #filing",
+                    "parentUuid": null,
+                    "children": [],
+                    "collapsed": false,
+                    "properties": {},
+                    "depth": 0
+                },
+                "33333333-3333-4333-8333-333333333333": {
+                    "uuid": "33333333-3333-4333-8333-333333333333",
+                    "content": "no task, no tag",
+                    "parentUuid": null,
+                    "children": [],
+                    "collapsed": false,
+                    "properties": {},
+                    "depth": 0
+                }
+            },
+            "properties": {},
+            "contentType": "journal",
+            "isJournal": true,
+            "journalDate": "2026-10-29",
+            "version": 1,
+            "createdAt": "2026-10-29T00:00:00Z",
+            "modifiedAt": "2026-10-29T00:00:00Z"
+        })
+        .to_string()
+    }
+
+    fn journal_type_json() -> String {
+        serde_json::to_string(&tend_core::ContentType::journal()).unwrap()
+    }
+
+    #[test]
+    fn tasks_come_back_with_their_properties_and_date() {
+        let json =
+            extract_tasks_impl(&page_json(), &journal_type_json(), Some("2026-10-29")).unwrap();
+        let tasks: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(tasks.as_array().unwrap().len(), 1);
+        let task = &tasks[0];
+        assert_eq!(task["status"], "TODO");
+        assert_eq!(task["content"], "file the return");
+        assert_eq!(task["dueDate"], "2026-11-01");
+        assert_eq!(task["priority"], "1");
+        assert_eq!(task["isJournal"], true);
+        assert_eq!(task["journalDate"], "2026-10-29");
+    }
+
+    #[test]
+    fn tags_come_back_lowercased_with_their_block() {
+        let json = extract_tags_impl(&page_json()).unwrap();
+        let tags: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+
+        let mut names: Vec<&str> = tags.iter().map(|t| t["tag"].as_str().unwrap()).collect();
+        names.sort();
+        assert_eq!(names, vec!["filing", "tax"]);
+
+        for tag in &tags {
+            assert_eq!(tag["pageName"], "2026-10-29");
+            assert_eq!(tag["blockUuid"], "22222222-2222-4222-8222-222222222222");
+        }
+    }
+
+    #[test]
+    fn an_undated_type_needs_no_date() {
+        let page_type = serde_json::to_string(&tend_core::ContentType::page()).unwrap();
+        let json = extract_tasks_impl(&page_json(), &page_type, None).unwrap();
+        let tasks: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(tasks[0]["isJournal"], false);
+        assert_eq!(tasks[0]["journalDate"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn bad_input_is_reported_rather_than_panicking() {
+        // Each of the three parse steps on this boundary, since a local garden
+        // feeds all of them from JS where the types are not checked.
+        assert!(extract_tags_impl("not json").is_err());
+        assert!(extract_tasks_impl("not json", &journal_type_json(), None).is_err());
+        assert!(extract_tasks_impl(&page_json(), "not json", None).is_err());
+        assert!(extract_tasks_impl(&page_json(), &journal_type_json(), Some("29/10/2026")).is_err());
+    }
+}
+

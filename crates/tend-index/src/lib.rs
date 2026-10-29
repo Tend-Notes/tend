@@ -56,9 +56,12 @@ impl TagIndex {
         self.remove_page(&page.name);
 
         let mut page_tag_list = Vec::new();
-        for (tag, occurrence) in tags_in_page(page) {
-            page_tag_list.push(tag.clone());
-            self.tags.entry(tag).or_default().push(occurrence);
+        for found in tags_in_page(page) {
+            page_tag_list.push(found.tag.clone());
+            self.tags.entry(found.tag).or_default().push(TagOccurrence {
+                page_name: found.page_name,
+                block_uuid: found.block_uuid,
+            });
         }
 
         if !page_tag_list.is_empty() {
@@ -229,23 +232,31 @@ pub fn tasks_in_page(
     tasks
 }
 
-/// Every tag occurrence in a page, as `(lowercased tag, where it occurs)`.
+/// A tag as found in a page: the tag itself, and the block it was written in.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TagRef {
+    /// Lowercased, since that is the key everything else uses.
+    pub tag: String,
+    pub page_name: String,
+    pub block_uuid: Uuid,
+}
+
+/// Every tag occurrence in a page.
 ///
 /// Tags are matched case-insensitively — `#Work` and `#work` are one tag — and
-/// the lowercased form is the key everything else uses. Split out for the same
-/// reason as [`tasks_in_page`]: the matching is interpretation, the maps that
-/// hold the result are not.
-pub fn tags_in_page(page: &Page) -> Vec<(String, TagOccurrence)> {
+/// the lowercased form is what comes back. Split out for the same reason as
+/// [`tasks_in_page`]: the matching is interpretation, the maps that hold the
+/// result are not.
+pub fn tags_in_page(page: &Page) -> Vec<TagRef> {
     let mut out = Vec::new();
     for block in page.blocks.values() {
         for tag in block.extract_tags() {
-            out.push((
-                tag.to_lowercase(),
-                TagOccurrence {
-                    page_name: page.name.clone(),
-                    block_uuid: block.uuid,
-                },
-            ));
+            out.push(TagRef {
+                tag: tag.to_lowercase(),
+                page_name: page.name.clone(),
+                block_uuid: block.uuid,
+            });
         }
     }
     out
@@ -543,7 +554,7 @@ mod extraction_tests {
         let tags = tags_in_page(&page);
 
         assert_eq!(tags.len(), 3);
-        assert!(tags.iter().all(|(tag, _)| tag == "work"));
+        assert!(tags.iter().all(|found| found.tag == "work"));
     }
 
     #[test]
@@ -556,11 +567,11 @@ mod extraction_tests {
 
         let mut found: Vec<(String, bool)> = tags
             .into_iter()
-            .map(|(tag, occurrence)| {
-                assert_eq!(occurrence.page_name, "Notes");
-                let from_first = occurrence.block_uuid == first_uuid;
-                assert!(from_first || occurrence.block_uuid == second_uuid);
-                (tag, from_first)
+            .map(|found| {
+                assert_eq!(found.page_name, "Notes");
+                let from_first = found.block_uuid == first_uuid;
+                assert!(from_first || found.block_uuid == second_uuid);
+                (found.tag, from_first)
             })
             .collect();
         found.sort();
