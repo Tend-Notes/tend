@@ -9,8 +9,7 @@ use axum::extract::{Path, Query, State};
 use axum::Json;
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
-use tend_core::{Block, ContentType, Page, PageMeta};
-use uuid::Uuid;
+use tend_core::{instantiate, strip_cursor_marker, Block, ContentType, CursorPosition, Page, PageMeta};
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
@@ -19,9 +18,6 @@ use crate::state::AppState;
 
 use super::gardens::load_user_content_types;
 use super::helpers::{default_about_body, remove_from_all_indices, update_all_indices_with_content_type};
-
-/// Marker for cursor position in templates
-const CURSOR_MARKER: &str = "{{cursor}}";
 
 /// Resolve the date a sheet is filed under: a date-foldered type always has
 /// one, defaulting to today when the request omitted it.
@@ -37,16 +33,6 @@ fn resolve_sheet_date(content_type: &ContentType, date: Option<NaiveDate>) -> Op
     }
 }
 
-/// Cursor position information for template instantiation
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CursorPosition {
-    /// UUID of the block containing the cursor marker
-    pub block_uuid: String,
-    /// Character offset within the block content
-    pub offset: usize,
-}
-
 /// Response for sheet creation, including optional cursor position
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,116 +43,6 @@ pub struct CreateSheetResponse {
     /// Cursor position if template contained {{cursor}} marker
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cursor_position: Option<CursorPosition>,
-}
-
-/// Helper function to copy a block tree from a template page to a new page.
-/// Creates new UUIDs for all blocks while preserving the tree structure.
-/// If a {{cursor}} marker is found, it's removed and the position is tracked.
-///
-/// Returns the cursor position if found (only the first occurrence is tracked).
-fn copy_block_tree(
-    template: &Page,
-    template_uuid: Uuid,
-    new_parent_uuid: Option<Uuid>,
-    target: &mut Page,
-    cursor_position: &mut Option<CursorPosition>,
-) {
-    if let Some(template_block) = template.blocks.get(&template_uuid) {
-        // Create a new block with a new UUID
-        let new_uuid = Uuid::new_v4();
-
-        // Process content: look for {{cursor}} marker and remove it
-        let (content, found_cursor_offset) = process_cursor_marker(&template_block.content, cursor_position.is_none());
-
-        // Track cursor position if found (only first occurrence)
-        if let Some(offset) = found_cursor_offset {
-            if cursor_position.is_none() {
-                *cursor_position = Some(CursorPosition {
-                    block_uuid: new_uuid.to_string(),
-                    offset,
-                });
-            }
-        }
-
-        let mut new_block = Block::with_uuid(new_uuid, &content);
-        new_block.collapsed = template_block.collapsed;
-        new_block.properties = template_block.properties.clone();
-        new_block.parent_uuid = new_parent_uuid;
-
-        // Recursively copy children and collect their new UUIDs
-        let mut new_children = Vec::new();
-        for child_uuid in &template_block.children {
-            if template.blocks.contains_key(child_uuid) {
-                let child_new_uuid = copy_block_tree_inner(template, *child_uuid, Some(new_uuid), target, cursor_position);
-                new_children.push(child_new_uuid);
-            }
-        }
-        new_block.children = new_children;
-
-        target.add_block(new_block);
-    }
-}
-
-/// Inner recursive helper that returns the new UUID of the copied block
-fn copy_block_tree_inner(
-    template: &Page,
-    template_uuid: Uuid,
-    new_parent_uuid: Option<Uuid>,
-    target: &mut Page,
-    cursor_position: &mut Option<CursorPosition>,
-) -> Uuid {
-    let template_block = template.blocks.get(&template_uuid).unwrap();
-
-    // Create a new block with a new UUID
-    let new_uuid = Uuid::new_v4();
-
-    // Process content: look for {{cursor}} marker and remove it
-    let (content, found_cursor_offset) = process_cursor_marker(&template_block.content, cursor_position.is_none());
-
-    // Track cursor position if found (only first occurrence)
-    if let Some(offset) = found_cursor_offset {
-        if cursor_position.is_none() {
-            *cursor_position = Some(CursorPosition {
-                block_uuid: new_uuid.to_string(),
-                offset,
-            });
-        }
-    }
-
-    let mut new_block = Block::with_uuid(new_uuid, &content);
-    new_block.collapsed = template_block.collapsed;
-    new_block.properties = template_block.properties.clone();
-    new_block.parent_uuid = new_parent_uuid;
-
-    // Recursively copy children
-    let mut new_children = Vec::new();
-    for child_uuid in &template_block.children {
-        let child_new_uuid = copy_block_tree_inner(template, *child_uuid, Some(new_uuid), target, cursor_position);
-        new_children.push(child_new_uuid);
-    }
-    new_block.children = new_children;
-
-    target.add_block(new_block);
-    new_uuid
-}
-
-/// Process content to find and remove the {{cursor}} marker.
-/// Returns (processed_content, Some(offset)) if marker was found and should_track is true.
-/// Returns (original_content, None) if marker not found or should_track is false.
-fn process_cursor_marker(content: &str, should_track: bool) -> (String, Option<usize>) {
-    if !should_track {
-        // Even if we're not tracking, we should still remove any cursor markers
-        let cleaned = content.replace(CURSOR_MARKER, "");
-        return (cleaned, None);
-    }
-
-    if let Some(offset) = content.find(CURSOR_MARKER) {
-        // Found the marker - remove it and return the offset
-        let cleaned = content.replace(CURSOR_MARKER, "");
-        (cleaned, Some(offset))
-    } else {
-        (content.to_string(), None)
-    }
 }
 
 /// Path parameters for sheet routes
@@ -304,7 +180,7 @@ pub async fn create_sheet(
     // Priority: 1) Request content, 2) Template file, 3) Config template string
     if let Some(content) = &req.content {
         // User provided explicit content - check for cursor marker
-        let (processed_content, found_offset) = process_cursor_marker(content, true);
+        let (processed_content, found_offset) = strip_cursor_marker(content, true);
         if let Some(offset) = found_offset {
             let block = Block::new(processed_content);
             cursor_position = Some(CursorPosition {
@@ -329,16 +205,13 @@ pub async fn create_sheet(
             // Use template file - copy its blocks with new UUIDs
             if let Ok(template_content) = tokio::fs::read_to_string(&template_path).await {
                 if let Ok(template_page) = tend_core::parser::parse_markdown(&template_content, &content_type_id) {
-                    // Copy blocks from template with new UUIDs, tracking cursor position
-                    for root_uuid in &template_page.root_blocks {
-                        copy_block_tree(&template_page, *root_uuid, None, &mut page, &mut cursor_position);
-                    }
+                    cursor_position = instantiate(&template_page, &mut page);
                 }
             }
         } else if !content_type.template.is_empty() {
             // Fall back to config.template string for backwards compat
             // Also check for cursor marker here
-            let (processed_content, found_offset) = process_cursor_marker(&content_type.template, true);
+            let (processed_content, found_offset) = strip_cursor_marker(&content_type.template, true);
             let block = Block::new(processed_content);
             if let Some(offset) = found_offset {
                 cursor_position = Some(CursorPosition {

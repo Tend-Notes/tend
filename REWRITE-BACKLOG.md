@@ -74,3 +74,20 @@ currently two features that contradict each other, and the resolution is a
 single cache layer that holds ciphertext and decrypts on read, sharing the
 garden's identity — the same answer item 1 wants for the search index, and
 plausibly the same component.
+
+## 4. The template cursor offset is a byte offset
+
+`tend_core::CursorPosition::offset` comes from `str::find`, so it counts bytes;
+the editor consumes it as a position in a JavaScript string, which counts UTF-16
+code units. A template whose `{{cursor}}` sits after non-ASCII text therefore
+puts the caret too far right — one extra for every two-byte character before it.
+
+Nobody has hit it: `{{cursor}}` is normally at the start of a line or after a
+status keyword, and every template shipped is ASCII. Noticed while moving the
+template code into tend-core for local-folder gardens, and deliberately left
+alone there, because the fix is a change of units on a value the editor already
+reads, and the right unit is UTF-16 — which means it belongs with whatever
+decides the caret-offset mapping generally (`EDITOR-FIXES.md` EF-08 is the same
+question from the other end). The behaviour is pinned by
+`offset_is_a_byte_offset` in `crates/tend-core/src/template.rs`, so the change
+will announce itself.
