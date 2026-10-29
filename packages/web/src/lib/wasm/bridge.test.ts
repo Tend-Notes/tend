@@ -18,11 +18,17 @@ import { fileURLToPath } from 'node:url'
 const wasmPath = fileURLToPath(new URL('./generated/tend_wasm_bg.wasm', import.meta.url))
 const built = existsSync(wasmPath)
 
+// Written by `cargo test -p tend-wasm`, with a freshly minted age identity each
+// run, and not tracked in git — a test fixture's secret key is still a secret
+// key. `make test` runs cargo first, so they are there; a bare vitest run on a
+// fresh clone has to skip rather than fail on a missing file.
 const FIXTURES = fileURLToPath(
   new URL('../../../../../crates/tend-wasm/tests/fixtures/', import.meta.url)
 )
+const fixtures = existsSync(`${FIXTURES}identity.txt`)
+const ready = built && fixtures
 
-describe.skipIf(!built)('tend-wasm bridge (compiled)', () => {
+describe.skipIf(!ready)('tend-wasm bridge (compiled)', () => {
   let wasm: typeof import('./generated/tend_wasm.js')
 
   beforeAll(async () => {
@@ -337,6 +343,6 @@ describe.skipIf(!built)('loadWasm', () => {
   })
 })
 
-describe.skipIf(built)('tend-wasm bridge', () => {
-  it.skip('not built — run `make wasm` to include these checks', () => {})
+describe.skipIf(ready)('tend-wasm bridge', () => {
+  it.skip('not built — run `make wasm` and `cargo test` to include these checks', () => {})
 })
