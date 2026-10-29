@@ -71,13 +71,10 @@ export function LocalGardenDialog({ needsFolder, onContinue, onCancel }: LocalGa
           <strong className="text-base-05">It stays an ordinary Tend garden.</strong> The
           files are the same format the server writes, so you can point a Tend server at the
           folder later, and <code className="text-base-0C">age</code> still decrypts an
-          encrypted one.
+          encrypted one. What Tend has no button for is turning this garden into a server one
+          — the folder is yours to move if you ever want that.
         </li>
       </ul>
-
-      <p className="text-xs text-base-03">
-        A garden cannot be moved between local and server afterwards.
-      </p>
 
       {needsFolder && (
         <p className="text-xs text-base-0A">
@@ -85,6 +82,10 @@ export function LocalGardenDialog({ needsFolder, onContinue, onCancel }: LocalGa
           created as a subfolder of it.
         </p>
       )}
+
+      <p className="text-xs text-base-03">
+        Whether a garden is local is fixed when it is created.
+      </p>
 
       <div className="flex items-center gap-2 pt-1">
         <button
