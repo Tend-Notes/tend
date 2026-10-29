@@ -107,10 +107,60 @@ live in memory only, and are dropped on lock, on garden switch, and on page
 unload. The passphrase is never persisted. Filenames remain the one at-rest
 exposure, as on the server.
 
-One non-obvious leak to close: `lib/userSync.ts` syncs UI state to the server,
-and `recentSheets` carries sheet names and titles — for a local garden, note
-titles leaving the machine. Local-garden entries are excluded from the synced
-payload and kept in `localStorage` only.
+Three channels carry garden content out of the page as the code stands, and all
+three are reuse of server-garden machinery that was never re-checked against the
+rule above. They are named here rather than buried in the task list, because
+closing them is the work, not a detail of it.
+
+**`lib/userSync.ts` sends more than sheet titles.** `buildState()` posts
+`recentSheets` (sheet names and titles), `recentTags` and `tags` (tag names),
+and `activeWorkSession` — which carries `pageName` *and* `taskContent`, the
+literal text of a task block. `flushPendingSaves()` sends the same payload by
+`navigator.sendBeacon` on `beforeunload`, so a guard wrapped only around the
+debounced path would not cover it. The remedy is to invert the rule rather than
+subtract fields: while a local garden is active, the payload is built from an
+explicit allow-list of content-free UI fields (sidebar geometry and mode, panels
+open or closed) and nothing else. A field added to one of those stores later is
+then left out by default, instead of leaking by default.
+
+**`lib/draftStore.ts` is not garden-scoped.** Its key is `pageName` alone, so a
+local garden's draft and a server garden's draft for the same sheet name already
+overwrite each other today, before encryption comes into it at all. The key
+becomes `(backend, gardenId, pageName)`, and the body is encrypted as described
+in *Queued writes and drafts*.
+
+**The service worker caches sheet responses to disk.** `vite.config.ts`
+runtime-caches `/api/v1/pages` and `/api/v1/journals` into Cache Storage for 24
+hours. A local garden never issues those requests, so this is a leak only if
+something reaches `fetch()` — which is the second reason the resolver in Task 6
+must fail closed rather than fall back to the server implementation. Separately,
+and pre-existing: for an *encrypted server* garden that cache already holds
+decrypted sheet JSON at rest. Out of scope here, recorded as item 3 of
+`REWRITE-BACKLOG.md`.
+
+### Per-garden UI state
+
+Recent sheets, recent tags and tag colours are content — they are names the user
+wrote. For a server garden the server holds them; a local garden needs somewhere
+else, and `localStorage` is not it, because zustand's `persist` middleware would
+write those names to disk in the clear, which is the thing this section forbids.
+
+They live in the garden folder instead: `.tend/ui-state.json` for an unencrypted
+garden, and `.tend/ui-state.json.age`, encrypted to the garden's X25519
+recipient, for an encrypted one. That is the same mechanism as queued drafts, so
+it is the same module and not a second scheme.
+
+This is the lowest-friction option rather than a compromise for safety's sake.
+The state survives a reload, and it follows the folder to another machine, which
+neither `localStorage` nor IndexedDB does. `.tend/` is already ignored in full by
+`tend-git`'s backup — `ensure_gitignore` broadens a narrow ignore to the whole
+directory — so there is no commit churn and no path to a remote; that precaution
+exists precisely because the link index, carrying plaintext wikilink and tag
+names, was committed and pushed before it was tightened. Writes are debounced as
+`userSync` already debounces, and the watcher's self-write filter covers them.
+For an encrypted garden the file is readable only after unlock, so the sidebar's
+recents fill in at unlock and show nothing before it — which is already the
+posture of a locked garden.
 
 ---
 
@@ -403,6 +453,10 @@ The API groups over the store plus wasm: pages, journals, sheets, templates,
 content types; links/tags/todos/graph derived in memory; search over the
 in-memory index.
 
+The per-garden UI-state file and the garden-scoped, encrypted draft key belong
+here too, since both are reads and writes through the store — see *No plaintext
+at rest* and *Queued writes and drafts*.
+
 The `FileSystemObserver` lives here too: one recursive observation on the active
 garden's directory, started on garden open and torn down on lock and switch, with
 the self-write filter reading the store's pending-write set, a debounce window
@@ -415,6 +469,17 @@ observer that tests can drive by emitting records, including `unknown`.
 `packages/web/src/lib/api.ts`.
 
 The dispatchers, and demo mode moved onto the new path.
+
+**The dispatchers fail closed.** A group method missing from the local backend
+must throw, never fall through to the server implementation — a `??` fallback
+there would post a local garden's content to `/api/v1/…`, which is the one
+outcome this whole feature exists to prevent. The local backend is typed against
+the same interface as the server one so an omission is a compile error, and a
+test asserts that every exported member of every group resolves on all three
+backends.
+
+`userSync`'s content-free allow-list lands here as well, since the resolver is
+what knows a local garden is active.
 
 Also here, since it guards the path content takes into the DOM: the
 numeric coercion of the tag-pill style components, and the test asserting that
@@ -452,8 +517,17 @@ write a note, lock, unlock, reconnect, and assert no plaintext in IndexedDB.
   reads; wasm writes → Rust reads; `age -d` where available.
 - Manual, in Edge, once Tasks 4-7 land: create a local garden on disk, point
   `tend-server` at the same folder, confirm it opens and renders identically.
-- At-rest check: after unlocking an encrypted local garden and editing a note,
-  dump IndexedDB and assert it contains no note text (also asserted in e2e).
+- **The canary test, written before the backend it guards.** In the shape of the
+  registry's `records only what the server must never learn`: open a fake
+  encrypted local garden, drive the things that normally persist — type a note,
+  tag it, start a work session, visit a second sheet — with a canary string in
+  the body, the title and the tag name, then assert that no transport call was
+  made at all (`fetch` and `sendBeacon` both stubbed and both expected unused)
+  and that no `localStorage` value, no IndexedDB record and no Cache Storage
+  entry contains the canary. The policy as an executing test rather than as a
+  paragraph; a new leak fails it without anyone having to remember this section.
+- At-rest check in e2e: after unlocking an encrypted local garden and editing a
+  note, dump IndexedDB and assert it contains no note text.
 
 ---
 
@@ -484,6 +558,6 @@ write a note, lock, unlock, reconnect, and assert no plaintext in IndexedDB.
 
 ## Environment
 
-Implementation is blocked on one choice: either the installs are run outside the
-sandbox and handed back, or the sandbox is given network access. Until then this
-document stands alone and no code should be written against it.
+Settled. The Rust toolchain, the `wasm32-unknown-unknown` target and a matching
+`wasm-bindgen-cli` are installed, with `~/.rustup` and `~/.cargo` writable;
+nothing else in `$HOME` is. `make test` and `make wasm` both run.
