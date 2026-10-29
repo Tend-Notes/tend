@@ -280,6 +280,8 @@ export interface LoadedSheet {
   page: Page
   /** Listing metadata, built by the bridge from the same rules the server uses. */
   meta: PageMeta
+  /** The file's text, decrypted. Kept so a caller can tell a rewrite would be a no-change. */
+  text: string
   lastModified: number
   path: string
 }
@@ -338,7 +340,7 @@ export async function readSheetAt(
   page.isJournal = meta.isJournal
   page.journalDate = meta.journalDate
 
-  return { page, meta, lastModified: file.lastModified, path }
+  return { page, meta, text: file.text, lastModified: file.lastModified, path }
 }
 
 /**

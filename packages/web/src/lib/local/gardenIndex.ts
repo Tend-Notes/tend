@@ -65,6 +65,11 @@ export interface IndexedSheet {
   meta: PageMeta
   contentType: ContentType
   ref: SheetRef
+  /**
+   * The file's mtime when it was scanned — what the app is showing. A save
+   * checks against this, so an edit by another program since is caught.
+   */
+  lastModified: number
 }
 
 /**
@@ -127,6 +132,7 @@ export async function buildIndex(
         meta: loaded.meta,
         contentType,
         ref,
+        lastModified: loaded.lastModified,
       })
       metas.push(loaded.meta)
 

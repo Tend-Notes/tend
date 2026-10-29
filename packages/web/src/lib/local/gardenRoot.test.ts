@@ -237,7 +237,9 @@ describe.skipIf(!wasmBuilt)('creating gardens', () => {
     // Unwrapping the stored identity IS the passphrase check, as on the server.
     expect(await unlockLocalGarden(store, PASSPHRASE)).toBe(identity)
     await expect(unlockLocalGarden(store, 'wrong passphrase')).rejects.toThrow()
-  })
+    // scrypt is deliberately slow, and this does three derivations (create,
+    // unlock, failed unlock) in wasm. Seconds are the point, not a problem.
+  }, 30_000)
 
   it('gives two gardens with the same name distinct folders', async () => {
     const registry = new MemoryRegistry()
