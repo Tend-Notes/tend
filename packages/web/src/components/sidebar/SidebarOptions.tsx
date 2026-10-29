@@ -7,6 +7,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { usePageStore } from '../../stores/pageStore'
 import { UnlockGardenDialog } from '../ui/UnlockGardenDialog'
+import { LocalGardens } from './LocalGardens'
+import { useLocalGardenStore } from '../../stores/localGardenStore'
 import { useUIStore } from '../../stores/uiStore'
 import { contentTypes as contentTypesApi, isDemoMode, checkAuthResponse } from '../../lib/api'
 import { activateGarden } from '../../stores/gardenSwitch'
@@ -38,6 +40,23 @@ const SECTIONS: { id: SectionId; label: string; hideInDemo?: boolean; demoOnly?:
   { id: 'gardens', label: 'Gardens', hideInDemo: true },
   { id: 'import', label: 'Import', hideInDemo: true },
 ]
+
+/**
+ * What a section says when the active garden is a local folder.
+ *
+ * Some features belong to a server: the git repo is the server's, and there is
+ * nothing on the server to import into. The dispatcher refuses those calls, so
+ * without this the user would get a thrown error from a button that looked
+ * available. Saying so in place is the honest version.
+ */
+function NotAvailableLocally({ what }: { what: string }) {
+  return (
+    <p className="text-xs text-base-03">
+      {what} is not available for a local folder garden — its files live on this machine,
+      and the server never sees them.
+    </p>
+  )
+}
 
 // Strip credentials (user:token@) from a git remote URL before displaying it, so
 // an embedded personal-access-token isn't shown on screen or in the tooltip.
@@ -829,6 +848,8 @@ function RemoteStatusIcon({ status, message }: { status: RemoteStatus; message?:
 
 // Backup section
 function BackupSection() {
+  // Reactive: the section has to change the moment a local garden is opened.
+  const localGardenOpen = useLocalGardenStore((state) => state.openId !== null)
   const { backupEnabled, setBackupEnabled, backupIntervalMinutes, setBackupIntervalMinutes } =
     useSettingsStore(
       useShallow((s) => ({
@@ -1018,6 +1039,11 @@ function BackupSection() {
     } finally {
       setInitializingGit(false)
     }
+  }
+
+  // The repository belongs to the server, which has never seen this folder.
+  if (localGardenOpen) {
+    return <NotAvailableLocally what="Version control" />
   }
 
   return (
@@ -1982,12 +2008,17 @@ function GardensSection() {
           + New garden
         </button>
       )}
+
+      {/* Gardens whose files live in a folder on this machine. Listed after the
+          server's, since those are the ones available from anywhere. */}
+      {!isDemoMode && <LocalGardens />}
     </div>
   )
 }
 
 // Import section with Import Errors management
 function ImportSection() {
+  const localGardenOpen = useLocalGardenStore((state) => state.openId !== null)
   const openImportDialog = useUIStore((s) => s.openImportDialog)
   const openImportErrorEditor = usePageStore((state) => state.openImportErrorEditor)
   const [view, setView] = useState<'main' | 'errors'>('main')
@@ -2050,6 +2081,11 @@ function ImportSection() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to discard all')
     }
+  }
+
+  // Import runs on the server, into a server garden.
+  if (localGardenOpen) {
+    return <NotAvailableLocally what="Import" />
   }
 
   return (
