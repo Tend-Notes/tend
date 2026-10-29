@@ -264,7 +264,23 @@ check(
   (await page.getByText('e2e-gardens', { exact: false }).count()) > 0
 )
 
+// Encrypting explains itself the same way, and in the same format.
 await page.getByText('Encrypt garden', { exact: true }).click()
+check(
+  'ticking encrypt explains what changes too',
+  await page.getByText('Encrypt this garden').isVisible()
+)
+check(
+  'and leads with the consequence that has no remedy',
+  (await page.getByText(/Forget the passphrase and the notes are gone/).count()) > 0
+)
+check(
+  'and says the one thing encryption does not hide',
+  (await page.getByText(/Filenames are not encrypted/).count()) > 0
+)
+await page.getByRole('button', { name: /^Continue$/ }).click()
+await page.waitForTimeout(300)
+
 await page.getByPlaceholder('Passphrase', { exact: true }).fill(PASSPHRASE)
 await page.getByPlaceholder('Confirm passphrase').fill(PASSPHRASE)
 await page.getByRole('button', { name: /^Create/ }).click()

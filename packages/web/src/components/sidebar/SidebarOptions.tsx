@@ -9,6 +9,7 @@ import { usePageStore } from '../../stores/pageStore'
 import { UnlockGardenDialog } from '../ui/UnlockGardenDialog'
 import { LocalGardens } from './LocalGardens'
 import { LocalGardenDialog } from '../ui/LocalGardenDialog'
+import { EncryptGardenDialog } from '../ui/EncryptGardenDialog'
 import { useLocalGardenStore } from '../../stores/localGardenStore'
 import { useUIStore } from '../../stores/uiStore'
 import { contentTypes as contentTypesApi, isDemoMode, checkAuthResponse } from '../../lib/api'
@@ -1497,6 +1498,7 @@ function GardensSection() {
   // the files land differs.
   const [newGardenLocal, setNewGardenLocal] = useState(false)
   const [showLocalDialog, setShowLocalDialog] = useState(false)
+  const [showEncryptDialog, setShowEncryptDialog] = useState(false)
   const {
     localSupported,
     localRoot,
@@ -1936,6 +1938,20 @@ function GardensSection() {
         />
       )}
 
+      {showEncryptDialog && (
+        <EncryptGardenDialog
+          local={newGardenLocal}
+          onContinue={() => {
+            setShowEncryptDialog(false)
+            setNewGardenEncrypted(true)
+          }}
+          onCancel={() => {
+            setShowEncryptDialog(false)
+            setNewGardenEncrypted(false)
+          }}
+        />
+      )}
+
       {showLocalDialog && (
         <LocalGardenDialog
           needsFolder={localRoot.state !== 'ready'}
@@ -1976,8 +1992,10 @@ function GardensSection() {
                   type="checkbox"
                   checked={newGardenEncrypted}
                   onChange={(e) => {
-                    setNewGardenEncrypted(e.target.checked)
-                    if (!e.target.checked) {
+                    if (e.target.checked) {
+                      setShowEncryptDialog(true)
+                    } else {
+                      setNewGardenEncrypted(false)
                       setNewGardenPassphrase('')
                       setNewGardenPassphraseConfirm('')
                     }
@@ -2042,9 +2060,6 @@ function GardensSection() {
                       if (e.key === 'Enter') handleCreateGarden()
                     }}
                   />
-                  <p className="text-[10px] text-base-0A leading-tight">
-                    Warning: If you forget your passphrase, your notes cannot be recovered. There is no password reset.
-                  </p>
 
                   {/* Search options for encrypted gardens. A local garden has
                       no server-held index to configure: it builds one in memory
@@ -2057,12 +2072,7 @@ function GardensSection() {
                         onChange={(e) => setNewGardenSearchEnabled(e.target.checked)}
                         className="w-3.5 h-3.5 accent-base-0D mt-0.5"
                       />
-                      <div>
-                        <span className="text-xs text-base-04">Enable full-text search</span>
-                        <p className="text-[10px] text-base-03 leading-tight">
-                          The search index is built in memory only while the garden is unlocked and is never written to disk.
-                        </p>
-                      </div>
+                      <span className="text-xs text-base-04">Enable full-text search</span>
                     </label>
 
                     {/* Index TTL (shown when search is enabled) */}
@@ -2086,9 +2096,6 @@ function GardensSection() {
                       </div>
                     )}
 
-                    <p className="text-[10px] text-base-08 leading-tight">
-                      Note: Note content and link/tag metadata are encrypted or kept in memory only, and nothing under .tend/ is ever pushed to a remote. Filenames are the only thing NOT encrypted — they remain visible on disk.
-                    </p>
                   </div>
                 </div>
               )}
