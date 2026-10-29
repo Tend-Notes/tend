@@ -117,11 +117,24 @@ closing them is the work, not a detail of it.
 and `activeWorkSession` — which carries `pageName` *and* `taskContent`, the
 literal text of a task block. `flushPendingSaves()` sends the same payload by
 `navigator.sendBeacon` on `beforeunload`, so a guard wrapped only around the
-debounced path would not cover it. The remedy is to invert the rule rather than
-subtract fields: while a local garden is active, the payload is built from an
-explicit allow-list of content-free UI fields (sidebar geometry and mode, panels
-open or closed) and nothing else. A field added to one of those stores later is
-then left out by default, instead of leaking by default.
+debounced path would not cover it.
+
+Filtering that payload down to its content-free fields does not work, and the
+reason is worth recording. `POST /user/state` replaces the whole blob, and the
+blob is per *user*, not per garden — so a local garden that sent a reduced
+payload would overwrite the server garden's `recentSheets`, `tags` and work
+session with nothing, destroying real state as a side effect of protecting it.
+
+So the UI-state sync is suspended outright while a local garden is active:
+nothing is sent, and the server's stored blob is left exactly as the last server
+garden left it. What that costs is sidebar geometry not being written back
+during a local session, which is already restored from the server on the next
+load — no friction a user would notice.
+
+Preferences are a separate payload and keep syncing: `buildPrefs()` carries
+themes, font sizing, task-status vocabulary and git settings, every one of them
+a number or a fixed enum, and no garden content. Changing a theme inside a local
+garden should stick, and it does.
 
 **`lib/draftStore.ts` is not garden-scoped.** Its key is `pageName` alone, so a
 local garden's draft and a server garden's draft for the same sheet name already
@@ -478,8 +491,8 @@ the same interface as the server one so an omission is a compile error, and a
 test asserts that every exported member of every group resolves on all three
 backends.
 
-`userSync`'s content-free allow-list lands here as well, since the resolver is
-what knows a local garden is active.
+Suspending the UI-state sync lands here as well, since the resolver is what
+knows a local garden is active.
 
 Also here, since it guards the path content takes into the DOM: the
 numeric coercion of the tag-pill style components, and the test asserting that
