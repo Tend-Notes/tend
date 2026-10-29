@@ -18,7 +18,6 @@
 // Deleting someone's notes is never a side effect of tidying a list.
 
 import { useEffect, useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
 import { UnlockGardenDialog } from '../ui/UnlockGardenDialog'
 import { useLocalGardenStore } from '../../stores/localGardenStore'
 
@@ -73,19 +72,12 @@ export function LocalGardens() {
     refresh,
     pickRoot,
     reconnect,
-    create,
     open,
     close,
     forget,
     clearError,
   } = useLocalGardenStore()
 
-  const [showNewForm, setShowNewForm] = useState(false)
-  const [name, setName] = useState('')
-  const [encrypted, setEncrypted] = useState(false)
-  const [passphrase, setPassphrase] = useState('')
-  const [passphraseConfirm, setPassphraseConfirm] = useState('')
-  const [formError, setFormError] = useState<string | null>(null)
   const [unlockId, setUnlockId] = useState<string | null>(null)
   const [confirmForget, setConfirmForget] = useState<string | null>(null)
   const [reloading, setReloading] = useState(false)
@@ -127,34 +119,6 @@ export function LocalGardens() {
         </p>
       </div>
     )
-  }
-
-  const resetForm = () => {
-    setShowNewForm(false)
-    setName('')
-    setEncrypted(false)
-    setPassphrase('')
-    setPassphraseConfirm('')
-    setFormError(null)
-  }
-
-  const submitNew = async () => {
-    if (!name.trim()) return
-    if (encrypted) {
-      if (!passphrase) {
-        setFormError('Enter a passphrase for the encrypted garden')
-        return
-      }
-      if (passphrase !== passphraseConfirm) {
-        setFormError('Passphrases do not match')
-        return
-      }
-    }
-    setFormError(null)
-    await create({ name: name.trim(), passphrase: encrypted ? passphrase : undefined })
-    // The passphrase is used to wrap the identity and then dropped; it is never
-    // stored, so clearing the field is the whole of forgetting it here.
-    resetForm()
   }
 
   const handleOpen = async (id: string) => {
@@ -203,15 +167,14 @@ export function LocalGardens() {
         </div>
       )}
 
-      {/* The root: picked once, re-granted from a click after a restart. */}
+      {/* No folder chosen yet. Choosing one is part of creating the first
+          local garden, so this points at that rather than offering a second
+          way in. */}
       {status.state === 'none' && (
-        <button
-          onClick={() => void pickRoot()}
-          disabled={busy}
-          className="w-full py-1.5 text-xs text-base-04 hover:text-base-05 border border-dashed border-base-02 rounded transition-colors disabled:opacity-50"
-        >
-          Choose a folder for local gardens…
-        </button>
+        <p className="text-xs text-base-03">
+          Use <span className="text-base-04">+ New garden</span> above and tick "Keep in a
+          local folder". You will be asked where local gardens should live.
+        </p>
       )}
 
       {status.state === 'needs-permission' && (
@@ -331,95 +294,6 @@ export function LocalGardens() {
           )}
         </div>
       ))}
-
-      <AnimatePresence>
-        {showNewForm && status.state === 'ready' && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="space-y-2 p-2 border border-base-02 rounded">
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Garden name"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !encrypted) void submitNew()
-                  if (e.key === 'Escape') resetForm()
-                }}
-                className="w-full px-2 py-1 text-xs bg-base-00 border border-base-02 rounded text-base-05 focus:border-base-0D focus:outline-none"
-              />
-
-              <label className="flex items-center gap-1.5 text-xs text-base-04 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={encrypted}
-                  onChange={(e) => setEncrypted(e.target.checked)}
-                  className="accent-base-0D"
-                />
-                Encrypt this garden
-              </label>
-
-              {encrypted && (
-                <div className="space-y-1.5">
-                  <input
-                    type="password"
-                    value={passphrase}
-                    onChange={(e) => setPassphrase(e.target.value)}
-                    placeholder="Passphrase"
-                    className="w-full px-2 py-1 text-xs bg-base-00 border border-base-02 rounded text-base-05 focus:border-base-0D focus:outline-none"
-                  />
-                  <input
-                    type="password"
-                    value={passphraseConfirm}
-                    onChange={(e) => setPassphraseConfirm(e.target.value)}
-                    placeholder="Confirm passphrase"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') void submitNew()
-                    }}
-                    className="w-full px-2 py-1 text-xs bg-base-00 border border-base-02 rounded text-base-05 focus:border-base-0D focus:outline-none"
-                  />
-                  <p className="text-xs text-base-03">
-                    The passphrase is not stored anywhere. Lose it and the notes cannot be
-                    recovered — not by Tend, not by anyone.
-                  </p>
-                </div>
-              )}
-
-              {formError && <p className="text-xs text-base-08">{formError}</p>}
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => void submitNew()}
-                  disabled={busy || !name.trim()}
-                  className="px-2 py-1 text-xs text-base-05 bg-base-01 border border-base-02 rounded hover:border-base-03 transition-colors disabled:opacity-50"
-                >
-                  {busy ? 'Creating…' : 'Create'}
-                </button>
-                <button
-                  onClick={resetForm}
-                  className="px-2 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {!showNewForm && status.state === 'ready' && (
-        <button
-          onClick={() => setShowNewForm(true)}
-          className="w-full py-1.5 text-xs text-base-04 hover:text-base-05 border border-dashed border-base-02 rounded transition-colors"
-        >
-          + New local garden
-        </button>
-      )}
 
       {unlockId && (
         <UnlockGardenDialog

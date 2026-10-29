@@ -8,6 +8,7 @@ import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet
 import { usePageStore } from '../../stores/pageStore'
 import { UnlockGardenDialog } from '../ui/UnlockGardenDialog'
 import { LocalGardens } from './LocalGardens'
+import { LocalGardenDialog } from '../ui/LocalGardenDialog'
 import { useLocalGardenStore } from '../../stores/localGardenStore'
 import { useUIStore } from '../../stores/uiStore'
 import { contentTypes as contentTypesApi, isDemoMode, checkAuthResponse } from '../../lib/api'
@@ -1492,6 +1493,55 @@ function GardensSection() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [unlockGardenId, setUnlockGardenId] = useState<string | null>(null)
   const [unlocking, setUnlocking] = useState(false)
+  // Creating a garden in a local folder goes through the same form; only where
+  // the files land differs.
+  const [newGardenLocal, setNewGardenLocal] = useState(false)
+  const [showLocalDialog, setShowLocalDialog] = useState(false)
+  const {
+    localSupported,
+    localRoot,
+    createLocal,
+    pickLocalRoot,
+    refreshLocal,
+  } = useLocalGardenStore(
+    useShallow((s) => ({
+      localSupported: s.supported,
+      localRoot: s.status,
+      createLocal: s.create,
+      pickLocalRoot: s.pickRoot,
+      refreshLocal: s.refresh,
+    }))
+  )
+
+  useEffect(() => {
+    void refreshLocal()
+  }, [refreshLocal])
+
+  const resetNewGardenForm = () => {
+    setShowNewForm(false)
+    setNewGardenName('')
+    setNewGardenEncrypted(false)
+    setNewGardenPassphrase('')
+    setNewGardenPassphraseConfirm('')
+    setNewGardenLocal(false)
+  }
+
+  /**
+   * Continue past the local-garden explanation.
+   *
+   * The folder picker needs a user gesture, and this click is one — so if no
+   * gardens folder has been chosen yet, this is where it gets chosen.
+   */
+  const confirmLocal = async () => {
+    setShowLocalDialog(false)
+    if (localRoot.state !== 'ready') {
+      await pickLocalRoot()
+      // Still nothing usable: the user dismissed the picker, or the folder is
+      // unreachable. Leave the checkbox off rather than pretending otherwise.
+      if (useLocalGardenStore.getState().status.state !== 'ready') return
+    }
+    setNewGardenLocal(true)
+  }
 
   // Fetch gardens on mount
   useEffect(() => {
@@ -1541,6 +1591,26 @@ function GardensSection() {
       }
     }
 
+    if (newGardenLocal) {
+      setCreating(true)
+      setError(null)
+      try {
+        await createLocal({
+          name: newGardenName.trim(),
+          passphrase: newGardenEncrypted ? newGardenPassphrase : undefined,
+        })
+        const failure = useLocalGardenStore.getState().error
+        if (failure) {
+          setError(failure)
+          return
+        }
+        resetNewGardenForm()
+      } finally {
+        setCreating(false)
+      }
+      return
+    }
+
     try {
       setCreating(true)
       setError(null)
@@ -1572,13 +1642,9 @@ function GardensSection() {
 
       // Refresh the list and reset form
       await fetchGardens()
-      setNewGardenName('')
-      setNewGardenEncrypted(false)
-      setNewGardenPassphrase('')
-      setNewGardenPassphraseConfirm('')
       setNewGardenSearchEnabled(false)
       setNewGardenIndexTtl(12)
-      setShowNewForm(false)
+      resetNewGardenForm()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create garden')
     } finally {
@@ -1865,6 +1931,17 @@ function GardensSection() {
         />
       )}
 
+      {showLocalDialog && (
+        <LocalGardenDialog
+          needsFolder={localRoot.state !== 'ready'}
+          onContinue={() => void confirmLocal()}
+          onCancel={() => {
+            setShowLocalDialog(false)
+            setNewGardenLocal(false)
+          }}
+        />
+      )}
+
       <AnimatePresence>
         {showNewForm && (
           <motion.div
@@ -1910,6 +1987,36 @@ function GardensSection() {
                 </span>
               </label>
 
+              {/* Local-folder toggle. Checking it explains what changes first,
+                  because a garden cannot be moved between local and server
+                  afterwards. */}
+              {localSupported && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newGardenLocal}
+                    onChange={(e) => {
+                      if (e.target.checked) setShowLocalDialog(true)
+                      else setNewGardenLocal(false)
+                    }}
+                    className="w-3.5 h-3.5 accent-base-0D"
+                  />
+                  <span className="text-xs text-base-04 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+                    </svg>
+                    Keep in a local folder
+                  </span>
+                </label>
+              )}
+
+              {newGardenLocal && localRoot.state === 'ready' && (
+                <p className="text-xs text-base-03 pl-5">
+                  In <span className="text-base-04">{localRoot.folderName}</span>, on this
+                  machine. Not on the server, and not on your other devices.
+                </p>
+              )}
+
               {/* Passphrase fields (shown when encryption is enabled) */}
               {newGardenEncrypted && (
                 <div className="space-y-2 pt-1">
@@ -1934,8 +2041,10 @@ function GardensSection() {
                     Warning: If you forget your passphrase, your notes cannot be recovered. There is no password reset.
                   </p>
 
-                  {/* Search options for encrypted gardens */}
-                  <div className="pt-2 border-t border-base-02 space-y-2">
+                  {/* Search options for encrypted gardens. A local garden has
+                      no server-held index to configure: it builds one in memory
+                      from the folder and drops it on lock, always. */}
+                  <div className={`pt-2 border-t border-base-02 space-y-2 ${newGardenLocal ? 'hidden' : ''}`}>
                     <label className="flex items-start gap-2 cursor-pointer">
                       <input
                         type="checkbox"
@@ -1988,13 +2097,7 @@ function GardensSection() {
                   {creating ? 'Creating...' : 'Create'}
                 </button>
                 <button
-                  onClick={() => {
-                    setShowNewForm(false)
-                    setNewGardenName('')
-                    setNewGardenEncrypted(false)
-                    setNewGardenPassphrase('')
-                    setNewGardenPassphraseConfirm('')
-                  }}
+                  onClick={resetNewGardenForm}
                   className="px-2 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
                 >
                   Cancel

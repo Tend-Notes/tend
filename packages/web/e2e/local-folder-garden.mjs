@@ -229,24 +229,42 @@ check(
   await page.getByText('Local folders', { exact: true }).isVisible()
 )
 
-// --- pick the gardens root ---------------------------------------------------
+// --- create an encrypted garden in a local folder -----------------------------
+//
+// One flow for both kinds of garden: the same form, with Encrypt and "Keep in a
+// local folder" beside each other. Ticking the local box explains what changes
+// and asks for the gardens folder, since both are irreversible once notes exist.
 
-await page.getByRole('button', { name: /Choose a folder for local gardens/ }).click()
-await page.waitForTimeout(500)
+await page.getByRole('button', { name: '+ New garden' }).click()
+await page.getByPlaceholder('Garden name').fill('Sealed')
+
+await page.getByText('Keep in a local folder', { exact: true }).click()
 check(
-  'the chosen folder is shown',
+  'ticking local explains what changes before anything is created',
+  await page.getByText('Keep this garden in a local folder').isVisible()
+)
+check(
+  'and says the folder has yet to be chosen',
+  (await page.getByRole('button', { name: /Continue and choose a folder/ }).count()) > 0
+)
+
+// Cancel leaves the box unticked rather than half-committing.
+await page.getByRole('button', { name: /^Cancel$/ }).first().click()
+await page.waitForTimeout(300)
+check(
+  'cancelling backs out of it',
+  !(await page.getByText('Keep this garden in a local folder').isVisible().catch(() => false))
+)
+
+await page.getByText('Keep in a local folder', { exact: true }).click()
+await page.getByRole('button', { name: /Continue and choose a folder/ }).click()
+await page.waitForTimeout(800)
+check(
+  'continuing picks the folder and shows which one',
   (await page.getByText('e2e-gardens', { exact: false }).count()) > 0
 )
-check(
-  'and the browser says it will not be remembered, since the handle is faked',
-  (await page.getByText(/will not remember the folder/).count()) > 0
-)
 
-// --- create an encrypted garden ----------------------------------------------
-
-await page.getByRole('button', { name: '+ New local garden' }).click()
-await page.getByPlaceholder('Garden name').fill('Sealed')
-await page.getByRole('checkbox').last().check()
+await page.getByText('Encrypt garden', { exact: true }).click()
 await page.getByPlaceholder('Passphrase', { exact: true }).fill(PASSPHRASE)
 await page.getByPlaceholder('Confirm passphrase').fill(PASSPHRASE)
 await page.getByRole('button', { name: /^Create/ }).click()
