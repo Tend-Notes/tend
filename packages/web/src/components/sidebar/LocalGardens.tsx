@@ -109,17 +109,11 @@ export function LocalGardens() {
     void refresh()
   }, [refresh])
 
-  if (!supported) {
-    return (
-      <div className="pt-2 border-t border-base-02 space-y-1">
-        <h4 className="text-xs font-medium text-base-04">Local folders</h4>
-        <p className="text-xs text-base-03">
-          This browser cannot open local folders. Local gardens need a Chromium browser such
-          as Edge.
-        </p>
-      </div>
-    )
-  }
+  // Nothing to show: a browser without the File System Access API has no local
+  // gardens and no way to make one. The new-garden form hides its checkbox for
+  // the same reason, so saying anything here would be answering a question the
+  // user was never offered.
+  if (!supported) return null
 
   const handleOpen = async (id: string) => {
     const { needsPassphrase } = await open(id)
@@ -132,20 +126,21 @@ export function LocalGardens() {
     if (!needsPassphrase) setUnlockId(null)
   }
 
-  return (
-    <div className="pt-2 border-t border-base-02 space-y-2">
-      <div className="flex items-baseline justify-between">
-        <h4 className="text-xs font-medium text-base-04">Local folders</h4>
-        {status.state === 'ready' && (
-          <span className="text-xs text-base-03 truncate ml-2" title={status.folderName}>
-            {status.folderName}
-          </span>
-        )}
-      </div>
+  // A local garden has nothing to say until there is one, or something about
+  // the folder needs attention. Otherwise this renders nothing and the gardens
+  // list is just the gardens list.
+  const needsAttention = status.state === 'needs-permission' || status.state === 'missing'
+  if (gardens.length === 0 && !needsAttention && !error) return null
 
-      <p className="text-xs text-base-03">
-        Local gardens live in this browser on this machine, and never reach the server.
-      </p>
+  return (
+    <>
+      {gardens.length > 0 && (
+        <p className="text-xs text-base-03 pt-1">
+          The folder gardens live in this browser on this machine
+          {status.state === 'ready' ? `, in ${status.folderName}` : ''}, and never reach the
+          server.
+        </p>
+      )}
 
       {status.state === 'ready' && !rootRemembered && (
         <p className="text-xs text-base-0A">
@@ -165,16 +160,6 @@ export function LocalGardens() {
             ×
           </button>
         </div>
-      )}
-
-      {/* No folder chosen yet. Choosing one is part of creating the first
-          local garden, so this points at that rather than offering a second
-          way in. */}
-      {status.state === 'none' && (
-        <p className="text-xs text-base-03">
-          Use <span className="text-base-04">+ New garden</span> above and tick "Keep in a
-          local folder". You will be asked where local gardens should live.
-        </p>
       )}
 
       {status.state === 'needs-permission' && (
@@ -306,6 +291,6 @@ export function LocalGardens() {
           }}
         />
       )}
-    </div>
+    </>
   )
 }

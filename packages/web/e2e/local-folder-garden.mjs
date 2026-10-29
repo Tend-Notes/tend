@@ -225,8 +225,8 @@ await page.getByText('Gardens', { exact: true }).click()
 await page.waitForTimeout(400)
 
 check(
-  'the sidebar offers local folders',
-  await page.getByText('Local folders', { exact: true }).isVisible()
+  'the gardens section lists the server gardens',
+  (await page.getByRole('button', { name: '+ New garden' }).count()) > 0
 )
 
 // --- create an encrypted garden in a local folder -----------------------------
@@ -335,9 +335,15 @@ const openGardens = async () => {
   if (await settingsBtn.count()) await settingsBtn.first().click()
   await page.waitForTimeout(300)
   // The section remembers whether it was open, so one click may collapse it.
-  // Click until the local-folder list is actually on screen.
+  // Click until the gardens list is actually on screen.
   for (let attempt = 0; attempt < 3; attempt++) {
-    if (await page.getByText('Local folders', { exact: true }).isVisible().catch(() => false)) break
+    if (
+      await page
+        .getByRole('button', { name: '+ New garden' })
+        .isVisible()
+        .catch(() => false)
+    )
+      break
     const gardens = page.getByText('Gardens', { exact: true })
     if (await gardens.count()) await gardens.first().click()
     await page.waitForTimeout(500)

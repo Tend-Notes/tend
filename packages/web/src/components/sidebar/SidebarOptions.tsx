@@ -1869,6 +1869,11 @@ function GardensSection() {
             </div>
           ))}
 
+          {/* Gardens whose files live in a folder on this machine, in the same
+              list, after the server's — those are the ones reachable from
+              anywhere, so they come first. */}
+          {!isDemoMode && <LocalGardens />}
+
           {/* Archived gardens */}
           {archivedGardens.length > 0 && (
             <div className="pt-2 border-t border-base-02">
@@ -2117,9 +2122,6 @@ function GardensSection() {
         </button>
       )}
 
-      {/* Gardens whose files live in a folder on this machine. Listed after the
-          server's, since those are the ones available from anywhere. */}
-      {!isDemoMode && <LocalGardens />}
     </div>
   )
 }
