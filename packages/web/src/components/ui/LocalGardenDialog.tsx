@@ -68,11 +68,10 @@ export function LocalGardenDialog({ needsFolder, onContinue, onCancel }: LocalGa
           be identical to a server garden's.
         </li>
         <li>
-          <strong className="text-base-05">It stays an ordinary Tend garden.</strong> The
-          files are the same format the server writes, so you can point a Tend server at the
-          folder later, and <code className="text-base-0C">age</code> still decrypts an
-          encrypted one. What Tend has no button for is turning this garden into a server one
-          — the folder is yours to move if you ever want that.
+          <strong className="text-base-05">The files are not locked in.</strong> They are the
+          same markdown Tend writes everywhere else, readable with any editor, and{' '}
+          <code className="text-base-0C">age</code> decrypts an encrypted one on its own.
+          Moving a garden between local and server is not something Tend does for you.
         </li>
       </ul>
 
