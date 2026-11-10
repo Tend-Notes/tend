@@ -35,8 +35,16 @@ ANONYMIZE-*.md
 CLAUDE.md
 REVIEW-REMEDIATION-*.md
 
-# wasm build output (make wasm)
-packages/web/src/lib/wasm/generated/
+# The wasm bridge's build output is COMMITTED, not ignored.
+#
+# `packages/web/src/lib/wasm/index.ts` imports it statically, so every build
+# path needs it: the Dockerfile's frontend stage, `nix build`, CI, and a fresh
+# clone. None of those has a Rust toolchain with the wasm32 target and a
+# `wasm-bindgen-cli` pinned to the exact version in Cargo.lock, and a mismatched
+# CLI emits glue that does not match the module. Ignoring it meant every build
+# off a clean checkout failed to resolve the import, which is how it reached
+# trunk. `make wasm` regenerates it; generated/SOURCE records what it was built
+# from, and a test fails if the two have drifted.
 
 # Generated test fixtures. `cargo test -p tend-wasm` writes these (see
 # crates/tend-wasm/tests/fixtures.rs) with a freshly minted age identity each

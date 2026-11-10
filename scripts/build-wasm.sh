@@ -63,6 +63,22 @@ else
   echo "==> wasm-opt not found, skipping (module will be larger)"
 fi
 
+# Stamp what this was built from. The output is committed (it has to be — the
+# frontend imports it statically and no build path can produce it), so the one
+# real hazard is committing source changes without rerunning this. The stamp
+# lets a plain test catch that, with no Rust toolchain involved: it hashes the
+# crates that feed the bridge plus the wasm-bindgen version, and
+# `wasm/stamp.test.ts` recomputes it.
+echo "==> stamp"
+bridge_sources() {
+  find crates/tend-wasm/src crates/tend-core/src crates/tend-storage/src \
+       crates/tend-index/src -type f -name '*.rs' | LC_ALL=C sort
+}
+{
+  echo "wasm-bindgen $CRATE_VERSION"
+  bridge_sources | xargs sha256sum
+} | sha256sum | cut -d' ' -f1 > "$OUT/SOURCE"
+
 printf '==> built %s (%s gzipped)\n' \
   "$(du -h "$OUT/tend_wasm_bg.wasm" | cut -f1)" \
   "$(gzip -c "$OUT/tend_wasm_bg.wasm" | wc -c | awk '{printf "%.1fK", $1/1024}')"
