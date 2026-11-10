@@ -26,8 +26,13 @@ import type { Block } from '../types'
 import { activeBackend } from './backend'
 
 const DB_NAME = 'tend-drafts'
-const DB_VERSION = 2
-const STORE_NAME = 'drafts'
+// 3, not 2: a version-2 database may already exist in a browser that ran an
+// earlier build of this file, and it would not get the new store without a
+// further bump — onupgradeneeded only fires on a version change.
+const DB_VERSION = 3
+const STORE_NAME = 'drafts_v2'
+/** Version 1's store, keyed on pageName alone. Read once, then emptied. */
+const LEGACY_STORE = 'drafts'
 
 /** A draft as the rest of the app sees it. */
 export interface Draft {
@@ -92,45 +97,77 @@ async function initDB(): Promise<IDBDatabase> {
       db.onclose = () => {
         db = null
       }
+      // Best effort, and never awaited: a draft that cannot be carried across
+      // is a draft that stays where it is, not a database that will not open.
+      void carryOverLegacyDrafts(db)
       resolve(db)
     }
 
+    // The upgrade does exactly one thing: create the new store. It does not
+    // read, move or delete anything.
+    //
+    // That is deliberate. An exception inside a versionchange transaction
+    // aborts it and fails the open, which would leave the drafts database
+    // permanently unopenable — no draft saving, no recovery, for everyone,
+    // not just whoever had a v1 draft. Carrying old drafts across is worth
+    // doing but not worth risking that, so it happens afterwards in an
+    // ordinary transaction where a failure is a caught no-op.
     request.onupgradeneeded = (event) => {
       const database = (event.target as IDBOpenDBRequest).result
-      const upgrade = (event.target as IDBOpenDBRequest).transaction
-
       if (!database.objectStoreNames.contains(STORE_NAME)) {
         database.createObjectStore(STORE_NAME, { keyPath: 'key' })
-        return
-      }
-
-      // Version 1 keyed on pageName alone. Those drafts can only have come
-      // from a server garden — nothing else existed — so they are rekeyed into
-      // that scope rather than dropped. An unsaved edit is exactly the thing
-      // not to throw away during an upgrade.
-      const old = upgrade?.objectStore(STORE_NAME)
-      if (!old || old.keyPath === 'key') return
-
-      const read = old.getAll()
-      read.onsuccess = () => {
-        const existing = (read.result ?? []) as Draft[]
-        database.deleteObjectStore(STORE_NAME)
-        const next = database.createObjectStore(STORE_NAME, { keyPath: 'key' })
-        for (const draft of existing) {
-          if (!draft?.pageName) continue
-          next.put({
-            key: draftKey('server', draft.pageName),
-            scope: 'server',
-            pageName: draft.pageName,
-            savedAt: draft.savedAt,
-            serverVersion: draft.serverVersion,
-            blocks: draft.blocks,
-            rootBlocks: draft.rootBlocks,
-          } satisfies StoredDraft)
-        }
       }
     }
   })
+}
+
+/**
+ * Move version 1's drafts into the scoped store, once.
+ *
+ * Those drafts can only have come from a server garden — nothing else existed
+ * when they were written — so that is the scope they get. The legacy store is
+ * emptied afterwards rather than deleted, so this cannot run twice and a
+ * downgrade still finds the store it expects.
+ *
+ * Every failure here is swallowed on purpose. The worst outcome is that an
+ * unsaved edit from before the upgrade is not offered back, which is a loss of
+ * a recovery prompt, not of anything the user can see. Running this inside the
+ * upgrade instead would trade that for the chance of an unopenable database.
+ */
+async function carryOverLegacyDrafts(database: IDBDatabase): Promise<void> {
+  try {
+    if (!database.objectStoreNames.contains(LEGACY_STORE)) return
+
+    const tx = database.transaction([LEGACY_STORE, STORE_NAME], 'readwrite')
+    const legacy = tx.objectStore(LEGACY_STORE)
+    const scoped = tx.objectStore(STORE_NAME)
+
+    const old = await request<Draft[]>(legacy.getAll(), 'read legacy drafts')
+    if (!old || old.length === 0) return
+
+    // Existing keys win: a draft written since the upgrade is newer than
+    // anything left behind by version 1.
+    const taken = new Set(await request<IDBValidKey[]>(scoped.getAllKeys(), 'read keys'))
+
+    for (const draft of old) {
+      if (!draft?.pageName) continue
+      const key = draftKey('server', draft.pageName)
+      if (taken.has(key)) continue
+      scoped.put({
+        key,
+        scope: 'server',
+        pageName: draft.pageName,
+        savedAt: draft.savedAt,
+        serverVersion: draft.serverVersion,
+        blocks: draft.blocks,
+        rootBlocks: draft.rootBlocks,
+      } satisfies StoredDraft)
+    }
+
+    legacy.clear()
+  } catch {
+    // Left where they are. The scoped store is unaffected either way.
+  }
 }
 
 function request<T>(req: IDBRequest<T>, what: string): Promise<T> {

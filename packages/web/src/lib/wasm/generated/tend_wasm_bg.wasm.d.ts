@@ -1,0 +1,35 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const apply_block_updates: (a: number, b: number, c: number, d: number, e: number, f: number, g: bigint) => void;
+export const apply_property_updates: (a: number, b: number, c: number, d: number, e: number) => void;
+export const decode_filename: (a: number, b: number, c: number) => void;
+export const decrypt_scrypt: (a: number, b: number, c: number, d: number, e: number) => void;
+export const decrypt_with_identity: (a: number, b: number, c: number, d: number, e: number) => void;
+export const encode_filename: (a: number, b: number, c: number) => void;
+export const encrypt_scrypt: (a: number, b: number, c: number, d: number, e: number) => void;
+export const encrypt_to_recipient: (a: number, b: number, c: number, d: number, e: number) => void;
+export const extract_links: (a: number, b: number, c: number) => void;
+export const extract_tags: (a: number, b: number, c: number) => void;
+export const extract_tasks: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const generate_identity: (a: number) => void;
+export const identity_to_recipient: (a: number, b: number, c: number) => void;
+export const instantiate_template: (a: number, b: number, c: number, d: number, e: number) => void;
+export const parse_markdown: (a: number, b: number, c: number, d: number, e: number) => void;
+export const qualify_name: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const serialize_page: (a: number, b: number, c: number) => void;
+export const sheet_meta: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: bigint, j: bigint) => void;
+export const sheet_ref: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+export const sheet_ref_meta: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => void;
+export const sheet_rel_path: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+export const sort_sheets: (a: number, b: number, c: number, d: number, e: number) => void;
+export const split_name: (a: number, b: number, c: number, d: number, e: number) => void;
+export const strip_cursor_marker: (a: number, b: number, c: number, d: number) => void;
+export const unwrap_identity: (a: number, b: number, c: number, d: number, e: number) => void;
+export const validate_safe_name: (a: number, b: number, c: number) => void;
+export const wrap_identity: (a: number, b: number, c: number, d: number, e: number) => void;
+export const __wbindgen_export: (a: number) => void;
+export const __wbindgen_add_to_stack_pointer: (a: number) => number;
+export const __wbindgen_export2: (a: number, b: number) => number;
+export const __wbindgen_export3: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_export4: (a: number, b: number, c: number) => void;
