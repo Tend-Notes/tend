@@ -34,3 +34,13 @@ result
 ANONYMIZE-*.md
 CLAUDE.md
 REVIEW-REMEDIATION-*.md
+
+# wasm build output (make wasm)
+packages/web/src/lib/wasm/generated/
+
+# Generated test fixtures. `cargo test -p tend-wasm` writes these (see
+# crates/tend-wasm/tests/fixtures.rs) with a freshly minted age identity each
+# run, so they are build output, not source. They were tracked once, which put
+# a live AGE-SECRET-KEY in the repository — a throwaway one that guards nothing,
+# but a secret key in a repo regardless, and the file churned on every test run.
+crates/tend-wasm/tests/fixtures/

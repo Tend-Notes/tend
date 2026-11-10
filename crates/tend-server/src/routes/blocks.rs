@@ -373,17 +373,7 @@ pub async fn update_block(
     };
 
     // Optional optimistic-concurrency check.
-    if let Some(expected) = req.version {
-        if page.version != expected {
-            return Err(AppError::Conflict {
-                current_version: page.version,
-                message: format!(
-                    "Version mismatch: expected {}, current {}",
-                    expected, page.version
-                ),
-            });
-        }
-    }
+    page.check_version(req.version)?;
 
     let uuid_parsed = uuid
         .parse::<uuid::Uuid>()
