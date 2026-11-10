@@ -1,21 +1,77 @@
 // SPDX-License-Identifier: MIT WITH Commons-Clause
-// IndexedDB-based draft storage for data loss prevention
+// IndexedDB-based draft storage for data loss prevention.
+//
+// Two things about drafts that are not obvious from the API below.
+//
+// **They are scoped to a garden.** The key used to be the page name alone, so
+// a draft for "Shopping" in one garden and a draft for "Shopping" in another
+// were the same record — which was already wrong for two server gardens, and
+// becomes a content leak once a local folder garden can be open. The key now
+// carries which backend and which garden the draft belongs to, and a listing
+// only ever returns the open garden's own.
+//
+// **In an encrypted garden they are encrypted.** The block text of an unsaved
+// edit is the body of a note; writing it to IndexedDB in the clear would undo
+// the point of the garden being encrypted. Drafts are sealed to the garden's
+// own X25519 recipient, exactly as its note files are, so what is at rest is no
+// more readable than the garden itself — and recovery happens after unlock,
+// which is where it belongs anyway, since the user cannot act on a recovered
+// draft while the garden is locked.
+//
+// If an encrypted garden is locked, a draft is **refused** rather than written
+// in the clear. Losing an unsaved edit is bad; writing the user's notes to disk
+// unencrypted after they asked for encryption is worse.
 
 import type { Block } from '../types'
+import { activeBackend } from './backend'
 
 const DB_NAME = 'tend-drafts'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_NAME = 'drafts'
 
-interface Draft {
+/** A draft as the rest of the app sees it. */
+export interface Draft {
   pageName: string
   blocks: Block[]
   rootBlocks: string[]
   savedAt: number
-  serverVersion: string // modifiedAt from server, to detect conflicts
+  /** The page's `modifiedAt` when the draft was taken, to detect conflicts. */
+  serverVersion: string
+}
+
+/**
+ * A draft as stored. Either the blocks are there in the clear (a plain
+ * garden), or `sealed` holds them as age ciphertext and nothing else does.
+ */
+interface StoredDraft {
+  /** `${scope}\u0000${pageName}`. */
+  key: string
+  scope: string
+  pageName: string
+  savedAt: number
+  serverVersion: string
+  blocks?: Block[]
+  rootBlocks?: string[]
+  sealed?: Uint8Array
 }
 
 let db: IDBDatabase | null = null
+
+/**
+ * Which garden a draft belongs to.
+ *
+ * `server` covers every server garden: the server's own switch already purges
+ * content caches and drafts when the active garden changes, so they cannot
+ * collide in practice.
+ */
+export function draftScope(): string {
+  const { kind, gardenId } = activeBackend()
+  return kind === 'local' ? `local:${gardenId}` : kind
+}
+
+export function draftKey(scope: string, pageName: string): string {
+  return `${scope}\u0000${pageName}`
+}
 
 /**
  * Initialize the IndexedDB database
@@ -41,17 +97,128 @@ async function initDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const database = (event.target as IDBOpenDBRequest).result
+      const upgrade = (event.target as IDBOpenDBRequest).transaction
 
-      // Create the drafts object store with pageName as key
       if (!database.objectStoreNames.contains(STORE_NAME)) {
-        database.createObjectStore(STORE_NAME, { keyPath: 'pageName' })
+        database.createObjectStore(STORE_NAME, { keyPath: 'key' })
+        return
+      }
+
+      // Version 1 keyed on pageName alone. Those drafts can only have come
+      // from a server garden — nothing else existed — so they are rekeyed into
+      // that scope rather than dropped. An unsaved edit is exactly the thing
+      // not to throw away during an upgrade.
+      const old = upgrade?.objectStore(STORE_NAME)
+      if (!old || old.keyPath === 'key') return
+
+      const read = old.getAll()
+      read.onsuccess = () => {
+        const existing = (read.result ?? []) as Draft[]
+        database.deleteObjectStore(STORE_NAME)
+        const next = database.createObjectStore(STORE_NAME, { keyPath: 'key' })
+        for (const draft of existing) {
+          if (!draft?.pageName) continue
+          next.put({
+            key: draftKey('server', draft.pageName),
+            scope: 'server',
+            pageName: draft.pageName,
+            savedAt: draft.savedAt,
+            serverVersion: draft.serverVersion,
+            blocks: draft.blocks,
+            rootBlocks: draft.rootBlocks,
+          } satisfies StoredDraft)
+        }
       }
     }
   })
 }
 
+function request<T>(req: IDBRequest<T>, what: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => reject(new Error(`Failed to ${what}`))
+  })
+}
+
+async function objectStore(mode: IDBTransactionMode): Promise<IDBObjectStore> {
+  const database = await initDB()
+  return database.transaction([STORE_NAME], mode).objectStore(STORE_NAME)
+}
+
+// --- encryption --------------------------------------------------------------
+
 /**
- * Save a draft to IndexedDB
+ * The garden's own encryption, when the open garden has any.
+ *
+ * `null` means a plain garden, where drafts are stored as they always were.
+ * A thrown `DraftLockedError` means the garden is encrypted and locked, so
+ * there is no safe way to store one.
+ */
+async function gardenCrypto(): Promise<{
+  seal: (value: unknown) => Promise<Uint8Array>
+  open: <T>(sealed: Uint8Array) => Promise<T>
+} | null> {
+  if (activeBackend().kind !== 'local') return null
+
+  const { localSession } = await import('./local/localBackend')
+  const session = localSession()
+  if (!session?.encrypted) return null
+  if (!session.identity) throw new DraftLockedError()
+
+  const identity = session.identity
+  const { openWith, recipientOf, sealTo } = await import('./local/sealedJson')
+  const recipient = await recipientOf(identity)
+
+  return {
+    seal: (value) => sealTo(recipient, value),
+    open: (sealed) => openWith(identity, sealed),
+  }
+}
+
+/** The garden is encrypted and locked, so a draft cannot be stored or read. */
+export class DraftLockedError extends Error {
+  constructor() {
+    super('This garden is locked, so drafts cannot be stored or recovered')
+    this.name = 'DraftLockedError'
+  }
+}
+
+/** Turn a stored record back into a draft, decrypting if it is sealed. */
+async function unseal(stored: StoredDraft | null | undefined): Promise<Draft | null> {
+  if (!stored) return null
+
+  if (!stored.sealed) {
+    return {
+      pageName: stored.pageName,
+      blocks: stored.blocks ?? [],
+      rootBlocks: stored.rootBlocks ?? [],
+      savedAt: stored.savedAt,
+      serverVersion: stored.serverVersion,
+    }
+  }
+
+  const crypto = await gardenCrypto()
+  if (!crypto) throw new DraftLockedError()
+  const { blocks, rootBlocks } = await crypto.open<{
+    blocks: Block[]
+    rootBlocks: string[]
+  }>(stored.sealed)
+  return {
+    pageName: stored.pageName,
+    blocks,
+    rootBlocks,
+    savedAt: stored.savedAt,
+    serverVersion: stored.serverVersion,
+  }
+}
+
+// --- the API -----------------------------------------------------------------
+
+/**
+ * Save a draft to IndexedDB.
+ *
+ * Sealed to the garden's recipient in an encrypted garden, and refused outright
+ * if that garden is locked.
  */
 export async function saveDraft(
   pageName: string,
@@ -59,93 +226,64 @@ export async function saveDraft(
   rootBlocks: string[],
   serverVersion: string
 ): Promise<void> {
-  const database = await initDB()
+  const scope = draftScope()
+  const crypto = await gardenCrypto()
+  const store = await objectStore('readwrite')
 
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction([STORE_NAME], 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
+  const base = {
+    key: draftKey(scope, pageName),
+    scope,
+    pageName,
+    savedAt: Date.now(),
+    serverVersion,
+  }
+  const draft: StoredDraft = crypto
+    ? { ...base, sealed: await crypto.seal({ blocks, rootBlocks }) }
+    : { ...base, blocks, rootBlocks }
 
-    const draft: Draft = {
-      pageName,
-      blocks,
-      rootBlocks,
-      savedAt: Date.now(),
-      serverVersion,
-    }
-
-    const request = store.put(draft)
-
-    request.onerror = () => {
-      reject(new Error('Failed to save draft'))
-    }
-
-    request.onsuccess = () => {
-      resolve()
-    }
-  })
+  await request(store.put(draft), 'save draft')
 }
 
-/**
- * Get a draft from IndexedDB
- */
+/** Get the open garden's draft for a page. */
 export async function getDraft(pageName: string): Promise<Draft | null> {
-  const database = await initDB()
-
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction([STORE_NAME], 'readonly')
-    const store = transaction.objectStore(STORE_NAME)
-    const request = store.get(pageName)
-
-    request.onerror = () => {
-      reject(new Error('Failed to get draft'))
-    }
-
-    request.onsuccess = () => {
-      resolve(request.result || null)
-    }
-  })
+  const store = await objectStore('readonly')
+  const stored = await request<StoredDraft | undefined>(
+    store.get(draftKey(draftScope(), pageName)),
+    'get draft'
+  )
+  return unseal(stored)
 }
 
-/**
- * Delete a draft from IndexedDB (call after successful server save)
- */
+/** Delete a draft (call after a successful save). */
 export async function deleteDraft(pageName: string): Promise<void> {
-  const database = await initDB()
-
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction([STORE_NAME], 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-    const request = store.delete(pageName)
-
-    request.onerror = () => {
-      reject(new Error('Failed to delete draft'))
-    }
-
-    request.onsuccess = () => {
-      resolve()
-    }
-  })
+  const store = await objectStore('readwrite')
+  await request(store.delete(draftKey(draftScope(), pageName)), 'delete draft')
 }
 
 /**
- * Get all drafts (for showing recovery options on startup)
+ * Every draft of the open garden, for the recovery prompt on startup.
+ *
+ * A draft that cannot be decrypted is left out rather than failing the listing:
+ * one unreadable record must not hide the rest.
  */
 export async function getAllDrafts(): Promise<Draft[]> {
-  const database = await initDB()
+  const scope = draftScope()
+  const store = await objectStore('readonly')
+  const all = await request<StoredDraft[]>(store.getAll(), 'get all drafts')
 
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction([STORE_NAME], 'readonly')
-    const store = transaction.objectStore(STORE_NAME)
-    const request = store.getAll()
-
-    request.onerror = () => {
-      reject(new Error('Failed to get all drafts'))
+  const out: Draft[] = []
+  for (const stored of all ?? []) {
+    // A record with no scope predates the rekeying and belongs to a server
+    // garden; the upgrade rewrites those, so this is belt and braces.
+    if ((stored.scope ?? 'server') !== scope) continue
+    try {
+      const draft = await unseal(stored)
+      if (draft) out.push(draft)
+    } catch {
+      continue
     }
-
-    request.onsuccess = () => {
-      resolve(request.result || [])
-    }
-  })
+  }
+  return out
 }
 
 /**
@@ -155,31 +293,38 @@ export async function hasStaleDraft(
   pageName: string,
   serverModifiedAt: string
 ): Promise<boolean> {
-  const draft = await getDraft(pageName)
-  if (!draft) return false
+  try {
+    const draft = await getDraft(pageName)
+    if (!draft) return false
 
-  // Draft is stale if it was saved for a different server version
-  // (meaning the user made changes that weren't saved to the server)
-  return draft.serverVersion !== serverModifiedAt
+    // Draft is stale if it was saved for a different server version
+    // (meaning the user made changes that weren't saved to the server)
+    return draft.serverVersion !== serverModifiedAt
+  } catch {
+    // A locked garden cannot be asked. Reporting "no stale draft" is right:
+    // there is nothing the user can do about it until they unlock.
+    return false
+  }
 }
 
-/**
- * Clear all drafts (for testing or reset)
- */
+/** Clear every draft, of every garden. Used on user switch and on reset. */
 export async function clearAllDrafts(): Promise<void> {
-  const database = await initDB()
+  const store = await objectStore('readwrite')
+  await request(store.clear(), 'clear drafts')
+}
 
-  return new Promise((resolve, reject) => {
-    const transaction = database.transaction([STORE_NAME], 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-    const request = store.clear()
+/** Clear the open garden's drafts, leaving other gardens' alone. */
+export async function clearGardenDrafts(): Promise<void> {
+  const scope = draftScope()
+  const store = await objectStore('readwrite')
+  const all = await request<StoredDraft[]>(store.getAll(), 'clear drafts')
+  for (const stored of all ?? []) {
+    if ((stored.scope ?? 'server') === scope) store.delete(stored.key)
+  }
+}
 
-    request.onerror = () => {
-      reject(new Error('Failed to clear drafts'))
-    }
-
-    request.onsuccess = () => {
-      resolve()
-    }
-  })
+/** Tests only: drop the cached connection so a fresh one is opened. */
+export function resetDraftDbForTests(): void {
+  db?.close()
+  db = null
 }

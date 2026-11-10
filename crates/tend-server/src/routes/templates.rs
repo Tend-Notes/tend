@@ -17,7 +17,6 @@ use crate::error::AppError;
 use crate::routes::pages::UpdatePageRequest;
 use crate::state::AppState;
 
-use super::helpers::apply_block_updates;
 
 /// Get a template for a content type
 ///
@@ -100,7 +99,7 @@ pub async fn update_template(
     };
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
-    apply_block_updates(&mut page, req.blocks, req.version)?;
+    page.apply_block_updates(req.blocks, req.version)?;
 
     // Serialize and write atomically
     // Note: Templates are not indexed (no search, link, or block index updates)

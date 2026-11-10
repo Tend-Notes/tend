@@ -38,6 +38,11 @@ use std::str::FromStr;
 
 use age::secrecy::{ExposeSecret, SecretString};
 use age::x25519;
+
+// Re-exported because the public signatures below name these types: without
+// this, a downstream crate cannot call `encrypt_to_recipient` without taking
+// its own dependency on `age` and risking a version mismatch.
+pub use age::x25519::{Identity, Recipient};
 use thiserror::Error;
 use tracing::debug;
 

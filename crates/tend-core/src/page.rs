@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::Block;
+use crate::{Block, BlockData, CoreError};
 
 /// A page represents a single Markdown file in the garden.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +157,79 @@ impl Page {
     pub fn touch(&mut self) {
         self.modified_at = Utc::now();
     }
+
+    /// Optimistic-concurrency check: fail if the client's `expected` version is
+    /// not the one this page is at. `None` means the client did not ask for the
+    /// check.
+    pub fn check_version(&self, expected: Option<u64>) -> Result<(), CoreError> {
+        match expected {
+            Some(expected) if self.version != expected => Err(CoreError::VersionConflict {
+                expected,
+                current: self.version,
+            }),
+            _ => Ok(()),
+        }
+    }
+
+    /// Replace this page's blocks with the ones a client sent, bumping the
+    /// version and the modified timestamp.
+    ///
+    /// The whole block set is replaced, not merged: a save sends the page as it
+    /// now stands. `expected_version` runs [`Self::check_version`] first, so a
+    /// conflict leaves the page untouched.
+    pub fn apply_block_updates(
+        &mut self,
+        blocks: Vec<BlockData>,
+        expected_version: Option<u64>,
+    ) -> Result<(), CoreError> {
+        self.check_version(expected_version)?;
+
+        // Parse every UUID before mutating, so a bad one does not leave the
+        // page half-replaced.
+        let mut parsed = Vec::with_capacity(blocks.len());
+        for data in blocks {
+            let uuid: Uuid = data
+                .uuid
+                .parse()
+                .map_err(|_| CoreError::InvalidUuid(data.uuid.clone()))?;
+            parsed.push((uuid, data));
+        }
+
+        self.blocks.clear();
+        self.root_blocks.clear();
+
+        for (uuid, data) in parsed {
+            let mut block = Block::with_uuid(uuid, &data.content);
+            block.parent_uuid = data.parent_uuid.as_ref().and_then(|s| s.parse().ok());
+            block.children = data.children.iter().filter_map(|s| s.parse().ok()).collect();
+            block.collapsed = data.collapsed;
+            block.properties = data.properties;
+            self.add_block(block);
+        }
+
+        self.version += 1;
+        self.touch();
+
+        Ok(())
+    }
+
+    /// Merge page-level property changes.
+    ///
+    /// `Some(v)` sets the key, `None` removes it. Keys absent from `properties`
+    /// are left alone, so properties the server sets (`readonly`, say) survive a
+    /// client that does not echo them back.
+    pub fn apply_property_updates(&mut self, properties: HashMap<String, Option<String>>) {
+        for (key, value) in properties {
+            match value {
+                Some(v) => {
+                    self.properties.insert(key, v);
+                }
+                None => {
+                    self.properties.remove(&key);
+                }
+            }
+        }
+    }
 }
 
 /// Metadata about a page (without full block content)
@@ -215,6 +288,104 @@ mod tests {
 
         assert!(page.get_block(&uuid).is_some());
         assert_eq!(page.get_block(&uuid).unwrap().content, "Hello world");
+    }
+
+    fn block_data(uuid: Uuid, content: &str, parent: Option<Uuid>, children: &[Uuid]) -> BlockData {
+        BlockData {
+            uuid: uuid.to_string(),
+            content: content.to_string(),
+            parent_uuid: parent.map(|u| u.to_string()),
+            children: children.iter().map(|u| u.to_string()).collect(),
+            collapsed: false,
+            properties: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn check_version_table() {
+        let mut page = Page::new("Test");
+        page.version = 7;
+        assert!(page.check_version(None).is_ok(), "no expectation, no check");
+        assert!(page.check_version(Some(7)).is_ok(), "matching version passes");
+        match page.check_version(Some(6)) {
+            Err(CoreError::VersionConflict { expected, current }) => {
+                assert_eq!((expected, current), (6, 7));
+            }
+            other => panic!("expected a version conflict, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn apply_block_updates_replaces_the_block_set() {
+        let mut page = Page::new("Test");
+        page.add_block(Block::new("old"));
+        assert_eq!(page.blocks.len(), 1);
+
+        let parent = Uuid::new_v4();
+        let child = Uuid::new_v4();
+        page.apply_block_updates(
+            vec![
+                block_data(parent, "parent", None, &[child]),
+                block_data(child, "child", Some(parent), &[]),
+            ],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(page.blocks.len(), 2);
+        assert_eq!(page.root_blocks, vec![parent], "only the parent is a root");
+        assert_eq!(page.blocks[&parent].children, vec![child]);
+        assert_eq!(page.blocks[&child].parent_uuid, Some(parent));
+        assert_eq!(page.version, 2, "a save bumps the version");
+    }
+
+    #[test]
+    fn apply_block_updates_refuses_a_stale_version() {
+        let mut page = Page::new("Test");
+        page.add_block(Block::new("old"));
+        let err = page
+            .apply_block_updates(vec![block_data(Uuid::new_v4(), "new", None, &[])], Some(99))
+            .unwrap_err();
+        assert!(matches!(err, CoreError::VersionConflict { .. }));
+        assert_eq!(page.blocks.len(), 1, "a conflict leaves the page untouched");
+        assert_eq!(page.version, 1);
+    }
+
+    #[test]
+    fn apply_block_updates_rejects_an_unparseable_uuid() {
+        let mut page = Page::new("Test");
+        page.add_block(Block::new("old"));
+        let bad = BlockData {
+            uuid: "not-a-uuid".to_string(),
+            content: "new".to_string(),
+            parent_uuid: None,
+            children: Vec::new(),
+            collapsed: false,
+            properties: HashMap::new(),
+        };
+        let err = page.apply_block_updates(vec![bad], None).unwrap_err();
+        assert!(matches!(err, CoreError::InvalidUuid(_)));
+        assert_eq!(page.blocks.len(), 1, "nothing is replaced on a bad UUID");
+    }
+
+    #[test]
+    fn apply_property_updates_sets_removes_and_leaves_alone() {
+        let mut page = Page::new("Test");
+        page.properties.insert("readonly".to_string(), "true".to_string());
+        page.properties.insert("longform".to_string(), "true".to_string());
+
+        let mut changes = HashMap::new();
+        changes.insert("longform".to_string(), None); // remove
+        changes.insert("pinned".to_string(), Some("yes".to_string())); // set
+        page.apply_property_updates(changes);
+
+        assert_eq!(page.properties.get("pinned"), Some(&"yes".to_string()));
+        assert!(!page.properties.contains_key("longform"));
+        assert_eq!(
+            page.properties.get("readonly"),
+            Some(&"true".to_string()),
+            "a key the client never mentioned survives"
+        );
     }
 
     #[test]
