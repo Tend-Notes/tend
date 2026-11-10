@@ -229,36 +229,55 @@ mod tests {
         NaiveDate::from_ymd_opt(2025, 1, 18).unwrap()
     }
 
+    /// One row of the sheet_rel table: inputs, then the segments expected.
+    struct RelCase {
+        content_type: ContentType,
+        name: &'static str,
+        date: Option<NaiveDate>,
+        ext: &'static str,
+        encode: bool,
+        want: &'static [&'static str],
+    }
+
+    fn rel(
+        content_type: ContentType,
+        name: &'static str,
+        date: Option<NaiveDate>,
+        ext: &'static str,
+        encode: bool,
+        want: &'static [&'static str],
+    ) -> RelCase {
+        RelCase { content_type, name, date, ext, encode, want }
+    }
+
     /// Every layout, in both extensions and both encodings.
     #[test]
     fn sheet_rel_table() {
-        let cases: &[(ContentType, &str, Option<NaiveDate>, &str, bool, &[&str])] = &[
-            (flat(), "Shopping", None, MD_EXT, true, &["notes", "Shopping.md"]),
-            (flat(), "Shopping", None, ENCRYPTED_EXT, true, &["notes", "Shopping.md.age"]),
-            (dated(), "Standup", Some(jan18()), MD_EXT, true, &["meetings", "2025-01-18", "Standup.md"]),
-            (dated(), "Standup", Some(jan18()), ENCRYPTED_EXT, true, &["meetings", "2025-01-18", "Standup.md.age"]),
-            (namespaced(), "MyBook/Chapter 14", None, MD_EXT, true, &["books", "MyBook", "Chapter 14.md"]),
-            (namespaced(), "MyBook/Chapter 14", None, ENCRYPTED_EXT, true, &["books", "MyBook", "Chapter 14.md.age"]),
-            // A namespace may be nested, and becomes real folders.
-            (namespaced(), "Series/MyBook/Ch 1", None, MD_EXT, true, &["books", "Series", "MyBook", "Ch 1.md"]),
-            // A namespaced name with no namespace falls back to a flat leaf.
-            (namespaced(), "Loose", None, MD_EXT, true, &["books", "Loose.md"]),
-            // Unsafe characters are encoded in the leaf, and only the leaf.
-            (flat(), "A:B", None, MD_EXT, true, &["notes", "A%3AB.md"]),
-            (namespaced(), "A:B/C:D", None, MD_EXT, true, &["books", "A:B", "C%3AD.md"]),
-            // encode = false is the legacy un-encoded form still read on disk.
-            (flat(), "A:B", None, MD_EXT, false, &["notes", "A:B.md"]),
-            (namespaced(), "A:B/C:D", None, MD_EXT, false, &["books", "A:B", "C:D.md"]),
-            // A date-foldered type with no date: no date folder. Not written by
-            // the server, whose callers default the date first.
-            (dated(), "Standup", None, MD_EXT, true, &["meetings", "Standup.md"]),
+        let cases = vec![
+            rel(flat(), "Shopping", None, MD_EXT, true, &["notes", "Shopping.md"]),
+            rel(flat(), "Shopping", None, ENCRYPTED_EXT, true, &["notes", "Shopping.md.age"]),
+            rel(dated(), "Standup", Some(jan18()), MD_EXT, true, &["meetings", "2025-01-18", "Standup.md"]),
+            rel(dated(), "Standup", Some(jan18()), ENCRYPTED_EXT, true, &["meetings", "2025-01-18", "Standup.md.age"]),
+            rel(namespaced(), "MyBook/Chapter 14", None, MD_EXT, true, &["books", "MyBook", "Chapter 14.md"]),
+            rel(namespaced(), "MyBook/Chapter 14", None, ENCRYPTED_EXT, true, &["books", "MyBook", "Chapter 14.md.age"]),
+            rel(namespaced(), "Series/MyBook/Ch 1", None, MD_EXT, true, &["books", "Series", "MyBook", "Ch 1.md"]),
+            rel(namespaced(), "Loose", None, MD_EXT, true, &["books", "Loose.md"]),
+            rel(flat(), "A:B", None, MD_EXT, true, &["notes", "A%3AB.md"]),
+            rel(namespaced(), "A:B/C:D", None, MD_EXT, true, &["books", "A:B", "C%3AD.md"]),
+            rel(flat(), "A:B", None, MD_EXT, false, &["notes", "A:B.md"]),
+            rel(namespaced(), "A:B/C:D", None, MD_EXT, false, &["books", "A:B", "C:D.md"]),
+            rel(dated(), "Standup", None, MD_EXT, true, &["meetings", "Standup.md"]),
         ];
-        for (ct, name, date, ext, encode, want) in cases {
+        for case in &cases {
             assert_eq!(
-                sheet_rel(ct, name, *date, ext, *encode),
-                *want,
-                "sheet_rel({}, {name:?}, {date:?}, {ext}, {encode})",
-                ct.id
+                sheet_rel(&case.content_type, case.name, case.date, case.ext, case.encode),
+                case.want,
+                "sheet_rel({}, {:?}, {:?}, {}, {})",
+                case.content_type.id,
+                case.name,
+                case.date,
+                case.ext,
+                case.encode
             );
         }
     }
