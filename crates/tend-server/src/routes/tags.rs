@@ -8,7 +8,7 @@ use axum::Json;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
-use tend_index::TagInfo;
+use crate::indices::TagInfo;
 use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 

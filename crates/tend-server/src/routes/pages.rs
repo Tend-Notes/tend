@@ -15,7 +15,7 @@ use crate::state::AppState;
 use crate::ws::{BroadcastEvent, WsEvent};
 
 use super::gardens::load_user_content_types;
-use super::helpers::{remove_from_all_indices, update_all_indices};
+use super::helpers::{apply_block_updates, apply_property_updates, remove_from_all_indices, update_all_indices};
 use tend_core::ContentType;
 
 /// List all pages
@@ -166,10 +166,17 @@ pub struct UpdatePageRequest {
     pub properties: std::collections::HashMap<String, Option<String>>,
 }
 
-// Block data in API requests. The type lives in tend-core (the browser builds
-// the same payload for a local garden); re-exported here so the existing
-// `routes::pages::BlockData` path keeps working.
-pub use tend_core::BlockData;
+/// Block data in API requests
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockData {
+    pub uuid: String,
+    pub content: String,
+    pub parent_uuid: Option<String>,
+    pub children: Vec<String>,
+    pub collapsed: bool,
+    #[serde(default)]
+    pub properties: std::collections::HashMap<String, String>,
+}
 
 /// Update a page
 pub async fn update_page(
@@ -189,8 +196,8 @@ pub async fn update_page(
         .unwrap_or_else(|_| Page::new(&name));
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
-    page.apply_block_updates(req.blocks, req.version)?;
-    page.apply_property_updates(req.properties);
+    apply_block_updates(&mut page, req.blocks, req.version)?;
+    apply_property_updates(&mut page, req.properties);
 
     garden.file_manager.write_page(&page).await?;
 

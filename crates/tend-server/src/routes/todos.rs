@@ -9,7 +9,7 @@ use serde::Serialize;
 
 use crate::auth::AuthenticatedUser;
 use crate::error::AppError;
-use tend_index::TaskItem;
+use crate::indices::TaskItem;
 use crate::routes::gardens::load_user_content_types;
 use crate::state::AppState;
 

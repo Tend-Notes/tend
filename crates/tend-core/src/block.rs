@@ -153,23 +153,6 @@ impl Default for Block {
     }
 }
 
-/// A block as it arrives in an API request or from the browser.
-///
-/// The UUIDs are strings and the parent/child links are unresolved, which is
-/// what a JSON client sends. [`crate::Page::apply_block_updates`] turns a list
-/// of these into a page's block tree. Field names are deliberately NOT
-/// camelCased: this is the existing wire form.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlockData {
-    pub uuid: String,
-    pub content: String,
-    pub parent_uuid: Option<String>,
-    pub children: Vec<String>,
-    pub collapsed: bool,
-    #[serde(default)]
-    pub properties: HashMap<String, String>,
-}
-
 /// Task status for TODO blocks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

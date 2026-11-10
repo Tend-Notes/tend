@@ -20,6 +20,7 @@ mod config;
 mod csrf;
 mod error;
 mod headers;
+mod indices;
 mod origin;
 mod proxy_guard;
 mod routes;

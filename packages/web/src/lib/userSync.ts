@@ -3,21 +3,8 @@
 //
 // Syncs user preferences and UI state with the server for multi-tenant support.
 // Each user's preferences are stored on the server, not in browser localStorage.
-//
-// A local-folder garden's files never reach the server, and the UI-state payload
-// is full of its content: recentSheets carries sheet names and titles, tags and
-// recentTags carry tag names, and activeWorkSession carries a page name and
-// taskContent — the literal text of a task block. So the state sync is
-// suspended outright while a local garden is active (see suspendsState below),
-// and the garden-scoped stores are emptied on every switch so one garden's
-// content cannot be posted under the next garden's session.
-//
-// Preferences keep syncing: buildPrefs carries themes, font sizing, the
-// task-status vocabulary and git settings — numbers and fixed enums, no garden
-// content — and a theme changed inside a local garden should stick.
 
 import { user } from './api'
-import { isLocalGarden, onBackendChange } from './backend'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useUIStore } from '../stores/uiStore'
 import { useGitStore } from '../stores/gitStore'
@@ -33,22 +20,6 @@ const DEBOUNCE_MS = 1000
 
 // Track if we're currently loading from server (to avoid save loops)
 let isLoadingFromServer = false
-
-/**
- * Whether the UI-state payload may be sent at all.
- *
- * Filtering it down to its content-free fields is not an option: POST
- * /user/state replaces the whole blob and the blob is per user rather than per
- * garden, so a reduced payload sent from a local garden would overwrite the
- * server garden's recents, tags and work session with nothing. Suspending the
- * send leaves the stored blob exactly as the last server garden left it.
- *
- * What it costs is sidebar geometry not being written back during a local
- * session, which the next load restores from the server anyway.
- */
-function statePayloadAllowed(): boolean {
-  return !isLocalGarden()
-}
 
 /**
  * Run a store update that came from the server, not from the user.
@@ -255,7 +226,6 @@ function savePrefsToServer(): void {
  */
 function saveStateToServer(): void {
   if (isLoadingFromServer) return
-  if (!statePayloadAllowed()) return
 
   stateDirty = true
   if (stateSaveTimeout) clearTimeout(stateSaveTimeout)
@@ -290,48 +260,13 @@ function flushPendingSaves(): void {
     prefsDirty = false
   }
   if (stateDirty) {
-    // Guarded again rather than relying on stateDirty never being set while a
-    // local garden is active: the beacon is the path that bypasses the
-    // debounce, so it gets its own check. A pending server-garden payload
-    // dropped by a switch is no loss — the next load reads it back.
-    if (statePayloadAllowed()) {
-      const state = JSON.stringify(buildState())
-      if (state !== lastSentState) {
-        navigator.sendBeacon('/api/v1/user/state', new Blob([state], { type: 'application/json' }))
-        lastSentState = state
-      }
+    const state = JSON.stringify(buildState())
+    if (state !== lastSentState) {
+      navigator.sendBeacon('/api/v1/user/state', new Blob([state], { type: 'application/json' }))
+      lastSentState = state
     }
     stateDirty = false
   }
-}
-
-/**
- * Empty the stores whose contents are garden content.
- *
- * Visiting a sheet or touching a tag records it in these stores, so straight
- * after a garden switch they still hold the *previous* garden's names and
- * titles. Left alone, the next server garden's first save would post the
- * previous garden's content under its session — and where the previous garden
- * was local, that content was never meant to leave the machine at all.
- *
- * Runs under withoutSync, so emptying them does not itself trigger a save.
- */
-function clearGardenScopedStores(): void {
-  withoutSync(() => {
-    useRecentSheetsStore.getState().reset()
-    useTagStore.getState().reset()
-    useWorkSessionStore.getState().clearSession()
-  })
-}
-
-/**
- * Handle a backend switch: drop the old garden's content, then repopulate from
- * the server if the new garden is one the server serves. A local garden has
- * nothing to repopulate from here — its own UI state lives in its folder.
- */
-async function onGardenSwitch(): Promise<void> {
-  clearGardenScopedStores()
-  if (statePayloadAllowed()) await loadUserState()
 }
 
 // Unsubscribe functions
@@ -341,7 +276,6 @@ let unsubUI: (() => void) | null = null
 let unsubRecentSheets: (() => void) | null = null
 let unsubTags: (() => void) | null = null
 let unsubWorkSession: (() => void) | null = null
-let unsubBackend: (() => void) | null = null
 
 // beforeunload handler reference
 let beforeUnloadHandler: (() => void) | null = null
@@ -361,9 +295,6 @@ export function startSync(): void {
   unsubRecentSheets = useRecentSheetsStore.subscribe(saveStateToServer)
   unsubTags = useTagStore.subscribe(saveStateToServer)
   unsubWorkSession = useWorkSessionStore.subscribe(saveStateToServer)
-  unsubBackend = onBackendChange(() => {
-    void onGardenSwitch()
-  })
 
   // Add beforeunload handler to flush pending saves when closing tab/browser
   beforeUnloadHandler = flushPendingSaves
@@ -380,7 +311,6 @@ export function stopSync(): void {
   if (unsubRecentSheets) { unsubRecentSheets(); unsubRecentSheets = null }
   if (unsubTags) { unsubTags(); unsubTags = null }
   if (unsubWorkSession) { unsubWorkSession(); unsubWorkSession = null }
-  if (unsubBackend) { unsubBackend(); unsubBackend = null }
 
   if (beforeUnloadHandler) {
     window.removeEventListener('beforeunload', beforeUnloadHandler)

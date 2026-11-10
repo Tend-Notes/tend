@@ -38,16 +38,6 @@ pub struct ParsedName {
     pub date: Option<NaiveDate>,
 }
 
-/// Fold a name to the form links and backlinks match on.
-///
-/// Names are matched case-insensitively — `[[My Page]]` and `[[my page]]` are
-/// one target — and surrounding whitespace is not significant. The link index
-/// hashes this form; anything that resolves a link has to agree on it, which is
-/// why it lives here rather than in any one index.
-pub fn normalize(name: &str) -> String {
-    name.trim().to_lowercase()
-}
-
 /// Build the canonical name for a content type + bare name (+ date).
 ///
 /// This reproduces exactly the form the storage layer assigns to `Page::name`,

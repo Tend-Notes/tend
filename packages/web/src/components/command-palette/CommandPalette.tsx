@@ -9,7 +9,6 @@ import { useUIStore } from '../../stores/uiStore'
 import { useSettingsStore, usesDate, type ContentType } from '../../stores/settingsStore'
 import { useSyncStatusStore } from '../../stores/syncStatusStore'
 import { useToastStore } from '../../stores/toastStore'
-import { useLocalGardenStore } from '../../stores/localGardenStore'
 import * as api from '../../lib/api'
 import { qualifyName } from '../../lib/name'
 import { HeatmapCalendar } from '../ui/HeatmapCalendar'
@@ -94,7 +93,6 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const [linkNamespace, setLinkNamespace] = useState('')
   const [forcedViewport, setForcedViewportState] = useState<ForcedViewport>(getForcedViewport)
   const [reindexing, setReindexing] = useState(false)
-  const localGardenOpen = useLocalGardenStore((state) => state.openId !== null)
   const [stabilizing, setStabilizing] = useState(false)
   const { loadTodaysJournal, createPage, deletePage, currentPageName, currentPage, clearRecentFiles, updateCurrentPageProperty, openTaskManager } = usePageStore(useShallow((s) => ({ loadTodaysJournal: s.loadTodaysJournal, createPage: s.createPage, deletePage: s.deletePage, currentPageName: s.currentPageName, currentPage: s.currentPage, clearRecentFiles: s.clearRecentFiles, updateCurrentPageProperty: s.updateCurrentPageProperty, openTaskManager: s.openTaskManager })))
   const { toggleSidebar, openSearch, setSidebarMode, pendingContentType, pendingLinkContentType, clearPendingContentType, onSheetCreated, insertTextAtCursor, openImportDialog } = useUIStore(useShallow((s) => ({ toggleSidebar: s.toggleSidebar, openSearch: s.openSearch, setSidebarMode: s.setSidebarMode, pendingContentType: s.pendingContentType, pendingLinkContentType: s.pendingLinkContentType, clearPendingContentType: s.clearPendingContentType, onSheetCreated: s.onSheetCreated, insertTextAtCursor: s.insertTextAtCursor, openImportDialog: s.openImportDialog })))
@@ -745,19 +743,12 @@ function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
 
             {/* Dev Tools */}
             <Command.Group heading="Dev" className="mb-2">
-              {/* Rebuilding is a server operation: it drops and rewrites indices
-                  the server holds on disk. A local garden derives all of its
-                  own in memory and rebuilds them on every scan, so there is
-                  nothing here to rebuild. Stabilize stays — it rewrites the
-                  files themselves, which a local garden does client-side. */}
-              {!localGardenOpen && (
-                <CommandItem
-                  onSelect={handleRebuildIndices}
-                  value="dev rebuild indices reindex backlinks search"
-                >
-                  {reindexing ? 'DEV: Rebuilding indices...' : 'DEV: Rebuild Indices'}
-                </CommandItem>
-              )}
+              <CommandItem
+                onSelect={handleRebuildIndices}
+                value="dev rebuild indices reindex backlinks search"
+              >
+                {reindexing ? 'DEV: Rebuilding indices...' : 'DEV: Rebuild Indices'}
+              </CommandItem>
               <CommandItem
                 onSelect={handleStabilize}
                 value="dev stabilize page uuids fix import backlinks footer"

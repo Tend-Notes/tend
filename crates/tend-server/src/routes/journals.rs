@@ -15,7 +15,7 @@ use crate::routes::pages::UpdatePageRequest;
 use crate::state::AppState;
 use crate::ws::{BroadcastEvent, WsEvent};
 
-use super::helpers::update_all_indices;
+use super::helpers::{apply_block_updates, update_all_indices};
 
 /// List all journals
 pub async fn list_journals(
@@ -63,7 +63,7 @@ pub async fn update_journal(
         .unwrap_or_else(|_| Page::new_journal(date));
 
     // Apply block updates (version check, clear, parse, add blocks, bump version)
-    page.apply_block_updates(req.blocks, req.version)?;
+    apply_block_updates(&mut page, req.blocks, req.version)?;
 
     garden.file_manager.write_page(&page).await?;
 

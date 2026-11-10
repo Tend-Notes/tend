@@ -7,13 +7,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { useSettingsStore, ThemeMode, FontSizePreset, ContentType, TaskStatusSet, TASK_STATUS_SETS } from '../../stores/settingsStore'
 import { usePageStore } from '../../stores/pageStore'
 import { UnlockGardenDialog } from '../ui/UnlockGardenDialog'
-import { LocalGardens } from './LocalGardens'
-import { LocalGardenDialog } from '../ui/LocalGardenDialog'
-import { EncryptGardenDialog } from '../ui/EncryptGardenDialog'
-import { useLocalGardenStore } from '../../stores/localGardenStore'
 import { useUIStore } from '../../stores/uiStore'
+import { useSyncStatusStore } from '../../stores/syncStatusStore'
+import { useRecentSheetsStore } from '../../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi, isDemoMode, checkAuthResponse } from '../../lib/api'
-import { activateGarden } from '../../stores/gardenSwitch'
+import { invalidateSheetList } from '../../lib/sheetListCache'
 import {
   getDarkThemes,
   getLightThemes,
@@ -42,23 +40,6 @@ const SECTIONS: { id: SectionId; label: string; hideInDemo?: boolean; demoOnly?:
   { id: 'gardens', label: 'Gardens', hideInDemo: true },
   { id: 'import', label: 'Import', hideInDemo: true },
 ]
-
-/**
- * What a section says when the active garden is a local folder.
- *
- * Some features belong to a server: the git repo is the server's, and there is
- * nothing on the server to import into. The dispatcher refuses those calls, so
- * without this the user would get a thrown error from a button that looked
- * available. Saying so in place is the honest version.
- */
-function NotAvailableLocally({ what }: { what: string }) {
-  return (
-    <p className="text-xs text-base-03">
-      {what} is not available for a local folder garden — its files live on this machine,
-      and the server never sees them.
-    </p>
-  )
-}
 
 // Strip credentials (user:token@) from a git remote URL before displaying it, so
 // an embedded personal-access-token isn't shown on screen or in the tooltip.
@@ -850,8 +831,6 @@ function RemoteStatusIcon({ status, message }: { status: RemoteStatus; message?:
 
 // Backup section
 function BackupSection() {
-  // Reactive: the section has to change the moment a local garden is opened.
-  const localGardenOpen = useLocalGardenStore((state) => state.openId !== null)
   const { backupEnabled, setBackupEnabled, backupIntervalMinutes, setBackupIntervalMinutes } =
     useSettingsStore(
       useShallow((s) => ({
@@ -1041,11 +1020,6 @@ function BackupSection() {
     } finally {
       setInitializingGit(false)
     }
-  }
-
-  // The repository belongs to the server, which has never seen this folder.
-  if (localGardenOpen) {
-    return <NotAvailableLocally what="Version control" />
   }
 
   return (
@@ -1494,56 +1468,6 @@ function GardensSection() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
   const [unlockGardenId, setUnlockGardenId] = useState<string | null>(null)
   const [unlocking, setUnlocking] = useState(false)
-  // Creating a garden in a local folder goes through the same form; only where
-  // the files land differs.
-  const [newGardenLocal, setNewGardenLocal] = useState(false)
-  const [showLocalDialog, setShowLocalDialog] = useState(false)
-  const [showEncryptDialog, setShowEncryptDialog] = useState(false)
-  const {
-    localSupported,
-    localRoot,
-    createLocal,
-    pickLocalRoot,
-    refreshLocal,
-  } = useLocalGardenStore(
-    useShallow((s) => ({
-      localSupported: s.supported,
-      localRoot: s.status,
-      createLocal: s.create,
-      pickLocalRoot: s.pickRoot,
-      refreshLocal: s.refresh,
-    }))
-  )
-
-  useEffect(() => {
-    void refreshLocal()
-  }, [refreshLocal])
-
-  const resetNewGardenForm = () => {
-    setShowNewForm(false)
-    setNewGardenName('')
-    setNewGardenEncrypted(false)
-    setNewGardenPassphrase('')
-    setNewGardenPassphraseConfirm('')
-    setNewGardenLocal(false)
-  }
-
-  /**
-   * Continue past the local-garden explanation.
-   *
-   * The folder picker needs a user gesture, and this click is one — so if no
-   * gardens folder has been chosen yet, this is where it gets chosen.
-   */
-  const confirmLocal = async () => {
-    setShowLocalDialog(false)
-    if (localRoot.state !== 'ready') {
-      await pickLocalRoot()
-      // Still nothing usable: the user dismissed the picker, or the folder is
-      // unreachable. Leave the checkbox off rather than pretending otherwise.
-      if (useLocalGardenStore.getState().status.state !== 'ready') return
-    }
-    setNewGardenLocal(true)
-  }
 
   // Fetch gardens on mount
   useEffect(() => {
@@ -1593,26 +1517,6 @@ function GardensSection() {
       }
     }
 
-    if (newGardenLocal) {
-      setCreating(true)
-      setError(null)
-      try {
-        await createLocal({
-          name: newGardenName.trim(),
-          passphrase: newGardenEncrypted ? newGardenPassphrase : undefined,
-        })
-        const failure = useLocalGardenStore.getState().error
-        if (failure) {
-          setError(failure)
-          return
-        }
-        resetNewGardenForm()
-      } finally {
-        setCreating(false)
-      }
-      return
-    }
-
     try {
       setCreating(true)
       setError(null)
@@ -1644,9 +1548,13 @@ function GardensSection() {
 
       // Refresh the list and reset form
       await fetchGardens()
+      setNewGardenName('')
+      setNewGardenEncrypted(false)
+      setNewGardenPassphrase('')
+      setNewGardenPassphraseConfirm('')
       setNewGardenSearchEnabled(false)
       setNewGardenIndexTtl(12)
-      resetNewGardenForm()
+      setShowNewForm(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create garden')
     } finally {
@@ -1656,10 +1564,6 @@ function GardensSection() {
 
   const handleSwitchGarden = async (id: string) => {
     try {
-      // A local garden may be open. Close it first: its identity has to be
-      // dropped, and the dispatcher has to stop routing to it, before anything
-      // is asked of the server.
-      await useLocalGardenStore.getState().close()
       // Use AbortController with timeout to detect backend hangs
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
@@ -1688,8 +1592,22 @@ function GardensSection() {
         return
       }
 
+      // Update state and reset all stores to load the new garden
+      invalidateSheetList()
       setCurrentGraphId(id)
-      await activateGarden()
+      usePageStore.getState().reset()
+      useUIStore.getState().reset()
+      useSyncStatusStore.getState().reset()
+      useRecentSheetsStore.getState().reset()
+      // Load the new garden's content types
+      const types = await contentTypesApi.list()
+      useSettingsStore.getState().setContentTypes(types)
+      // Reset the URL to home first: a stale /page/<name> from the previous
+      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
+      // leaking the page across gardens.
+      window.history.replaceState(null, '', '/')
+      // Load the new garden's default page
+      await usePageStore.getState().initializeFromUrl()
     } catch (err) {
       // Ignore AbortError - either our timeout or page reload aborted the request.
       // If it's a real timeout, the page won't reload and user can retry.
@@ -1710,7 +1628,6 @@ function GardensSection() {
 
     try {
       setUnlocking(true)
-      await useLocalGardenStore.getState().close()
       setError(null)
       // No checkAuthResponse here: this endpoint answers a wrong passphrase
       // with 401, which has nothing to do with the proxy session.
@@ -1728,9 +1645,23 @@ function GardensSection() {
         throw new Error(data.error || 'Failed to unlock garden')
       }
 
+      invalidateSheetList()
       setCurrentGraphId(unlockGardenId)
       setUnlockGardenId(null)
-      await activateGarden()
+      // Reset all stores and load the new garden's content types and default page
+      usePageStore.getState().reset()
+      useUIStore.getState().reset()
+      useSyncStatusStore.getState().reset()
+      useRecentSheetsStore.getState().reset()
+      // Load the new garden's content types
+      const types = await contentTypesApi.list()
+      useSettingsStore.getState().setContentTypes(types)
+      // Reset the URL to home first: a stale /page/<name> from the previous
+      // garden would otherwise 404 in the new one and get AUTO-CREATED there,
+      // leaking the page across gardens.
+      window.history.replaceState(null, '', '/')
+      // Load the new garden's default page
+      await usePageStore.getState().initializeFromUrl()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to unlock garden')
     } finally {
@@ -1871,11 +1802,6 @@ function GardensSection() {
             </div>
           ))}
 
-          {/* Gardens whose files live in a folder on this machine, in the same
-              list, after the server's — those are the ones reachable from
-              anywhere, so they come first. */}
-          {!isDemoMode && <LocalGardens />}
-
           {/* Archived gardens */}
           {archivedGardens.length > 0 && (
             <div className="pt-2 border-t border-base-02">
@@ -1938,31 +1864,6 @@ function GardensSection() {
         />
       )}
 
-      {showEncryptDialog && (
-        <EncryptGardenDialog
-          local={newGardenLocal}
-          onContinue={() => {
-            setShowEncryptDialog(false)
-            setNewGardenEncrypted(true)
-          }}
-          onCancel={() => {
-            setShowEncryptDialog(false)
-            setNewGardenEncrypted(false)
-          }}
-        />
-      )}
-
-      {showLocalDialog && (
-        <LocalGardenDialog
-          needsFolder={localRoot.state !== 'ready'}
-          onContinue={() => void confirmLocal()}
-          onCancel={() => {
-            setShowLocalDialog(false)
-            setNewGardenLocal(false)
-          }}
-        />
-      )}
-
       <AnimatePresence>
         {showNewForm && (
           <motion.div
@@ -1992,10 +1893,8 @@ function GardensSection() {
                   type="checkbox"
                   checked={newGardenEncrypted}
                   onChange={(e) => {
-                    if (e.target.checked) {
-                      setShowEncryptDialog(true)
-                    } else {
-                      setNewGardenEncrypted(false)
+                    setNewGardenEncrypted(e.target.checked)
+                    if (!e.target.checked) {
                       setNewGardenPassphrase('')
                       setNewGardenPassphraseConfirm('')
                     }
@@ -2009,36 +1908,6 @@ function GardensSection() {
                   Encrypt garden
                 </span>
               </label>
-
-              {/* Local-folder toggle. Checking it explains what changes first,
-                  because a garden cannot be moved between local and server
-                  afterwards. */}
-              {localSupported && (
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newGardenLocal}
-                    onChange={(e) => {
-                      if (e.target.checked) setShowLocalDialog(true)
-                      else setNewGardenLocal(false)
-                    }}
-                    className="w-3.5 h-3.5 accent-base-0D"
-                  />
-                  <span className="text-xs text-base-04 flex items-center gap-1">
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-                    </svg>
-                    Keep in a local folder
-                  </span>
-                </label>
-              )}
-
-              {newGardenLocal && localRoot.state === 'ready' && (
-                <p className="text-xs text-base-03 pl-5">
-                  In <span className="text-base-04">{localRoot.folderName}</span>, on this
-                  machine. Not on the server, and not on your other devices.
-                </p>
-              )}
 
               {/* Passphrase fields (shown when encryption is enabled) */}
               {newGardenEncrypted && (
@@ -2060,11 +1929,12 @@ function GardensSection() {
                       if (e.key === 'Enter') handleCreateGarden()
                     }}
                   />
+                  <p className="text-[10px] text-base-0A leading-tight">
+                    Warning: If you forget your passphrase, your notes cannot be recovered. There is no password reset.
+                  </p>
 
-                  {/* Search options for encrypted gardens. A local garden has
-                      no server-held index to configure: it builds one in memory
-                      from the folder and drops it on lock, always. */}
-                  <div className={`pt-2 border-t border-base-02 space-y-2 ${newGardenLocal ? 'hidden' : ''}`}>
+                  {/* Search options for encrypted gardens */}
+                  <div className="pt-2 border-t border-base-02 space-y-2">
                     <label className="flex items-start gap-2 cursor-pointer">
                       <input
                         type="checkbox"
@@ -2072,7 +1942,12 @@ function GardensSection() {
                         onChange={(e) => setNewGardenSearchEnabled(e.target.checked)}
                         className="w-3.5 h-3.5 accent-base-0D mt-0.5"
                       />
-                      <span className="text-xs text-base-04">Enable full-text search</span>
+                      <div>
+                        <span className="text-xs text-base-04">Enable full-text search</span>
+                        <p className="text-[10px] text-base-03 leading-tight">
+                          The search index is built in memory only while the garden is unlocked and is never written to disk.
+                        </p>
+                      </div>
                     </label>
 
                     {/* Index TTL (shown when search is enabled) */}
@@ -2096,6 +1971,9 @@ function GardensSection() {
                       </div>
                     )}
 
+                    <p className="text-[10px] text-base-08 leading-tight">
+                      Note: Note content and link/tag metadata are encrypted or kept in memory only, and nothing under .tend/ is ever pushed to a remote. Filenames are the only thing NOT encrypted — they remain visible on disk.
+                    </p>
                   </div>
                 </div>
               )}
@@ -2109,7 +1987,13 @@ function GardensSection() {
                   {creating ? 'Creating...' : 'Create'}
                 </button>
                 <button
-                  onClick={resetNewGardenForm}
+                  onClick={() => {
+                    setShowNewForm(false)
+                    setNewGardenName('')
+                    setNewGardenEncrypted(false)
+                    setNewGardenPassphrase('')
+                    setNewGardenPassphraseConfirm('')
+                  }}
                   className="px-2 py-1 text-xs text-base-04 hover:text-base-05 transition-colors"
                 >
                   Cancel
@@ -2128,14 +2012,12 @@ function GardensSection() {
           + New garden
         </button>
       )}
-
     </div>
   )
 }
 
 // Import section with Import Errors management
 function ImportSection() {
-  const localGardenOpen = useLocalGardenStore((state) => state.openId !== null)
   const openImportDialog = useUIStore((s) => s.openImportDialog)
   const openImportErrorEditor = usePageStore((state) => state.openImportErrorEditor)
   const [view, setView] = useState<'main' | 'errors'>('main')
@@ -2198,11 +2080,6 @@ function ImportSection() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to discard all')
     }
-  }
-
-  // Import runs on the server, into a server garden.
-  if (localGardenOpen) {
-    return <NotAvailableLocally what="Import" />
   }
 
   return (

@@ -10,7 +10,6 @@ import { useRecentSheetsStore } from '../stores/recentSheetsStore'
 import { contentTypes as contentTypesApi, isDemoMode } from '../lib/api'
 import { useAuthStore } from '../stores/authStore'
 import { clearUserScopedContent } from '../lib/cacheReset'
-import { useLocalGardenStore } from '../stores/localGardenStore'
 
 // WebSocket event types (must match server-side WsEvent enum)
 interface WsEventBase {
@@ -87,21 +86,10 @@ export function useWebSocket() {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closingIntentionallyRef = useRef(false)
   const failedAttemptsRef = useRef(0)
-  const localGardenOpen = useLocalGardenStore((state) => state.openId !== null)
 
   useEffect(() => {
     // Skip WebSocket in demo mode - no backend server
     if (isDemoMode) {
-      return
-    }
-
-    // Not subscribed while a local-folder garden is open. The server has
-    // nothing to say about a folder it has never seen, and what it *would*
-    // say is actively wrong: a `file_changed` for its own garden can name a
-    // page the local garden also has, and `garden_switched` would reset
-    // everything and point currentGraphId at a server garden the user did not
-    // open. The socket comes back on switching to a server garden.
-    if (localGardenOpen) {
       return
     }
 
@@ -270,11 +258,6 @@ export function useWebSocket() {
       }
     }
 
-    // The effect can run more than once now (a local garden opening and
-    // closing), and the previous teardown set this. Clear it, or the reconnect
-    // logic treats every later close as intentional and never comes back.
-    closingIntentionallyRef.current = false
-
     // Small delay to let page fully load before connecting
     const initialDelay = setTimeout(connect, 100)
 
@@ -290,9 +273,7 @@ export function useWebSocket() {
         wsRef.current.close()
       }
     }
-    // Re-runs on opening or closing a local garden, which tears the socket down
-    // and brings it back; otherwise this connects once on mount.
-  }, [localGardenOpen])
+  }, []) // No dependencies - connect once on mount
 
   return wsRef.current
 }

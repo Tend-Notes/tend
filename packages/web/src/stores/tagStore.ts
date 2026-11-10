@@ -81,12 +81,7 @@ export const useTagStore = create<TagState>()(
           colors = randomTagColors()
           pendingTagColors.set(tagName, colors)
           queueMicrotask(() => {
-            // reset() may have emptied the map in between — a user or garden
-            // switch — and writing back then would resurrect a tag name the
-            // switch was there to drop.
-            const pending = pendingTagColors.get(tagName)
-            if (!pending) return
-            get().setTagColors(tagName, pending)
+            get().setTagColors(tagName, pendingTagColors.get(tagName)!)
             pendingTagColors.delete(tagName)
           })
         }
@@ -133,12 +128,8 @@ export const useTagStore = create<TagState>()(
         get().getTagColors(tagName) // This will create if not exists
       },
 
-      // Reset all tag data (used when switching users, and on a garden switch)
+      // Reset all tag data (used when switching users)
       reset: () => {
-        // The pending map has to go too, or a microtask queued just before the
-        // switch writes the previous garden's tag name straight back into the
-        // store — and from there into the next session's synced UI state.
-        pendingTagColors.clear()
         set({ tags: {}, selectedTag: null })
       },
     }),
