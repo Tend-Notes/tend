@@ -47,7 +47,14 @@ RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconfig git
 
 WORKDIR /app
 
-# Copy Cargo files for dependency caching
+# Copy Cargo files for dependency caching.
+#
+# This list has to name EVERY workspace member, because cargo loads every
+# member's manifest even when building one package. Adding a crate without
+# adding it here fails the build with "failed to load manifest for workspace
+# member" — which is exactly how tend-index and tend-wasm broke it. `make
+# check-crates` compares this list against Cargo.toml and is part of `make
+# test`.
 COPY Cargo.toml Cargo.lock ./
 COPY crates/tend-core/Cargo.toml ./crates/tend-core/
 COPY crates/tend-storage/Cargo.toml ./crates/tend-storage/
@@ -55,6 +62,8 @@ COPY crates/tend-search/Cargo.toml ./crates/tend-search/
 COPY crates/tend-git/Cargo.toml ./crates/tend-git/
 COPY crates/tend-blocks/Cargo.toml ./crates/tend-blocks/
 COPY crates/tend-links/Cargo.toml ./crates/tend-links/
+COPY crates/tend-index/Cargo.toml ./crates/tend-index/
+COPY crates/tend-wasm/Cargo.toml ./crates/tend-wasm/
 COPY crates/tend-server/Cargo.toml ./crates/tend-server/
 
 # Create dummy source files for dependency caching
@@ -64,10 +73,13 @@ RUN mkdir -p crates/tend-core/src && echo "pub fn dummy() {}" > crates/tend-core
     mkdir -p crates/tend-git/src && echo "pub fn dummy() {}" > crates/tend-git/src/lib.rs && \
     mkdir -p crates/tend-blocks/src && echo "pub fn dummy() {}" > crates/tend-blocks/src/lib.rs && \
     mkdir -p crates/tend-links/src && echo "pub fn dummy() {}" > crates/tend-links/src/lib.rs && \
+    mkdir -p crates/tend-index/src && echo "pub fn dummy() {}" > crates/tend-index/src/lib.rs && \
+    mkdir -p crates/tend-wasm/src && echo "pub fn dummy() {}" > crates/tend-wasm/src/lib.rs && \
     mkdir -p crates/tend-server/src && echo "fn main() {}" > crates/tend-server/src/main.rs
 
-# Build dependencies only (cached layer)
-RUN cargo build --release --locked && \
+# Build dependencies only (cached layer). Scoped to the server: the workspace
+# also holds the wasm bridge, which this image has no use for.
+RUN cargo build --release --locked -p tend-server && \
     rm -rf crates/*/src
 
 # Copy actual source code
@@ -80,10 +92,12 @@ RUN touch crates/tend-core/src/lib.rs && \
     touch crates/tend-git/src/lib.rs && \
     touch crates/tend-blocks/src/lib.rs && \
     touch crates/tend-links/src/lib.rs && \
+    touch crates/tend-index/src/lib.rs && \
+    touch crates/tend-wasm/src/lib.rs && \
     touch crates/tend-server/src/main.rs
 
 # Build the actual application
-RUN cargo build --release --locked
+RUN cargo build --release --locked -p tend-server
 
 # =============================================================================
 # Stage 3: Runtime image
