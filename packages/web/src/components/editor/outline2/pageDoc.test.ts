@@ -21,27 +21,6 @@ function samplePage(): Pick<Page, 'blocks' | 'rootBlocks'> {
   }
 }
 
-describe('a page with no blocks', () => {
-  it('gives the placeholder item a real uuid', () => {
-    // The bug this closes: the placeholder used to carry uuid '', on the
-    // assumption that uuidPlugin would fill it in. That plugin skips the scan
-    // for inline-only steps, and typing is inline-only — so the first
-    // keystroke on a brand-new page sent a block with no uuid and the save was
-    // rejected with "Invalid block UUID". Every new journal hit it.
-    const { blocks, rootBlocks } = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
-
-    expect(blocks).toHaveLength(1)
-    expect(blocks[0].uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
-    expect(rootBlocks).toEqual([blocks[0].uuid])
-  })
-
-  it('gives a different uuid each time, so two pages do not share one', () => {
-    const first = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
-    const second = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
-    expect(first.blocks[0].uuid).not.toBe(second.blocks[0].uuid)
-  })
-})
-
 describe('pageDoc round-trip', () => {
   it('page -> doc -> blocks preserves structure, content, uuids, collapsed, properties', () => {
     const page = samplePage()
@@ -68,5 +47,59 @@ describe('pageDoc round-trip', () => {
   it('produces a valid PM doc that passes its own schema check', () => {
     const doc = pageToDoc(samplePage())
     expect(() => doc.check()).not.toThrow()
+  })
+})
+
+// Regression: a brand-new sheet has no blocks, so the editor renders a single
+// placeholder bullet. That bullet used to carry an empty uuid, which the uuid
+// plugin minted on the first keystroke — until the plugin learned to skip plain
+// typing. The empty uuid then survived into the save payload, and the server
+// rejects it with 400 "Invalid UUID" on every retry.
+describe('a page with no blocks', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  it('gives its placeholder bullet a real uuid', () => {
+    const { blocks, rootBlocks } = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] }))
+
+    expect(blocks).toHaveLength(1)
+    expect(blocks[0].uuid).toMatch(UUID_RE)
+    expect(rootBlocks).toEqual([blocks[0].uuid])
+  })
+
+  it('mints a different uuid each time, so two new sheets cannot collide', () => {
+    const first = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] })).blocks[0].uuid
+    const second = docToBlocks(pageToDoc({ blocks: {}, rootBlocks: [] })).blocks[0].uuid
+
+    expect(first).not.toBe(second)
+  })
+})
+
+describe('docToBlocks uuid backstop', () => {
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+  it('never emits a block without a uuid, whatever the doc holds', () => {
+    // Belt and braces: the editor should not produce an empty uuid, but a block
+    // that reaches the server without one costs the user a save loop, so this
+    // is the last line of defence rather than an assumption.
+    const doc = pageToDoc({
+      rootBlocks: ['A'],
+      blocks: {
+        A: block('A', 'parent', null, ['']),
+        '': block('', 'child with no uuid', 'A', []),
+      },
+    })
+    const { blocks, rootBlocks } = docToBlocks(doc)
+
+    expect(blocks).toHaveLength(2)
+    // Existing ids are left alone; only the missing one is minted.
+    for (const b of blocks) expect(b.uuid).not.toBe('')
+    expect(blocks.find((b) => b.content === 'child with no uuid')!.uuid).toMatch(UUID_RE)
+    expect(rootBlocks).toEqual(['A'])
+
+    // And the parent/child wiring still refers to the minted ids.
+    const parent = blocks.find((b) => b.content === 'parent')!
+    const child = blocks.find((b) => b.content === 'child with no uuid')!
+    expect(parent.children).toEqual([child.uuid])
+    expect(child.parentUuid).toBe(parent.uuid)
   })
 })

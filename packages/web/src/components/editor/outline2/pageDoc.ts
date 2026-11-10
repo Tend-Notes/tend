@@ -25,16 +25,11 @@ function itemToJSON(page: Pick<Page, 'blocks'>, uuid: string): Record<string, un
   return { type: 'list_item', attrs: { uuid, collapsed: b.collapsed, properties: b.properties }, content }
 }
 
-/**
- * The document for a page with no blocks: one empty item to type into.
- *
- * Built fresh each time so the item gets a real uuid. It used to be a constant
- * with `uuid: ''`, on the assumption that `uuidPlugin` would fill it in — but
- * that plugin skips the scan for inline-only steps, and plain typing is
- * inline-only. So on a brand-new page the first keystroke sent a block with an
- * empty uuid, and the save was rejected with "Invalid block UUID". The
- * placeholder needs an identity from the start, like every other item.
- */
+// A page with no blocks still needs one bullet to type into. It gets a real
+// uuid here rather than an empty one: the uuid plugin only mints on structural
+// edits, so an empty uuid would survive plain typing all the way into the save
+// payload, where the server rejects the block with 400 "Invalid UUID" — and the
+// save retries, so the user sees a loop rather than a single error.
 function emptyDoc() {
   return {
     type: 'doc',
@@ -73,6 +68,22 @@ export function docToBlocks(doc: PMNode): DocBlocks {
   const blocks: Block[] = []
   const rootBlocks: string[] = []
 
+  // Last line of defence: a block that reaches the server without a uuid is
+  // rejected, and the save retries, so the user gets an error loop instead of
+  // one failure. Whatever produced the gap, mint here — keyed by node identity
+  // so a parent's `children` and the item's own id agree.
+  const minted = new Map<PMNode, string>()
+  const idOf = (item: PMNode): string => {
+    const existing = item.attrs.uuid as string
+    if (existing) return existing
+    let id = minted.get(item)
+    if (!id) {
+      id = uuidv4()
+      minted.set(item, id)
+    }
+    return id
+  }
+
   const childItems = (item: PMNode): PMNode[] => {
     const items: PMNode[] = []
     for (let i = 1; i < item.childCount; i++) {
@@ -85,14 +96,14 @@ export function docToBlocks(doc: PMNode): DocBlocks {
   }
 
   const walk = (item: PMNode, parentUuid: string | null, depth: number) => {
-    const uuid = item.attrs.uuid as string
+    const uuid = idOf(item)
     const content = item.child(0).textContent
     const kids = childItems(item)
     blocks.push({
       uuid,
       content,
       parentUuid,
-      children: kids.map((k) => k.attrs.uuid as string),
+      children: kids.map(idOf),
       collapsed: !!item.attrs.collapsed,
       properties: (item.attrs.properties as Record<string, string>) ?? {},
       depth,
@@ -102,7 +113,7 @@ export function docToBlocks(doc: PMNode): DocBlocks {
 
   const topList = doc.child(0) // bullet_list
   topList.forEach((item) => {
-    rootBlocks.push(item.attrs.uuid as string)
+    rootBlocks.push(idOf(item))
     walk(item, null, 0)
   })
 
